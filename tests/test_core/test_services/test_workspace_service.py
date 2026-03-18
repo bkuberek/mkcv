@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from mkcv.core.exceptions.pipeline_stage import PipelineStageError
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.workspace import WorkspaceService
 
@@ -30,9 +31,11 @@ class TestWorkspaceService:
 
 
 class TestPipelineService:
-    """Tests for PipelineService stub methods."""
+    """Tests for PipelineService with unconfigured stub."""
 
-    async def test_generate_raises_not_implemented(self, tmp_path: Path) -> None:
+    async def test_generate_raises_pipeline_stage_error_without_responses(
+        self, tmp_path: Path
+    ) -> None:
         from mkcv.adapters.filesystem.artifact_store import (
             FileSystemArtifactStore,
         )
@@ -51,7 +54,7 @@ class TestPipelineService:
         jd.write_text("test jd")
         kb.write_text("test kb")
 
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(PipelineStageError):
             await svc.generate(
                 jd_path=jd,
                 kb_path=kb,

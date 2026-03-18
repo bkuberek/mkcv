@@ -1,30 +1,98 @@
-{# Stage 3a: Tailor resume bullets for the target job.
+{# Stage 3: Tailor all resume content for the target job.
 
 Context variables:
-  - role: dict — selected role with original bullets
   - jd_analysis: dict — structured JD analysis
+  - selection: dict — experience selection from Stage 2
   - ats_keywords: list[str] — keywords to incorporate
+  - kb_text: str — the full knowledge base for reference
 
-Output: JSON list of TailoredBullet objects.
+Output: JSON matching TailoredContent model schema.
 #}
 {% include '_voice_anchor.j2' %}
 
-You are an expert resume writer.
+You are an expert resume writer producing ATS-optimized resume content.
 
-Rewrite the following resume bullets to be optimized for the target role.
-Incorporate ATS keywords naturally. Never fabricate metrics or achievements.
-
-## Target Role Context
+## Target Role
 
 Company: {{ jd_analysis.company }}
 Position: {{ jd_analysis.role_title }}
-Keywords to incorporate: {{ ats_keywords | join(', ') }}
+Seniority: {{ jd_analysis.seniority_level }}
+Summary: {{ jd_analysis.role_summary }}
 
-## Original Bullets for {{ role.company }} — {{ role.role }}
+## ATS Keywords to Incorporate
 
-{% for bullet in role.suggested_bullets %}
+{{ ats_keywords | join(', ') }}
+
+## Selected Experiences
+
+{% for exp in selection.selected_experiences %}
+### {{ exp.company }} — {{ exp.role }} ({{ exp.period }})
+Relevance: {{ exp.relevance_score }}/100
+Reframe: {{ exp.reframe_suggestion }}
+Suggested bullets:
+{% for bullet in exp.suggested_bullets %}
 - {{ bullet }}
 {% endfor %}
+{% endfor %}
 
-Respond with a JSON array of objects containing: original, rewritten,
-keywords_incorporated, and confidence (high/medium/low).
+## Skills to Highlight
+
+{{ selection.skills_to_highlight | join(', ') }}
+
+## Mission Themes
+
+{% for theme in selection.mission_themes %}
+- {{ theme }}
+{% endfor %}
+
+## Full Knowledge Base (for reference and accuracy)
+
+{{ kb_text }}
+
+## Instructions
+
+Produce a complete TailoredContent object with the following fields:
+
+### mission
+Write a concise mission statement (15-30 words, max 200 characters) for the resume header.
+- `text`: The mission statement itself.
+- `rationale`: Brief explanation of why this works for the application.
+
+### skills
+Group the candidate's relevant skills into 2-4 labeled categories. Each group has:
+- `label`: Category name (e.g., "Languages", "Infrastructure", "Frameworks").
+- `skills`: List of specific skill names.
+
+Prioritize skills that match ATS keywords. Omit irrelevant skills.
+
+### roles
+For each selected experience, produce a tailored role entry:
+- `company`: Company name.
+- `position`: Job title.
+- `location`: Work location if known, otherwise null.
+- `start_date`: Start date (e.g., "2020-01").
+- `end_date`: End date or "present".
+- `summary`: Optional 1-sentence role context (null if not needed).
+- `bullets`: List of tailored bullet points, each with:
+  - `original`: The source bullet from the KB (must be an exact quote).
+  - `rewritten`: The tailored version optimized for the target JD.
+  - `keywords_incorporated`: List of ATS keywords naturally woven in.
+  - `confidence`: "high" if faithful to the original, "medium" if enhanced with reasonable inference, "low" if stretched.
+- `tech_stack`: Optional technology line to display under the role.
+
+### earlier_experience
+If there are older roles worth mentioning briefly, provide a condensed 1-2 sentence summary. Otherwise null.
+
+### languages
+List of spoken/written languages if mentioned in the KB. Otherwise null.
+
+### low_confidence_flags
+List any items where you had to stretch or infer beyond what the KB states.
+
+**Critical rules:**
+- NEVER fabricate metrics, numbers, or achievements not in the KB.
+- Mark anything stretched or inferred as "low" confidence.
+- Keep bullets concise: ideally one line, max two lines.
+- Use strong action verbs and quantify impact where the data exists.
+
+Respond with a single JSON object. Do not include any text outside the JSON.

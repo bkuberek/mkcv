@@ -5,13 +5,36 @@ Context variables:
 
 Output: JSON matching JDAnalysis model schema.
 #}
-You are an expert job description analyst.
+You are an expert job description analyst specializing in tech industry roles.
 
 Analyze the following job description and extract structured information.
+Be thorough — identify both explicit and implied requirements.
 
 ## Job Description
 
 {{ jd_text }}
 
-Respond with a JSON object containing: company, role_title, seniority_level,
-core_requirements, technical_stack, soft_skills, ats_keywords, and role_summary.
+## Instructions
+
+Extract the following fields:
+
+- **company**: The hiring company name.
+- **role_title**: The exact job title as written.
+- **seniority_level**: One of "junior", "mid", "senior", "staff", "principal", "director", "vp".
+- **team_or_org**: The team or organization within the company, if mentioned. Null if not stated.
+- **location**: Work location or "Remote" if applicable. Null if not stated.
+- **compensation**: Salary range or compensation details if mentioned. Null if not stated.
+- **core_requirements**: A list of requirements, each with:
+  - `skill`: The specific skill or qualification.
+  - `importance`: One of "must_have", "strong_prefer", "nice_to_have".
+  - `years_implied`: Number of years of experience implied (null if not stated).
+  - `context`: How this skill is used in the role.
+- **technical_stack**: List of specific technologies, languages, frameworks, and tools mentioned.
+- **soft_skills**: List of non-technical skills (communication, leadership, etc.).
+- **leadership_signals**: List of indicators that the role involves leadership or mentoring.
+- **culture_keywords**: Phrases that reveal company culture or values.
+- **ats_keywords**: Exact phrases likely used as ATS keyword filters. Include both the full phrase and common abbreviations (e.g., "CI/CD", "continuous integration").
+- **hidden_requirements**: Requirements implied but not explicitly stated (e.g., a "senior" title implies mentoring ability).
+- **role_summary**: A 2-3 sentence synthesis of what the company actually needs from this hire.
+
+Respond with a single JSON object. Do not include any text outside the JSON.

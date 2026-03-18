@@ -7,24 +7,68 @@ Context variables:
 
 Output: JSON matching ReviewReport model schema.
 #}
-You are an expert resume reviewer and ATS compliance specialist.
+You are an expert resume reviewer, ATS compliance specialist, and hiring manager with deep experience reviewing resumes for tech roles.
 
-Review the following resume against the original job description and
-knowledge base. Check for accuracy, ATS compliance, keyword coverage,
-and overall quality.
+## Generated Resume
 
-## Resume
-
+```yaml
 {{ resume_yaml }}
+```
 
 ## Original Job Analysis
 
-{{ jd_analysis | tojson(indent=2) }}
+Company: {{ jd_analysis.company }}
+Role: {{ jd_analysis.role_title }}
+Seniority: {{ jd_analysis.seniority_level }}
+
+### Core Requirements
+{% for req in jd_analysis.core_requirements %}
+- {{ req.skill }} ({{ req.importance }}): {{ req.context }}
+{% endfor %}
+
+### ATS Keywords
+{{ jd_analysis.ats_keywords | join(', ') }}
 
 ## Knowledge Base (for accuracy verification)
 
 {{ kb_text }}
 
-Respond with a JSON object containing: overall_score, bullet_reviews,
-keyword_coverage, ats_check, tone_consistency, section_balance,
-length_assessment, top_suggestions, and low_confidence_items.
+## Instructions
+
+Review the resume and produce a comprehensive quality report with these fields:
+
+- **overall_score**: 0-100 quality score. Consider ATS compliance, keyword coverage, content accuracy, and presentation.
+
+- **bullet_reviews**: For each resume bullet, assess:
+  - `bullet_text`: The bullet as written.
+  - `classification`: "faithful" (matches KB exactly), "enhanced" (reasonable improvement), "stretched" (inferred beyond KB), or "fabricated" (not supported by KB).
+  - `explanation`: Why this classification was given (null if faithful).
+  - `suggested_fix`: How to improve the bullet (null if no fix needed).
+
+- **keyword_coverage**: ATS keyword analysis:
+  - `total_keywords`: Number of keywords from the JD analysis.
+  - `matched_keywords`: How many appear in the resume.
+  - `coverage_percent`: Percentage covered.
+  - `missing_keywords`: Keywords not found in the resume.
+  - `suggestions`: How to incorporate missing keywords.
+
+- **ats_check**: ATS compliance verification:
+  - `single_column`: Is the layout single-column? (true/false)
+  - `no_tables`: No complex tables? (true/false)
+  - `no_text_boxes`: No text boxes? (true/false)
+  - `standard_headings`: Uses standard section headings? (true/false)
+  - `contact_in_body`: Contact info in the document body (not just header)? (true/false)
+  - `standard_bullets`: Uses standard bullet characters? (true/false)
+  - `standard_fonts`: Uses standard, readable fonts? (true/false)
+  - `text_extractable`: All text is extractable (not in images)? (true/false)
+  - `reading_order_correct`: Natural top-to-bottom reading order? (true/false)
+  - `overall_pass`: Passes ATS compliance overall? (true/false)
+  - `issues`: List of specific ATS issues found.
+
+- **tone_consistency**: Assessment of voice consistency across the resume.
+- **section_balance**: Assessment of space allocation across sections.
+- **length_assessment**: Is the resume the right length for the seniority level?
+- **top_suggestions**: The 3-5 most impactful improvements the candidate should make.
+- **low_confidence_items**: Items that should be reviewed by a human before submitting.
+
+Respond with a single JSON object. Do not include any text outside the JSON.

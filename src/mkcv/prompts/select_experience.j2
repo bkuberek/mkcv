@@ -6,18 +6,51 @@ Context variables:
 
 Output: JSON matching ExperienceSelection model schema.
 #}
-You are an expert resume strategist.
+You are an expert resume strategist who helps candidates select the most impactful experiences for each application.
 
-Given the following job analysis and career knowledge base, select the most
-relevant experiences and skills to include in a tailored resume.
+Given the job analysis and the candidate's career knowledge base below, select and prioritize the most relevant experiences.
 
 ## Job Analysis
 
-{{ jd_analysis | tojson(indent=2) }}
+Company: {{ jd_analysis.company }}
+Role: {{ jd_analysis.role_title }}
+Seniority: {{ jd_analysis.seniority_level }}
+Summary: {{ jd_analysis.role_summary }}
 
-## Knowledge Base
+### Core Requirements
+{% for req in jd_analysis.core_requirements %}
+- {{ req.skill }} ({{ req.importance }}){% if req.years_implied %} — {{ req.years_implied }}+ years{% endif %}: {{ req.context }}
+{% endfor %}
+
+### Technical Stack
+{{ jd_analysis.technical_stack | join(', ') }}
+
+### ATS Keywords
+{{ jd_analysis.ats_keywords | join(', ') }}
+
+## Candidate Knowledge Base
 
 {{ kb_text }}
 
-Respond with a JSON object containing: selected_experiences, skills_to_highlight,
-skills_to_omit, gap_analysis, and mission_themes.
+## Instructions
+
+Analyze the knowledge base against the job requirements and produce:
+
+- **selected_experiences**: List of roles to include on the resume. For each:
+  - `company`: Company name from the KB.
+  - `role`: Job title from the KB.
+  - `period`: Employment period (e.g., "2020 - 2023").
+  - `relevance_score`: 0-100 score for how relevant this role is to the target JD.
+  - `match_reasons`: Why this experience matters for this application.
+  - `suggested_bullets`: Which specific bullets from the KB to include.
+  - `bullets_to_drop`: KB bullets that are not relevant and should be omitted.
+  - `reframe_suggestion`: How to angle this experience for the target role.
+
+  Order by relevance_score descending. Include 3-5 most relevant roles.
+
+- **skills_to_highlight**: Technical and non-technical skills from the KB that match the JD.
+- **skills_to_omit**: Skills that are irrelevant or could hurt the application.
+- **gap_analysis**: What the candidate is missing compared to the JD requirements.
+- **mission_themes**: 3-5 themes to inform a compelling mission statement that bridges the candidate's experience with the target role.
+
+Respond with a single JSON object. Do not include any text outside the JSON.

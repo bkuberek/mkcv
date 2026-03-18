@@ -2,20 +2,63 @@
 
 Context variables:
   - tailored_content: dict — complete tailored content from Stage 3
-  - personal_info: dict — name, email, phone, location, links
+  - kb_text: str — knowledge base for extracting personal information
 
 Output: Valid YAML matching RenderCV schema.
 #}
 You are an expert at structuring resume data into RenderCV YAML format.
 
-Convert the following tailored resume content into a valid RenderCV YAML document.
-
-## Personal Information
-
-{{ personal_info | tojson(indent=2) }}
-
 ## Tailored Content
 
 {{ tailored_content | tojson(indent=2) }}
 
-Respond with a valid YAML document matching the RenderCV schema.
+## Knowledge Base (for personal information)
+
+{{ kb_text }}
+
+## Instructions
+
+Convert the tailored content into a valid RenderCV YAML document.
+
+Extract personal information (name, email, phone, location, website, social networks) from the knowledge base. If specific personal info is not found, use reasonable placeholder text like "Your Name" or "your@email.com".
+
+The output must follow this exact RenderCV schema structure:
+
+```yaml
+cv:
+  name: "Full Name"
+  location: "City, Country"
+  email: "email@example.com"
+  phone: "+1-234-567-8900"
+  website: "https://example.com"  # optional
+  social_networks:  # optional
+    - network: LinkedIn
+      username: johndoe
+    - network: GitHub
+      username: johndoe
+  summary: "Mission statement text here"
+  sections:
+    experience:
+      - company: "Company Name"
+        position: "Job Title"
+        location: "City, Country"  # optional
+        start_date: "2020-01"
+        end_date: "present"
+        highlights:
+          - "Bullet point 1"
+          - "Bullet point 2"
+    skills:
+      - label: "Category Name"
+        details: "Skill 1, Skill 2, Skill 3"
+design:
+  theme: sb2nov
+```
+
+Key rules:
+- Use the `rewritten` text from tailored bullets (not the originals).
+- The `summary` field is the mission statement text.
+- Each skill group becomes a single entry with `label` and `details` (comma-separated skills).
+- Experience entries use `highlights` for bullet points.
+- Include only the YAML content. No markdown fences, no commentary.
+
+Respond with valid YAML only. No other text.

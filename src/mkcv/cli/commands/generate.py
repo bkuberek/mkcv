@@ -1,5 +1,6 @@
 """mkcv generate — run the AI pipeline to generate a tailored resume."""
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Annotated
 import cyclopts
 from rich.console import Console
 
-from mkcv.adapters.factory import create_workspace_manager
+from mkcv.adapters.factory import create_pipeline_service, create_workspace_manager
 from mkcv.config import settings
 from mkcv.core.exceptions import MkcvError
 
@@ -151,12 +152,11 @@ def _generate_workspace_mode(
     # Company and position are required in workspace mode
     if company is None or position is None:
         console.print(
-            "[red]Error:[/red] --company and --position are required "
-            "in workspace mode (Stage 1 analysis not yet implemented)."
+            "[red]Error:[/red] --company and --position are required in workspace mode."
         )
         sys.exit(2)
 
-    console.print("\n  [bold]mkcv generate[/bold] \u2014 workspace mode")
+    console.print("\n  [bold]mkcv generate[/bold] — workspace mode")
     console.print(f"  Workspace: {workspace_root}")
     console.print(f"  JD:        {jd}")
     console.print(f"  KB:        {kb}")
@@ -179,19 +179,17 @@ def _generate_workspace_mode(
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(exc.exit_code)
 
-    console.print(f"  [green]\u2713[/green] Created application: {app_dir.name}")
-    console.print(f"    {app_dir}/")
-    console.print("    \u251c\u2500\u2500 application.toml")
-    console.print("    \u251c\u2500\u2500 jd.txt")
-    console.print("    \u2514\u2500\u2500 .mkcv/")
-    console.print()
-    console.print(
-        "  [yellow]AI pipeline not yet implemented.[/yellow] "
-        "Application directory has been set up."
-    )
-    console.print(
-        "  Once the pipeline is ready, run:\n"
-        f"    [cyan]mkcv generate --jd {jd}[/cyan]\n"
+    console.print(f"  [green]✓[/green] Created application: {app_dir.name}")
+
+    # Use application dir as output if not specified
+    run_dir = output_dir or app_dir
+
+    # Run the pipeline
+    _run_pipeline(
+        jd=jd,
+        kb=kb,
+        output_dir=run_dir,
+        from_stage=from_stage,
     )
 
 
@@ -223,15 +221,63 @@ def _generate_standalone_mode(
     run_dir = output_dir or (Path.cwd() / ".mkcv")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    console.print("\n  [bold]mkcv generate[/bold] \u2014 standalone mode")
+    console.print("\n  [bold]mkcv generate[/bold] — standalone mode")
     console.print(f"  JD:        {jd}")
     console.print(f"  KB:        {kb}")
     console.print(f"  Output:    {run_dir}")
     console.print(f"  Theme:     {theme}")
     console.print(f"  Profile:   {profile}")
     console.print()
-    console.print(
-        "  [yellow]AI pipeline not yet implemented.[/yellow] "
-        "Run directory has been set up."
+
+    # Run the pipeline
+    _run_pipeline(
+        jd=jd,
+        kb=kb,
+        output_dir=run_dir,
+        from_stage=from_stage,
     )
+
+
+def _run_pipeline(
+    *,
+    jd: Path,
+    kb: Path,
+    output_dir: Path,
+    from_stage: int,
+) -> None:
+    """Execute the AI pipeline and display results."""
+    pipeline = create_pipeline_service(settings)
+
+    console.print("  [bold]Running AI pipeline...[/bold]")
+    console.print()
+
+    try:
+        result = asyncio.run(
+            pipeline.generate(
+                jd,
+                kb,
+                output_dir=output_dir,
+                from_stage=from_stage,
+            )
+        )
+    except MkcvError as exc:
+        console.print(f"  [red]Error:[/red] {exc}")
+        sys.exit(exc.exit_code)
+
+    # Display stage results
+    for stage in result.stages:
+        console.print(
+            f"  [green]✓[/green] Stage {stage.stage_number}: "
+            f"{stage.stage_name} ({stage.duration_seconds:.1f}s)"
+        )
+
+    console.print()
+    console.print(f"  Company:  {result.company}")
+    console.print(f"  Role:     {result.role_title}")
+    console.print(f"  Score:    [bold]{result.review_score}[/bold]/100")
+    console.print(f"  Duration: {result.total_duration_seconds:.1f}s")
+
+    if result.output_paths.get("resume_yaml"):
+        console.print(f"  Output:   {result.output_paths['resume_yaml']}")
+
     console.print()
