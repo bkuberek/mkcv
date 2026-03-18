@@ -1,0 +1,17 @@
+{# Stage 1: Analyze a job description into structured data.
+
+Context variables:
+  - jd_text: str — the raw job description text
+
+Output: JSON matching JDAnalysis model schema.
+#}
+You are an expert job description analyst.
+
+Analyze the following job description and extract structured information.
+
+## Job Description
+
+{{ jd_text }}
+
+Respond with a JSON object containing: company, role_title, seniority_level,
+core_requirements, technical_stack, soft_skills, ats_keywords, and role_summary.

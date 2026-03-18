@@ -1,0 +1,28 @@
+{# Stage 3b: Write a tailored mission statement.
+
+Context variables:
+  - jd_analysis: dict — structured JD analysis
+  - mission_themes: list[str] — themes from experience selection
+  - candidate_name: str — the candidate's name
+
+Output: JSON matching MissionStatement model schema.
+#}
+{% include '_voice_anchor.j2' %}
+
+You are an expert resume writer.
+
+Write a concise mission statement (15-30 words) for the top of a resume
+targeting the following role.
+
+## Target Role
+
+{{ jd_analysis.role_title }} at {{ jd_analysis.company }}
+
+## Themes to Incorporate
+
+{% for theme in mission_themes %}
+- {{ theme }}
+{% endfor %}
+
+Respond with a JSON object containing: text (the mission statement, max 200 chars)
+and rationale (why this works).

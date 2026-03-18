@@ -1,8 +1,8 @@
 # mkcv — Product Requirements Document
 
-**Version:** 0.1.0
-**Date:** 2026-03-18
-**Status:** Draft
+**Version:** 0.1.0<br>
+**Date:** 2026-03-18<br>
+**Status:** Draft<br>
 
 ---
 

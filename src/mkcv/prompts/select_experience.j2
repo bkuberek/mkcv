@@ -1,0 +1,23 @@
+{# Stage 2: Select relevant experience from the knowledge base.
+
+Context variables:
+  - jd_analysis: dict — structured JD analysis from Stage 1
+  - kb_text: str — the full knowledge base text
+
+Output: JSON matching ExperienceSelection model schema.
+#}
+You are an expert resume strategist.
+
+Given the following job analysis and career knowledge base, select the most
+relevant experiences and skills to include in a tailored resume.
+
+## Job Analysis
+
+{{ jd_analysis | tojson(indent=2) }}
+
+## Knowledge Base
+
+{{ kb_text }}
+
+Respond with a JSON object containing: selected_experiences, skills_to_highlight,
+skills_to_omit, gap_analysis, and mission_themes.

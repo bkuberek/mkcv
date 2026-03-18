@@ -1,0 +1,54 @@
+[default]
+# mkcv built-in defaults
+# These are overridden by: global config < workspace config < env vars < CLI flags
+
+[default.general]
+verbose = false
+log_level = "WARNING"
+log_format = "%(levelname)s: %(message)s"
+
+[default.pipeline]
+from_stage = 1
+auto_render = true
+interactive = false
+
+[default.pipeline.stages.analyze]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+temperature = 0.2
+
+[default.pipeline.stages.select]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+temperature = 0.3
+
+[default.pipeline.stages.tailor]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+temperature = 0.5
+
+[default.pipeline.stages.structure]
+provider = "openai"
+model = "gpt-4o"
+temperature = 0.1
+
+[default.pipeline.stages.review]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+temperature = 0.3
+
+[default.rendering]
+theme = "sb2nov"
+font = "SourceSansPro"
+font_size = "10pt"
+page_size = "letterpaper"
+
+[default.workspace]
+knowledge_base = "knowledge-base/career.md"
+applications_dir = "applications"
+templates_dir = "templates"
+naming_pattern = "{date}-{position}"
+company_slug = true
+
+[default.voice]
+guidelines = ""

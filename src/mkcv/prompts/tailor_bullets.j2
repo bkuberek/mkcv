@@ -1,0 +1,30 @@
+{# Stage 3a: Tailor resume bullets for the target job.
+
+Context variables:
+  - role: dict — selected role with original bullets
+  - jd_analysis: dict — structured JD analysis
+  - ats_keywords: list[str] — keywords to incorporate
+
+Output: JSON list of TailoredBullet objects.
+#}
+{% include '_voice_anchor.j2' %}
+
+You are an expert resume writer.
+
+Rewrite the following resume bullets to be optimized for the target role.
+Incorporate ATS keywords naturally. Never fabricate metrics or achievements.
+
+## Target Role Context
+
+Company: {{ jd_analysis.company }}
+Position: {{ jd_analysis.role_title }}
+Keywords to incorporate: {{ ats_keywords | join(', ') }}
+
+## Original Bullets for {{ role.company }} — {{ role.role }}
+
+{% for bullet in role.suggested_bullets %}
+- {{ bullet }}
+{% endfor %}
+
+Respond with a JSON array of objects containing: original, rewritten,
+keywords_incorporated, and confidence (high/medium/low).

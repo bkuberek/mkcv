@@ -1,7 +1,7 @@
 # mkcv — Research Findings
 
-**Date:** 2026-03-18
-**Source:** Full research document at `../../resume/pipeline/Resume Pipeline Research.md`
+**Date:** 2026-03-18<br>
+**Source:** Full research document at `../../resume/pipeline/Resume Pipeline Research.md`<br>
 
 ---
 

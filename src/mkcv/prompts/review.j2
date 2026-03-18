@@ -1,0 +1,30 @@
+{# Stage 5: Review the generated resume for quality and ATS compliance.
+
+Context variables:
+  - resume_yaml: str — the generated resume YAML
+  - jd_analysis: dict — original JD analysis
+  - kb_text: str — original knowledge base for accuracy checking
+
+Output: JSON matching ReviewReport model schema.
+#}
+You are an expert resume reviewer and ATS compliance specialist.
+
+Review the following resume against the original job description and
+knowledge base. Check for accuracy, ATS compliance, keyword coverage,
+and overall quality.
+
+## Resume
+
+{{ resume_yaml }}
+
+## Original Job Analysis
+
+{{ jd_analysis | tojson(indent=2) }}
+
+## Knowledge Base (for accuracy verification)
+
+{{ kb_text }}
+
+Respond with a JSON object containing: overall_score, bullet_reviews,
+keyword_coverage, ats_check, tone_consistency, section_balance,
+length_assessment, top_suggestions, and low_confidence_items.

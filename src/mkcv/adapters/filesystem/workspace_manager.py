@@ -1,0 +1,360 @@
+"""Filesystem adapter for workspace and application directory management."""
+
+import logging
+import re
+import shutil
+import unicodedata
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any
+
+import tomli_w
+
+from mkcv.core.exceptions.workspace import WorkspaceError, WorkspaceExistsError
+from mkcv.core.models.application_metadata import ApplicationMetadata
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Template constants
+# ---------------------------------------------------------------------------
+
+_MKCV_TOML_TEMPLATE: dict[str, Any] = {
+    "workspace": {"version": "0.1.0"},
+    "paths": {
+        "knowledge_base_dir": "knowledge-base",
+        "applications_dir": "applications",
+        "templates_dir": "templates",
+    },
+    "naming": {
+        "company_slug": True,
+        "application_pattern": "{date}-{position}",
+    },
+    "defaults": {
+        "theme": "sb2nov",
+        "profile": "premium",
+    },
+}
+
+_CAREER_MD_TEMPLATE = """\
+# {name} -- Career Knowledge Base
+
+## Personal Information
+
+| Field    | Value              |
+|----------|--------------------|
+| Name     | {name}             |
+| Email    |                    |
+| Phone    |                    |
+| Location |                    |
+| LinkedIn |                    |
+| GitHub   |                    |
+| Website  |                    |
+
+## Languages
+
+- English (native)
+
+## Professional Summary
+
+<!-- 2-3 paragraphs summarizing your career -->
+
+## Technical Skills -- Master List
+
+### Programming Languages
+### Frontend
+### Backend Frameworks
+### AI / ML / LLM
+### Databases & Data Stores
+### Infrastructure & DevOps
+
+## Career History -- Complete and Detailed
+
+### Company Name -- Job Title
+**YYYY-MM to YYYY-MM** | Location
+
+- Achievement bullet using XYZ formula
+- Tech stack: Python, FastAPI, PostgreSQL
+
+## Key Achievements
+
+## Strengths
+
+## Passions & Interests
+"""
+
+_VOICE_MD_TEMPLATE = """\
+# Voice Guidelines
+
+<!-- These guidelines shape how your resume content is written. -->
+<!-- Edit to match your personal voice and tone preferences. -->
+
+## Tone
+- Direct, not flowery
+- Concrete over abstract
+- Technical but accessible
+- Confident but not arrogant
+
+## Avoid
+- "Passionate about..."
+- "Leveraged..."
+- "Spearheaded..."
+- Buzzwords without substance
+
+## Prefer
+- Specific metrics and outcomes
+- Active voice
+- Clear cause-and-effect
+"""
+
+_GITIGNORE_TEMPLATE = """\
+# mkcv workspace ignores
+.mkcv/
+*.pdf
+*.png
+
+# OS files
+.DS_Store
+Thumbs.db
+"""
+
+_MAX_SLUG_LENGTH = 64
+_MAX_COLLISION_ATTEMPTS = 99
+
+
+class WorkspaceManager:
+    """Manages workspace filesystem operations.
+
+    Handles creating workspace structures, application directories,
+    and generating configuration files.
+    """
+
+    def create_workspace(self, path: Path) -> Path:
+        """Create a new mkcv workspace at the given path.
+
+        Creates:
+            - mkcv.toml (workspace config)
+            - knowledge-base/ (with career.md and voice.md templates)
+            - applications/ (empty)
+            - templates/ (empty)
+            - .gitignore
+
+        Args:
+            path: Directory to initialize.
+
+        Returns:
+            Path to the workspace root.
+
+        Raises:
+            WorkspaceExistsError: If mkcv.toml already exists.
+        """
+        workspace_root = path.resolve()
+        toml_path = workspace_root / "mkcv.toml"
+
+        if toml_path.exists():
+            raise WorkspaceExistsError(f"Workspace already exists: {toml_path}")
+
+        # Create root directory
+        try:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise WorkspaceError(
+                f"Cannot create workspace directory: {workspace_root}: {exc}"
+            ) from exc
+
+        # Write mkcv.toml using tomli_w
+        with toml_path.open("wb") as f:
+            tomli_w.dump(_MKCV_TOML_TEMPLATE, f)
+        logger.info("Created %s", toml_path)
+
+        # Create directories
+        for dir_name in ("knowledge-base", "applications", "templates"):
+            dir_path = workspace_root / dir_name
+            dir_path.mkdir(exist_ok=True)
+            logger.debug("Ensured directory: %s", dir_path)
+
+        # Create knowledge-base/career.md
+        career_path = workspace_root / "knowledge-base" / "career.md"
+        career_path.write_text(
+            _CAREER_MD_TEMPLATE.format(name="Your Name"),
+            encoding="utf-8",
+        )
+        logger.info("Created %s", career_path)
+
+        # Create knowledge-base/voice.md
+        voice_path = workspace_root / "knowledge-base" / "voice.md"
+        voice_path.write_text(_VOICE_MD_TEMPLATE, encoding="utf-8")
+        logger.info("Created %s", voice_path)
+
+        # Create .gitignore
+        gitignore_path = workspace_root / ".gitignore"
+        gitignore_path.write_text(_GITIGNORE_TEMPLATE, encoding="utf-8")
+        logger.info("Created %s", gitignore_path)
+
+        return workspace_root
+
+    def create_application(
+        self,
+        workspace_root: Path,
+        company: str,
+        position: str,
+        jd_source: Path,
+        *,
+        url: str | None = None,
+    ) -> Path:
+        """Create an application directory within the workspace.
+
+        Creates: applications/{company_slug}/{YYYY-MM}-{position_slug}/
+        With: application.toml, jd.txt (copied), .mkcv/
+
+        Args:
+            workspace_root: Workspace root path.
+            company: Company name (will be slugified).
+            position: Position title (will be slugified).
+            jd_source: Path to the JD file (will be copied in).
+            url: Optional job posting URL.
+
+        Returns:
+            Path to the created application directory.
+        """
+        app_date = date.today()
+        date_str = app_date.strftime("%Y-%m")
+
+        company_slug = self.slugify(company)
+        position_slug = self.slugify(position)
+
+        dir_name = f"{date_str}-{position_slug}"
+
+        # Build full path: applications/{company_slug}/{date}-{position_slug}/
+        apps_base = self.get_applications_dir(workspace_root)
+        app_dir = apps_base / company_slug / dir_name
+
+        # Handle collisions by appending -2, -3, etc.
+        app_dir = self._resolve_collision(app_dir)
+
+        # Create directories
+        app_dir.mkdir(parents=True, exist_ok=True)
+        (app_dir / ".mkcv").mkdir(exist_ok=True)
+
+        # Copy JD file
+        shutil.copy2(jd_source, app_dir / "jd.txt")
+        logger.info("Placed JD: %s", app_dir / "jd.txt")
+
+        # Generate application.toml
+        metadata = ApplicationMetadata(
+            company=company,
+            position=position,
+            date=app_date,
+            status="draft",
+            url=url,
+            created_at=datetime.now(tz=UTC),
+        )
+        self._write_application_toml(app_dir, metadata)
+
+        logger.info("Created application: %s", app_dir)
+        return app_dir
+
+    def slugify(self, text: str) -> str:
+        """Convert text to a filesystem-safe slug.
+
+        Lowercase, hyphens for spaces/special chars, no consecutive hyphens.
+        Unicode is NFKD-normalized and ASCII-transliterated.
+
+        Args:
+            text: Raw text to slugify.
+
+        Returns:
+            Filesystem-safe slug string.
+        """
+        # Normalize unicode
+        text = unicodedata.normalize("NFKD", text)
+        # Remove non-ASCII (accents become separate chars after NFKD)
+        text = text.encode("ascii", "ignore").decode("ascii")
+        # Lowercase
+        text = text.lower()
+        # Replace non-alphanumeric with hyphens
+        text = re.sub(r"[^a-z0-9]+", "-", text)
+        # Collapse consecutive hyphens
+        text = re.sub(r"-{2,}", "-", text)
+        # Strip leading/trailing hyphens
+        text = text.strip("-")
+        # Truncate
+        if len(text) > _MAX_SLUG_LENGTH:
+            text = text[:_MAX_SLUG_LENGTH].rstrip("-")
+        return text
+
+    def get_applications_dir(self, workspace_root: Path) -> Path:
+        """Get the applications directory for a workspace.
+
+        Args:
+            workspace_root: Workspace root path.
+
+        Returns:
+            Path to the applications directory.
+        """
+        return workspace_root / "applications"
+
+    def list_applications(self, workspace_root: Path) -> list[Path]:
+        """List all application directories in the workspace.
+
+        An application directory is identified by containing an
+        ``application.toml`` file.
+
+        Args:
+            workspace_root: Workspace root path.
+
+        Returns:
+            Sorted list of application directory paths.
+        """
+        apps_dir = self.get_applications_dir(workspace_root)
+        if not apps_dir.is_dir():
+            return []
+
+        return sorted(
+            app_toml.parent for app_toml in apps_dir.rglob("application.toml")
+        )
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_collision(self, path: Path) -> Path:
+        """If path exists, append -2, -3, etc. until a free name is found."""
+        if not path.exists():
+            return path
+
+        base = path
+        for i in range(2, _MAX_COLLISION_ATTEMPTS + 1):
+            candidate = base.parent / f"{base.name}-{i}"
+            if not candidate.exists():
+                logger.warning(
+                    "Directory collision: %s exists. Using %s",
+                    base.name,
+                    candidate.name,
+                )
+                return candidate
+
+        raise WorkspaceError(
+            f"Too many collisions for directory: {base}. Clean up old applications."
+        )
+
+    def _write_application_toml(
+        self,
+        app_dir: Path,
+        metadata: ApplicationMetadata,
+    ) -> None:
+        """Write application.toml from metadata."""
+        data: dict[str, Any] = {
+            "application": {
+                "company": metadata.company,
+                "position": metadata.position,
+                "date": metadata.date.isoformat(),
+                "status": metadata.status,
+                "url": metadata.url or "",
+                "created_at": metadata.created_at.isoformat(),
+            },
+        }
+        toml_path = app_dir / "application.toml"
+        with toml_path.open("wb") as f:
+            tomli_w.dump(data, f)
+        logger.debug("Wrote %s", toml_path)

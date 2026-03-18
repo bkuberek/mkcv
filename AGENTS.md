@@ -4,192 +4,153 @@
 
 ## Project Overview
 
-**mkcv** is an AI-powered resume generation tool that produces stunning, ATS-compliant PDF resumes tailored to specific job applications. It takes a career knowledge base + job description as input and outputs a polished PDF through a multi-stage AI pipeline.
+**mkcv** is an AI-powered CLI tool that generates ATS-compliant PDF resumes
+tailored to specific job applications. It takes a career knowledge base (Markdown)
++ job description (text) and produces a polished PDF through a 5-stage AI pipeline:
+analyze JD, select experience, tailor content, structure YAML, review.
 
-**Current phase:** CLI tool (Phase 1)
-**Future phases:** Web service API (Phase 2), Web app (Phase 3), Mobile app (Phase 4)
+Organized around a **workspace model**: `mkcv init PATH` creates a workspace with
+a knowledge base, config, and `applications/{company}/{YYYY-MM-position}/` dirs.
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Language | Python 3.12+ |
-| Package manager | `uv` (preferred) or `pip` |
-| CLI framework | `click` |
-| AI providers | Anthropic (Claude), OpenAI (GPT-4o), Ollama (local), OpenRouter |
-| PDF rendering | RenderCV (Typst engine) via subprocess, WeasyPrint as secondary |
-| Data format | YAML (RenderCV schema) and JSON (intermediate pipeline stages) |
-| Validation | Pydantic v2 for all data models |
-| Configuration | YAML config file + environment variables |
-| Testing | pytest, pytest-asyncio |
-| Linting | ruff |
-| Type checking | mypy (strict mode) |
-| Async | asyncio + httpx for API calls |
+- **Python >=3.12** with `uv` for package management
+- **Cyclopts** for CLI (native async, modern type-based API)
+- **Dynaconf** for configuration (TOML, env vars with `MKCV_` prefix, workspace layering)
+- **Pydantic v2** for all data models — never raw dicts
+- **asyncio + httpx** for async AI provider calls
+- **Jinja2** for prompt templates (`.j2` files in `src/mkcv/prompts/`)
+- **RenderCV** (Typst) for PDF rendering, WeasyPrint as secondary
+- **pytest + pytest-asyncio** for tests, **ruff** for lint/format, **mypy --strict** for types
+- AI providers: Anthropic, OpenAI, Ollama, OpenRouter (provider-agnostic)
 
-## Directory Structure
-
-```
-mkcv/
-├── AGENTS.md                  # This file
-├── README.md                  # User-facing documentation
-├── pyproject.toml             # Project config, dependencies, scripts
-├── docs/
-│   ├── product/               # Product requirements, research, roadmap
-│   │   ├── PRD.md
-│   │   ├── research.md
-│   │   └── roadmap.md
-│   └── specs/                 # Technical specifications
-│       ├── architecture.md
-│       ├── cli-interface.md
-│       └── data-models.md
-├── src/
-│   └── mkcv/
-│       ├── __init__.py
-│       ├── cli.py             # Click CLI entrypoint
-│       ├── pipeline/          # 5-stage AI pipeline
-│       │   ├── __init__.py
-│       │   ├── analyze.py     # Stage 1: JD analysis
-│       │   ├── select.py      # Stage 2: Experience selection
-│       │   ├── tailor.py      # Stage 3: Content tailoring
-│       │   ├── structure.py   # Stage 4: YAML assembly
-│       │   └── review.py      # Stage 5: Quality review
-│       ├── providers/         # AI model provider adapters
-│       │   ├── __init__.py
-│       │   ├── base.py        # Abstract provider interface
-│       │   ├── anthropic.py   # Claude API
-│       │   ├── openai.py      # OpenAI API
-│       │   ├── ollama.py      # Local Ollama
-│       │   └── openrouter.py  # OpenRouter proxy
-│       ├── renderers/         # PDF rendering backends
-│       │   ├── __init__.py
-│       │   ├── rendercv.py    # RenderCV/Typst renderer
-│       │   └── weasyprint.py  # HTML/CSS renderer (secondary)
-│       ├── models/            # Pydantic data models
-│       │   ├── __init__.py
-│       │   ├── knowledge_base.py
-│       │   ├── jd_analysis.py
-│       │   ├── resume.py
-│       │   └── review.py
-│       ├── prompts/           # Prompt templates (Jinja2)
-│       │   ├── analyze_jd.j2
-│       │   ├── select_experience.j2
-│       │   ├── tailor_bullets.j2
-│       │   ├── write_mission.j2
-│       │   ├── structure_yaml.j2
-│       │   └── review.j2
-│       └── config.py          # Configuration loading
-├── tests/
-│   ├── conftest.py
-│   ├── test_pipeline/
-│   ├── test_providers/
-│   ├── test_renderers/
-│   └── test_models/
-└── templates/                 # RenderCV theme templates
-    └── default/
-```
-
-## Build / Run / Test Commands
+## Build / Run / Test
 
 ```bash
-# Install dependencies
-uv sync
-
-# Run CLI
-uv run mkcv --help
-uv run mkcv generate --jd job.txt --kb career.md
-uv run mkcv render resume.yaml
-
-# Run all tests
-uv run pytest
-
-# Run a single test
-uv run pytest tests/test_pipeline/test_analyze.py::test_extracts_requirements
-
-# Run tests with coverage
-uv run pytest --cov=mkcv
-
-# Lint
-uv run ruff check src/ tests/
-uv run ruff format src/ tests/
-
-# Type check
-uv run mypy src/
+uv sync                                          # Install dependencies
+uv run mkcv --help                               # CLI help
+uv run mkcv init ./my-workspace                  # Create workspace
+uv run mkcv generate --jd job.txt --kb career.md # Generate resume
+uv run pytest                                    # All tests
+uv run pytest tests/test_cli/test_app.py         # Single file
+uv run pytest -k test_version_flag               # Single test by name
+uv run pytest --cov=mkcv                         # With coverage
+uv run ruff check src/ tests/                    # Lint
+uv run ruff format src/ tests/                   # Format
+uv run mypy src/                                 # Type check
 ```
 
-## Code Style Guidelines
+## Package Structure
 
-### General
+```
+src/mkcv/
+├── cli/                  # Cyclopts commands — no business logic
+│   ├── app.py            # App entry point, global options, meta handler
+│   └── commands/         # generate, render, validate, init_cmd, themes
+├── core/                 # Pure business logic — never imports from adapters
+│   ├── exceptions/       # MkcvError hierarchy (one class per file)
+│   ├── models/           # Pydantic data models (one class per file)
+│   ├── ports/            # Protocol interfaces: LLMPort, RendererPort, etc.
+│   └── services/         # Pipeline, Render, Validation, Workspace services
+├── config/               # Dynaconf configuration + workspace discovery
+│   ├── configuration.py  # 5-layer Configuration class
+│   ├── workspace.py      # find_workspace_root(), is_workspace()
+│   └── settings.toml     # Built-in defaults
+└── adapters/             # Implementations of core ports
+    ├── factory.py        # DI wiring — creates fully-assembled services
+    ├── filesystem/       # ArtifactStore, PromptLoader, WorkspaceManager
+    ├── llm/              # LLM provider adapters (stub, future: anthropic, openai)
+    └── renderers/        # PDF rendering adapters (stub, future: rendercv)
+```
 
-- **Python 3.12+** — use modern syntax (match/case, type unions with `|`, etc.)
-- **Strict typing** — all functions have type annotations; `mypy --strict` must pass
-- **Pydantic v2** for all data models — never use raw dicts for structured data
-- **async by default** — all AI provider calls are async; pipeline stages are async
-- **No print statements** — use `logging` or `click.echo` for CLI output
+## Code Style
+
+### Architecture Rules
+
+- **Hexagonal architecture**: core never imports from adapters or cli
+- **Services depend only on ports** (Protocol interfaces), never concrete adapters
+- **CLI has no business logic** — delegates to services via factory-created instances
+- **One class per file** — each model, exception, port, and adapter in its own file
+- **Manual DI via factory functions** in `adapters/factory.py`
+
+### General Rules
+
+- Python 3.12+ syntax: `match`/`case`, `X | Y` unions, `type` statements
+- Complete type annotations on all functions; `mypy --strict` must pass
+- `Pydantic v2 BaseModel` for all structured data
+- All AI provider calls and pipeline stages are `async`
+- No `print()` — use `logging` for internals, `rich.console.Console` for CLI output
+- Line length: ruff defaults (88 chars)
 
 ### Imports
 
 ```python
-# Standard library
+# 1. Standard library
 from pathlib import Path
 
-# Third party
-import click
+# 2. Third party
+import cyclopts
 from pydantic import BaseModel
 
-# Local
-from mkcv.models.resume import Resume
-from mkcv.pipeline.analyze import analyze_jd
+# 3. Local
+from mkcv.core.models.jd_analysis import JDAnalysis
+from mkcv.core.ports.llm import LLMPort
 ```
 
-- Group imports: stdlib → third-party → local, separated by blank lines
-- Use absolute imports from `mkcv.*`
-- Never use wildcard imports (`from x import *`)
+- Group: stdlib, third-party, local — separated by blank lines
+- Absolute imports only (`from mkcv.core.models...`), never relative or wildcard
 
-### Naming Conventions
+### Naming
 
-- Files/modules: `snake_case.py`
-- Classes: `PascalCase` (e.g., `JDAnalysis`, `ResumeBuilder`)
-- Functions/methods: `snake_case` (e.g., `analyze_jd`, `render_pdf`)
-- Constants: `UPPER_SNAKE_CASE` (e.g., `DEFAULT_TEMPERATURE`, `MAX_BULLET_LENGTH`)
-- Type aliases: `PascalCase` (e.g., `ProviderConfig = dict[str, Any]`)
-- Private: prefix with `_` (e.g., `_build_prompt`)
+| Element           | Convention         | Example                       |
+|-------------------|--------------------|-------------------------------|
+| Files/modules     | `snake_case`       | `jd_analysis.py`              |
+| Classes           | `PascalCase`       | `JDAnalysis`, `PipelineService` |
+| Functions/methods | `snake_case`       | `analyze_jd`, `render_pdf`    |
+| Constants         | `UPPER_SNAKE_CASE` | `DEFAULT_TEMPERATURE`         |
+| Private members   | `_` prefix         | `_build_prompt`               |
 
 ### Error Handling
 
-- Use custom exception hierarchy rooted at `MkcvError`
-- Provider errors: `ProviderError`, `RateLimitError`, `AuthenticationError`
-- Pipeline errors: `PipelineStageError`, `ValidationError`
-- Rendering errors: `RenderError`, `TemplateError`
-- Never catch bare `Exception` — always catch specific types
-- All errors should include actionable messages for CLI users
+Custom hierarchy rooted at `MkcvError` (each with `exit_code`):
+- `ProviderError` (4) → `RateLimitError`, `AuthenticationError`, `ContextLengthError`
+- `PipelineStageError` (5), `ValidationError` (5)
+- `RenderError` (6), `TemplateError` (6)
+- `WorkspaceError` (7) → `WorkspaceNotFoundError`, `WorkspaceExistsError`
+
+Never catch bare `Exception` — always catch specific types.
+
+### Configuration (5-layer resolution)
+
+1. Built-in defaults (`config/settings.toml` bundled with package)
+2. Global user config (`~/.config/mkcv/settings.toml`)
+3. Workspace config (`mkcv.toml` in workspace root)
+4. Environment variables (`MKCV_` prefix)
+5. CLI flags (applied at runtime)
+
+Secrets via env vars: `MKCV_ANTHROPIC_API_KEY`, `MKCV_OPENAI_API_KEY`, etc.
 
 ### Testing
 
-- Test files mirror source structure: `src/mkcv/pipeline/analyze.py` → `tests/test_pipeline/test_analyze.py`
-- Use pytest fixtures for common test data (sample JDs, KBs, resumes)
-- Mock all external API calls — never hit real providers in tests
-- One assertion per test function where practical
-- Test names describe behavior: `test_extracts_skills_from_bulleted_jd`
+- Mirror source layout: `src/mkcv/cli/app.py` → `tests/test_cli/test_app.py`
+- Mock all external calls — never hit real providers
+- Fixtures in `conftest.py` for shared test data
+- One assertion per test where practical
+- Descriptive names: `test_version_flag_prints_version`
 
-### Configuration
+## Key Design Principles
 
-- **Environment variables** for secrets: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_BASE_URL`
-- **YAML config file** (`~/.config/mkcv/config.yaml`) for preferences: default models, temperature, theme
-- **CLI flags** override config file; config file overrides env vars
-- Never hardcode API keys, model names, or file paths
+1. **Hexagonal architecture** — core logic is framework-free and testable in isolation
+2. **Workspace-centric** — `mkcv init` creates a project, applications are organized per-company
+3. **Pipeline stages are independent** — each can be run, tested, retried in isolation
+4. **Provider-agnostic** — switching AI providers is a config change, not a code change
+5. **Schema-validated** — all AI outputs validated against Pydantic models before use
+6. **Config layering** — 5 layers from built-in defaults to CLI flags
 
-### Prompts
+## Reference Documentation
 
-- All prompts live in `src/mkcv/prompts/` as Jinja2 templates (`.j2` files)
-- Prompts are never hardcoded in Python files
-- Each prompt template has a corresponding Pydantic model for its expected output
-- Include a voice consistency anchor in all writing-stage prompts
-
-### Key Design Principles
-
-1. **Pipeline stages are independent** — each can be run, tested, and retried in isolation
-2. **Intermediate outputs are persisted** — every stage writes its output to disk for debugging
-3. **Provider-agnostic** — switching from Claude to GPT-4o is a config change, not a code change
-4. **Schema-validated** — all AI outputs are validated against Pydantic models before proceeding
-5. **Human-in-the-loop friendly** — pipeline can pause after any stage for human review
-6. **ATS compliance is a first-class concern** — rendering rules are enforced, not just documented
+- Architecture: `docs/specs/architecture.md`
+- Data models: `docs/specs/data-models.md`
+- CLI interface: `docs/specs/cli-interface.md`
+- ADRs: `docs/decisions/`
+- Product requirements: `docs/product/PRD.md`

@@ -1,0 +1,21 @@
+{# Stage 4: Structure tailored content into RenderCV YAML.
+
+Context variables:
+  - tailored_content: dict — complete tailored content from Stage 3
+  - personal_info: dict — name, email, phone, location, links
+
+Output: Valid YAML matching RenderCV schema.
+#}
+You are an expert at structuring resume data into RenderCV YAML format.
+
+Convert the following tailored resume content into a valid RenderCV YAML document.
+
+## Personal Information
+
+{{ personal_info | tojson(indent=2) }}
+
+## Tailored Content
+
+{{ tailored_content | tojson(indent=2) }}
+
+Respond with a valid YAML document matching the RenderCV schema.
