@@ -59,10 +59,10 @@ class TypstCoverLetterRenderer:
         typ_path.write_text(typst_source, encoding="utf-8")
         logger.debug("Wrote Typst source: %s", typ_path)
 
-        # Compile Typst → PDF
+        # Compile Typst → PDF (typst.compile takes a file path, not source)
         pdf_path = output_dir / "cover_letter.pdf"
         try:
-            pdf_bytes = typst.compile(typst_source)
+            pdf_bytes = typst.compile(str(typ_path))
             pdf_path.write_bytes(pdf_bytes)
         except Exception as exc:
             raise RenderError(f"Typst compilation failed: {exc}") from exc
