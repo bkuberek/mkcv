@@ -110,7 +110,7 @@ page_size = "letterpaper"
 knowledge_base = "knowledge-base/career.md"
 applications_dir = "applications"
 templates_dir = "templates"
-naming_pattern = "{date}-{position}"
+naming_pattern = "{company}/{position}/{date}"
 company_slug = true
 
 [default.voice]

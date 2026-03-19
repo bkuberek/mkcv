@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from mkcv.core.exceptions.pipeline_stage import PipelineStageError
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
+from mkcv.core.models.jd_frontmatter import JDFrontmatter
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.pricing import calculate_cost
 from mkcv.core.models.profile_preset import Preset
@@ -298,6 +299,52 @@ class PipelineService:
             )
 
         return result
+
+    # ------------------------------------------------------------------
+    # Lightweight metadata extraction (pre-pipeline)
+    # ------------------------------------------------------------------
+
+    async def extract_jd_metadata(self, jd_text: str) -> JDFrontmatter:
+        """Extract company, position, and other metadata from a JD.
+
+        Makes a single lightweight LLM call using the stage-1 provider
+        to parse basic metadata before the full pipeline runs. This
+        enables workspace mode even when --company/--position are not
+        provided on the command line.
+
+        Args:
+            jd_text: Raw job description text.
+
+        Returns:
+            JDFrontmatter with extracted metadata fields.
+
+        Raises:
+            PipelineStageError: If the LLM call fails.
+        """
+        llm = self._resolve_llm(1)
+        config = self._stage_configs[1]
+
+        prompt = self._prompts.render(
+            "extract_jd_metadata.j2",
+            {"jd_text": jd_text},
+        )
+
+        try:
+            result = await llm.complete_structured(
+                [{"role": "user", "content": prompt}],
+                model=config.model,
+                response_model=JDFrontmatter,
+                temperature=0.1,
+                max_tokens=1024,
+            )
+        except Exception as exc:
+            raise PipelineStageError(
+                f"JD metadata extraction failed: {exc}",
+                stage="extract_jd_metadata",
+                stage_number=0,
+            ) from exc
+
+        return cast("JDFrontmatter", result)
 
     # ------------------------------------------------------------------
     # Stage implementations

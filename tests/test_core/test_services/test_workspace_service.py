@@ -46,8 +46,9 @@ class TestWorkspaceService:
             jd_source=jd,
         )
         assert app_dir.is_dir()
-        assert (app_dir / "jd.txt").is_file()
+        assert (app_dir / "jd.md").is_file()
         assert (app_dir / "application.toml").is_file()
+        assert (app_dir / "resumes").is_dir()
 
     def test_list_applications_returns_dirs(self, tmp_path: Path) -> None:
         manager = WorkspaceManager()

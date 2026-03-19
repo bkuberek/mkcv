@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from mkcv.core.models.jd_document import JDDocument
+
 
 @runtime_checkable
 class WorkspacePort(Protocol):
@@ -41,10 +43,11 @@ class WorkspacePort(Protocol):
         workspace_root: Path,
         company: str,
         position: str,
-        jd_source: Path,
+        jd_source: Path | str,
         *,
         preset_name: str = "standard",
         url: str | None = None,
+        jd_document: JDDocument | None = None,
     ) -> Path:
         """Create an application directory within the workspace.
 
@@ -52,12 +55,29 @@ class WorkspacePort(Protocol):
             workspace_root: Workspace root path.
             company: Company name (will be slugified).
             position: Position title (will be slugified).
-            jd_source: Path to the JD file (will be copied in).
-            preset_name: Preset name included in directory naming.
+            jd_source: Path to JD file (copied in) or raw text.
+            preset_name: Preset name stored in metadata.
             url: Optional job posting URL.
+            jd_document: Optional parsed JD for frontmatter writing.
 
         Returns:
             Path to the created application directory.
+        """
+        ...
+
+    def create_output_version(
+        self,
+        app_dir: Path,
+        output_type: str,
+    ) -> Path:
+        """Create a new versioned output subdirectory.
+
+        Args:
+            app_dir: Application directory path.
+            output_type: One of ``"resumes"``, ``"cover-letter"``.
+
+        Returns:
+            Path to the new version directory.
         """
         ...
 
@@ -80,11 +100,6 @@ class WorkspacePort(Protocol):
     ) -> Path | None:
         """Find the most recent application directory.
 
-        Scans application directories sorted lexicographically (which
-        produces chronological order due to the YYYY-MM prefix) and
-        returns the last entry. Only considers directories containing
-        an ``application.toml`` file.
-
         Args:
             workspace_root: Workspace root path.
             company: Optional company name filter (will be slugified).
@@ -102,5 +117,16 @@ class WorkspacePort(Protocol):
 
         Returns:
             Path to resume.yaml if it exists, or None.
+        """
+        ...
+
+    def resolve_cover_letter_path(self, app_dir: Path) -> Path | None:
+        """Find the latest cover letter in an application directory.
+
+        Args:
+            app_dir: Path to the application directory.
+
+        Returns:
+            Path to cover_letter.md or .pdf if it exists, or None.
         """
         ...

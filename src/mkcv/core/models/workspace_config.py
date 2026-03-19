@@ -15,7 +15,7 @@ class WorkspaceNaming(BaseModel):
     """Naming convention configuration."""
 
     company_slug: bool = True
-    application_pattern: str = "{date}-{position}"
+    application_pattern: str = "{company}/{position}/{date}"
 
 
 class WorkspaceDefaults(BaseModel):

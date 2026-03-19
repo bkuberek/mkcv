@@ -1,6 +1,7 @@
 """mkcv status — show workspace overview and application listing."""
 
 import logging
+import re
 import tomllib
 from pathlib import Path
 
@@ -101,35 +102,109 @@ def _build_application_table(app_dirs: list[Path]) -> Table:
     table.add_column("Position")
     table.add_column("Date")
     table.add_column("Status")
-    table.add_column("Resume YAML", justify="center")
+    table.add_column("Resume", justify="center")
     table.add_column("PDF", justify="center")
+    table.add_column("Versions", justify="center")
+    table.add_column("Location")
 
     for app_dir in app_dirs:
         metadata = _read_application_metadata(app_dir)
-        has_yaml = (app_dir / "resume.yaml").is_file()
-        has_pdf = any(app_dir.glob("*.pdf"))
+        has_yaml, has_pdf = _detect_resume_artifacts(app_dir)
+        resume_versions = _count_versions(app_dir / "resumes")
+        cl_versions = _count_versions(app_dir / "cover-letter")
 
         company: str
         position: str
         date_str: str
         status: str
+        location: str
         if metadata is not None:
             company = metadata.company
             position = metadata.position
             date_str = metadata.date.isoformat()
             status = metadata.status
+            location = metadata.location or ""
         else:
             company = app_dir.parent.name
             position = app_dir.name
             date_str = "?"
             status = "?"
+            location = ""
 
         yaml_mark = "[green]\u2713[/green]" if has_yaml else "[dim]\u2717[/dim]"
         pdf_mark = "[green]\u2713[/green]" if has_pdf else "[dim]\u2717[/dim]"
 
-        table.add_row(company, position, date_str, status, yaml_mark, pdf_mark)
+        # Build version count string
+        version_parts: list[str] = []
+        if resume_versions > 0:
+            version_parts.append(f"r:{resume_versions}")
+        if cl_versions > 0:
+            version_parts.append(f"cl:{cl_versions}")
+        version_str = " ".join(version_parts) if version_parts else ""
+
+        table.add_row(
+            company,
+            position,
+            date_str,
+            status,
+            yaml_mark,
+            pdf_mark,
+            version_str,
+            location,
+        )
 
     return table
+
+
+def _detect_resume_artifacts(app_dir: Path) -> tuple[bool, bool]:
+    """Detect resume YAML and PDF in both old and new directory layouts.
+
+    Checks new layout (resumes/v{N}/resume.yaml) first, falls back
+    to old layout (app_dir/resume.yaml).
+
+    Returns:
+        Tuple of (has_yaml, has_pdf).
+    """
+    has_yaml = False
+    has_pdf = False
+
+    # New layout: check resumes/ subdirectory
+    resumes_dir = app_dir / "resumes"
+    if resumes_dir.is_dir():
+        for version_dir in resumes_dir.iterdir():
+            if version_dir.is_dir():
+                if (version_dir / "resume.yaml").is_file():
+                    has_yaml = True
+                if any(version_dir.glob("*.pdf")):
+                    has_pdf = True
+
+    # Old layout fallback
+    if not has_yaml:
+        has_yaml = (app_dir / "resume.yaml").is_file()
+    if not has_pdf:
+        has_pdf = any(app_dir.glob("*.pdf"))
+
+    return has_yaml, has_pdf
+
+
+def _count_versions(parent: Path) -> int:
+    """Count the number of v{N} directories under a parent.
+
+    Args:
+        parent: Directory to scan (e.g., app_dir/resumes/).
+
+    Returns:
+        Number of versioned sub-directories.
+    """
+    if not parent.is_dir():
+        return 0
+
+    pattern = re.compile(r"^v(\d+)$")
+    count = 0
+    for entry in parent.iterdir():
+        if entry.is_dir() and pattern.match(entry.name):
+            count += 1
+    return count
 
 
 def _read_application_metadata(app_dir: Path) -> ApplicationMetadata | None:

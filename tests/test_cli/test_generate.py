@@ -303,10 +303,14 @@ class TestGenerateWorkspaceMode:
         kb.write_text("Knowledge base content")
         app_dir = tmp_path / "applications" / "testco" / "2025-01-engineer"
         app_dir.mkdir(parents=True)
+        version_dir = app_dir / "resumes" / "v1"
+        version_dir.mkdir(parents=True)
+        (version_dir / ".mkcv").mkdir()
         result = _make_pipeline_result(tmp_path)
         mock_pipeline = MagicMock()
         mock_ws_service = MagicMock()
         mock_ws_service.setup_application.return_value = app_dir
+        mock_ws_service.create_output_version.return_value = version_dir
         with (
             patch(f"{_CMD}.settings") as mock_settings,
             patch(f"{_CMD}.create_workspace_service", return_value=mock_ws_service),
@@ -323,15 +327,36 @@ class TestGenerateWorkspaceMode:
 
             generate_command(jd=str(jd), kb=kb, company="TestCo", position="Engineer")
         mock_ws_service.setup_application.assert_called_once()
+        mock_ws_service.create_output_version.assert_called_once()
 
-    def test_workspace_mode_missing_company_exits(self, tmp_path: Path) -> None:
+    def test_workspace_mode_missing_company_extracts_via_llm(
+        self, tmp_path: Path
+    ) -> None:
+        """When company is missing, LLM extraction is attempted."""
         jd = _jd_path(tmp_path)
         kb = tmp_path / "kb.md"
         kb.write_text("Knowledge base content")
+        app_dir = tmp_path / "applications" / "extracted-co" / "2025-01-engineer"
+        app_dir.mkdir(parents=True)
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        mock_ws_service = MagicMock()
+        mock_ws_service.setup_application.return_value = app_dir
+        mock_ws_service.create_output_version.return_value = app_dir / "resumes" / "v1"
+        (app_dir / "resumes" / "v1").mkdir(parents=True)
+        (app_dir / "resumes" / "v1" / ".mkcv").mkdir()
         with (
             patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_workspace_service", return_value=mock_ws_service),
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
             patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
-            pytest.raises(SystemExit, match="2"),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+            patch(
+                f"{_CMD}._extract_jd_metadata",
+                return_value=("ExtractedCo", "Engineer"),
+            ),
         ):
             mock_settings.in_workspace = True
             mock_settings.workspace_root = tmp_path
@@ -339,14 +364,20 @@ class TestGenerateWorkspaceMode:
             from mkcv.cli.commands.generate import generate_command
 
             generate_command(jd=str(jd), kb=kb, company=None, position="Engineer")
+        mock_ws_service.setup_application.assert_called_once()
 
-    def test_workspace_mode_missing_position_exits(self, tmp_path: Path) -> None:
+    def test_workspace_mode_extraction_fails_exits(self, tmp_path: Path) -> None:
+        """When LLM extraction returns None, exit with error."""
         jd = _jd_path(tmp_path)
         kb = tmp_path / "kb.md"
         kb.write_text("Knowledge base content")
         with (
             patch(f"{_CMD}.settings") as mock_settings,
             patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(
+                f"{_CMD}._extract_jd_metadata",
+                return_value=(None, None),
+            ),
             pytest.raises(SystemExit, match="2"),
         ):
             mock_settings.in_workspace = True
@@ -354,7 +385,44 @@ class TestGenerateWorkspaceMode:
             mock_settings.workspace.knowledge_base = "kb.md"
             from mkcv.cli.commands.generate import generate_command
 
+            generate_command(jd=str(jd), kb=kb, company=None, position=None)
+
+    def test_workspace_mode_missing_position_extracts_via_llm(
+        self, tmp_path: Path
+    ) -> None:
+        """When position is missing, LLM extraction is attempted."""
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        app_dir = tmp_path / "applications" / "testco" / "2025-01-engineer"
+        app_dir.mkdir(parents=True)
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        mock_ws_service = MagicMock()
+        mock_ws_service.setup_application.return_value = app_dir
+        mock_ws_service.create_output_version.return_value = app_dir / "resumes" / "v1"
+        (app_dir / "resumes" / "v1").mkdir(parents=True)
+        (app_dir / "resumes" / "v1" / ".mkcv").mkdir()
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_workspace_service", return_value=mock_ws_service),
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+            patch(
+                f"{_CMD}._extract_jd_metadata",
+                return_value=("TestCo", "ExtractedEngineer"),
+            ),
+        ):
+            mock_settings.in_workspace = True
+            mock_settings.workspace_root = tmp_path
+            mock_settings.workspace.knowledge_base = "kb.md"
+            from mkcv.cli.commands.generate import generate_command
+
             generate_command(jd=str(jd), kb=kb, company="TestCo", position=None)
+        mock_ws_service.setup_application.assert_called_once()
 
     def test_workspace_mode_resolves_kb_from_config(self, tmp_path: Path) -> None:
         jd = _jd_path(tmp_path)
@@ -363,10 +431,14 @@ class TestGenerateWorkspaceMode:
         kb.write_text("Knowledge base content")
         app_dir = tmp_path / "applications" / "testco" / "2025-01-engineer"
         app_dir.mkdir(parents=True)
+        version_dir = app_dir / "resumes" / "v1"
+        version_dir.mkdir(parents=True)
+        (version_dir / ".mkcv").mkdir()
         result = _make_pipeline_result(tmp_path)
         mock_pipeline = MagicMock()
         mock_ws_service = MagicMock()
         mock_ws_service.setup_application.return_value = app_dir
+        mock_ws_service.create_output_version.return_value = version_dir
         with (
             patch(f"{_CMD}.settings") as mock_settings,
             patch(f"{_CMD}.create_workspace_service", return_value=mock_ws_service),
@@ -782,3 +854,187 @@ class TestVersionBasedOutputDir:
             mock_settings.in_workspace = False
             result = _default_output_dir("<generic resume>", "concise")
         assert "-v1" in result.name
+
+
+class TestWriteRunMetadata:
+    """Tests for _write_run_metadata helper."""
+
+    def test_writes_run_metadata_json(self, tmp_path: Path) -> None:
+        import json
+
+        from mkcv.cli.commands.generate import _write_run_metadata
+
+        result = _make_pipeline_result(tmp_path)
+        _write_run_metadata(
+            output_dir=tmp_path,
+            result=result,
+            preset_name="standard",
+            provider_override=None,
+        )
+        metadata_path = tmp_path / ".mkcv" / "run_metadata.json"
+        assert metadata_path.is_file()
+        data = json.loads(metadata_path.read_text())
+        assert data["preset"] == "standard"
+        assert data["review_score"] == 85
+
+    def test_run_metadata_includes_cost(self, tmp_path: Path) -> None:
+        import json
+
+        from mkcv.cli.commands.generate import _write_run_metadata
+
+        result = _make_pipeline_result(tmp_path)
+        _write_run_metadata(
+            output_dir=tmp_path,
+            result=result,
+            preset_name="concise",
+            provider_override=None,
+        )
+        data = json.loads((tmp_path / ".mkcv" / "run_metadata.json").read_text())
+        assert data["total_cost_usd"] == result.total_cost_usd
+
+    def test_run_metadata_uses_provider_override(self, tmp_path: Path) -> None:
+        import json
+
+        from mkcv.cli.commands.generate import _write_run_metadata
+
+        result = _make_pipeline_result(tmp_path)
+        _write_run_metadata(
+            output_dir=tmp_path,
+            result=result,
+            preset_name="standard",
+            provider_override="openrouter",
+        )
+        data = json.loads((tmp_path / ".mkcv" / "run_metadata.json").read_text())
+        assert data["provider"] == "openrouter"
+
+    def test_no_write_when_no_stages(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _write_run_metadata
+
+        result = PipelineResult(
+            run_id="empty",
+            timestamp=datetime.now(tz=UTC),
+            jd_source="jd.txt",
+            kb_source="kb.md",
+            company="Co",
+            role_title="Eng",
+            stages=[],
+            total_cost_usd=0.0,
+            total_duration_seconds=0.0,
+            review_score=0,
+            output_paths={},
+        )
+        _write_run_metadata(
+            output_dir=tmp_path,
+            result=result,
+            preset_name="standard",
+            provider_override=None,
+        )
+        assert not (tmp_path / ".mkcv" / "run_metadata.json").exists()
+
+
+class TestExtractJDMetadataCommand:
+    """Tests for _extract_jd_metadata CLI helper."""
+
+    def test_returns_company_position(self) -> None:
+        from mkcv.cli.commands.generate import _extract_jd_metadata
+
+        with (
+            patch(f"{_CMD}.create_pipeline_service") as mock_factory,
+            patch(f"{_CMD}.asyncio.run") as mock_run,
+            patch(f"{_CMD}.settings"),
+        ):
+            mock_fm = MagicMock()
+            mock_fm.company = "ExtractedCo"
+            mock_fm.position = "Sr. Engineer"
+            mock_run.return_value = mock_fm
+            company, position = _extract_jd_metadata(
+                "JD text", preset="standard", provider_override=None, theme="sb2nov"
+            )
+        assert company == "ExtractedCo"
+        assert position == "Sr. Engineer"
+        mock_factory.assert_called_once()
+
+    def test_returns_none_on_error(self) -> None:
+        from mkcv.cli.commands.generate import _extract_jd_metadata
+
+        with (
+            patch(f"{_CMD}.create_pipeline_service"),
+            patch(f"{_CMD}.asyncio.run", side_effect=RuntimeError("fail")),
+            patch(f"{_CMD}.settings"),
+        ):
+            company, position = _extract_jd_metadata(
+                "JD text", preset="standard", provider_override=None, theme="sb2nov"
+            )
+        assert company is None
+        assert position is None
+
+
+class TestVersionedOutputWorkspaceMode:
+    """Tests for versioned output placement in workspace mode."""
+
+    def test_workspace_mode_creates_versioned_resume_dir(self, tmp_path: Path) -> None:
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        app_dir = tmp_path / "applications" / "testco" / "engineer" / "2025-01-01"
+        version_dir = app_dir / "resumes" / "v1"
+        version_dir.mkdir(parents=True)
+        (version_dir / ".mkcv").mkdir()
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        mock_ws_service = MagicMock()
+        mock_ws_service.setup_application.return_value = app_dir
+        mock_ws_service.create_output_version.return_value = version_dir
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_workspace_service", return_value=mock_ws_service),
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+        ):
+            mock_settings.in_workspace = True
+            mock_settings.workspace_root = tmp_path
+            mock_settings.workspace.knowledge_base = "kb.md"
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(jd=str(jd), kb=kb, company="TestCo", position="Engineer")
+        mock_ws_service.create_output_version.assert_called_once_with(
+            app_dir, "resumes"
+        )
+
+    def test_cover_letter_chain_creates_versioned_dir(self, tmp_path: Path) -> None:
+        """Chaining cover letter in workspace mode creates versioned dir."""
+        from mkcv.cli.commands.generate import _chain_cover_letter
+
+        result = _make_pipeline_result(tmp_path, include_yaml=True)
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        cl_version_dir = app_dir / "cover-letter" / "v1"
+        cl_version_dir.mkdir(parents=True)
+        (cl_version_dir / ".mkcv").mkdir()
+
+        mock_ws_service = MagicMock()
+        mock_ws_service.create_output_version.return_value = cl_version_dir
+        mock_cl_result = MagicMock()
+        mock_cl_result.stages = []
+        mock_cl_result.review_score = 80
+        mock_cl_result.output_paths = {}
+
+        with (
+            patch(f"{_CMD}.create_workspace_service", return_value=mock_ws_service),
+            patch(f"{_CMD}.create_cover_letter_service"),
+            patch(f"{_CMD}.asyncio.run", return_value=mock_cl_result),
+        ):
+            _chain_cover_letter(
+                result=result,
+                jd_text="JD text",
+                output_dir=tmp_path,
+                provider_override=None,
+                cl_preset="standard",
+                app_dir=app_dir,
+            )
+        mock_ws_service.create_output_version.assert_called_once_with(
+            app_dir, "cover-letter"
+        )

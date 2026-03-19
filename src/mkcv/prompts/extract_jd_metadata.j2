@@ -1,0 +1,36 @@
+{# Lightweight JD metadata extraction.
+
+Context variables:
+  - jd_text: str — the raw job description text
+
+Output: JSON matching JDFrontmatter model schema.
+#}
+You are a job description parser. Extract key metadata from the following job
+description text. Be precise and extract only what is explicitly stated or
+very clearly implied.
+
+## Job Description
+
+{{ jd_text }}
+
+## Instructions
+
+Extract the following fields. If a field cannot be determined from the text,
+set it to null.
+
+- **company**: The hiring company name.
+- **position**: The exact job title as written in the posting.
+- **location**: Work location (city, state/country), or null if not stated.
+- **workplace**: One of "remote", "hybrid", or "onsite". Null if not determinable.
+- **compensation**: An object with optional fields:
+  - `base`: Base salary range as a string (e.g., "$150k-$200k"), or null.
+  - `equity`: Equity details as a string, or null.
+  - `bonus`: Bonus details as a string, or null.
+  - `total`: Total compensation if stated, or null.
+  Set the entire compensation object to null if no pay information is mentioned.
+- **source**: Where the job was likely posted (e.g., "linkedin", "company-site"),
+  or null if not determinable.
+- **tags**: A list of 3-5 short tags categorizing this role (e.g., "backend",
+  "senior", "python", "distributed-systems"). Use lowercase kebab-case.
+
+Respond with a single JSON object matching the schema exactly. No text outside the JSON.

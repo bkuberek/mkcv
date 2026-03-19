@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import tomli_w
+from ruamel.yaml import YAML
 
 from mkcv.core.exceptions.workspace import WorkspaceError, WorkspaceExistsError
 from mkcv.core.models.application_metadata import ApplicationMetadata
+from mkcv.core.models.jd_document import JDDocument
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ templates_dir = "templates"
 
 [naming]
 company_slug = true
-application_pattern = "{date}-{position}"
+application_pattern = "{company}/{position}/{date}"
 
 [defaults]
 theme = "sb2nov"
@@ -478,13 +480,22 @@ temperature = 0.6
 │   └── voice.md                  # Writing tone preferences
 ├── applications/                 # Targeted resumes (with JD)
 │   └── {{company}}/
-│       └── {{date-position}}/
-│           ├── application.toml  # Application metadata
-│           ├── jd.txt            # Job description
-│           ├── resume.yaml       # Generated resume
-│           ├── resume.pdf        # Rendered PDF
-│           ├── cover_letter.pdf  # Cover letter (if generated)
-│           └── .mkcv/            # Pipeline artifacts
+│       └── {{position}}/
+│           └── {{YYYY-MM-DD}}/
+│               ├── application.toml  # Application metadata
+│               ├── jd.md             # Job description (with YAML frontmatter)
+│               ├── resumes/          # Versioned resume outputs
+│               │   ├── v1/
+│               │   │   ├── resume.yaml
+│               │   │   ├── resume.pdf
+│               │   │   └── .mkcv/    # Pipeline artifacts
+│               │   └── v2/           # Re-run creates a new version
+│               │       └── ...
+│               └── cover-letter/     # Versioned cover letter outputs
+│                   └── v1/
+│                       ├── cover_letter.md
+│                       ├── cover_letter.pdf
+│                       └── .mkcv/
 ├── resumes/                      # Generic resumes (no JD)
 │   └── {{date}}-{{target}}/
 │       ├── resume.yaml
@@ -679,64 +690,187 @@ class WorkspaceManager:
         workspace_root: Path,
         company: str,
         position: str,
-        jd_source: Path,
+        jd_source: Path | str,
         *,
         preset_name: str = "standard",
         url: str | None = None,
+        jd_document: JDDocument | None = None,
     ) -> Path:
         """Create an application directory within the workspace.
 
-        Creates: applications/{company_slug}/{YYYY-MM}-{position}-{preset}-v{N}/
-        With: application.toml, jd.txt (copied), .mkcv/
-
-        Version numbering increments automatically: v1, v2, v3, etc.
+        Creates: applications/{company_slug}/{position_slug}/{YYYY-MM-DD}/
+        With: application.toml, jd.md, resumes/
 
         Args:
             workspace_root: Workspace root path.
             company: Company name (will be slugified).
             position: Position title (will be slugified).
-            jd_source: Path to the JD file (will be copied in).
-            preset_name: Preset name included in directory naming.
+            jd_source: Path to JD file (copied in) or raw text.
+            preset_name: Preset name stored in metadata.
             url: Optional job posting URL.
+            jd_document: Optional parsed JD for frontmatter writing.
 
         Returns:
             Path to the created application directory.
         """
-        app_date = date.today()
-        date_str = app_date.strftime("%Y-%m")
+        today = date.today()
+        app_dir = self._build_application_path(workspace_root, company, position, today)
 
-        company_slug = self.slugify(company)
-        position_slug = self.slugify(position)
-
-        base_name = f"{date_str}-{position_slug}-{preset_name}"
-
-        # Build full path: applications/{company_slug}/{base}-v{N}/
-        apps_base = self.get_applications_dir(workspace_root)
-        parent_dir = apps_base / company_slug
-        version = _next_version(parent_dir, base_name)
-        app_dir = parent_dir / f"{base_name}-v{version}"
-
-        # Create directories
+        # Create directory structure
         app_dir.mkdir(parents=True, exist_ok=True)
-        (app_dir / ".mkcv").mkdir(exist_ok=True)
+        (app_dir / "resumes").mkdir(exist_ok=True)
 
-        # Copy JD file
-        shutil.copy2(jd_source, app_dir / "jd.txt")
-        logger.info("Placed JD: %s", app_dir / "jd.txt")
+        # Write JD file (as markdown with frontmatter if possible)
+        if jd_document is not None:
+            self._write_jd_markdown(jd_document, app_dir, url=url)
+        elif isinstance(jd_source, Path):
+            shutil.copy2(jd_source, app_dir / "jd.md")
+        else:
+            (app_dir / "jd.md").write_text(jd_source, encoding="utf-8")
 
-        # Generate application.toml
-        metadata = ApplicationMetadata(
+        # Build and write application.toml
+        metadata = self._build_application_metadata(
             company=company,
             position=position,
-            date=app_date,
-            status="draft",
+            app_date=today,
             url=url,
-            created_at=datetime.now(tz=UTC),
+            preset_name=preset_name,
+            jd_document=jd_document,
         )
         self._write_application_toml(app_dir, metadata)
 
         logger.info("Created application: %s", app_dir)
         return app_dir
+
+    def _build_application_path(
+        self,
+        workspace_root: Path,
+        company: str,
+        position: str,
+        app_date: date,
+    ) -> Path:
+        """Build the application directory path.
+
+        Layout: applications/{company_slug}/{position_slug}/{YYYY-MM-DD}/
+
+        Args:
+            workspace_root: Workspace root path.
+            company: Company name (will be slugified).
+            position: Position title (will be slugified).
+            app_date: Application date.
+
+        Returns:
+            Path to the application directory.
+
+        Raises:
+            WorkspaceError: If the directory already exists with an application.toml.
+        """
+        apps_base = self.get_applications_dir(workspace_root)
+        company_slug = self.slugify(company)
+        position_slug = self.slugify(position)
+        date_str = app_date.strftime("%Y-%m-%d")
+
+        app_dir = apps_base / company_slug / position_slug / date_str
+
+        if app_dir.exists() and (app_dir / "application.toml").is_file():
+            raise WorkspaceError(
+                f"Application directory already exists: {app_dir}. "
+                "Use the existing directory or choose a different date."
+            )
+
+        return app_dir
+
+    def _build_application_metadata(
+        self,
+        *,
+        company: str,
+        position: str,
+        app_date: date,
+        url: str | None,
+        preset_name: str,
+        jd_document: JDDocument | None,
+    ) -> ApplicationMetadata:
+        """Build ApplicationMetadata, enriching from JD frontmatter."""
+        fm = jd_document.metadata if jd_document else None
+
+        return ApplicationMetadata(
+            company=company,
+            position=position,
+            date=app_date,
+            status="draft",
+            url=url or (fm.url if fm else None),
+            created_at=datetime.now(tz=UTC),
+            preset=preset_name,
+            compensation=fm.compensation if fm else None,
+            location=fm.location if fm else None,
+            workplace=fm.workplace if fm else None,
+            source=fm.source if fm else None,
+            tags=fm.tags if fm else [],
+        )
+
+    def _write_jd_markdown(
+        self,
+        jd_document: JDDocument,
+        app_dir: Path,
+        *,
+        url: str | None = None,
+    ) -> Path:
+        """Write a JD document as markdown with YAML frontmatter.
+
+        Args:
+            jd_document: Parsed JD document.
+            app_dir: Application directory to write into.
+            url: Optional URL to include in frontmatter.
+
+        Returns:
+            Path to the written jd.md file.
+        """
+        lines: list[str] = []
+
+        metadata = jd_document.metadata
+        if metadata is not None:
+            fm_dict: dict[str, object] = {}
+            if metadata.company:
+                fm_dict["company"] = metadata.company
+            if metadata.position:
+                fm_dict["position"] = metadata.position
+            if url or metadata.url:
+                fm_dict["url"] = url or metadata.url
+            if metadata.location:
+                fm_dict["location"] = metadata.location
+            if metadata.workplace:
+                fm_dict["workplace"] = metadata.workplace
+            if metadata.compensation:
+                comp = metadata.compensation.model_dump(exclude_none=True)
+                if comp:
+                    fm_dict["compensation"] = comp
+            if metadata.posted_date:
+                fm_dict["posted_date"] = metadata.posted_date.isoformat()
+            if metadata.source:
+                fm_dict["source"] = metadata.source
+            if metadata.tags:
+                fm_dict["tags"] = metadata.tags
+
+            if fm_dict:
+                from io import StringIO
+
+                yaml_engine = YAML()
+                yaml_engine.default_flow_style = False
+                stream = StringIO()
+                yaml_engine.dump(fm_dict, stream)
+                yaml_str = stream.getvalue().strip()
+
+                lines.append("---")
+                lines.append(yaml_str)
+                lines.append("---")
+                lines.append("")
+
+        lines.append(jd_document.body)
+        lines.append("")  # trailing newline
+
+        jd_path = app_dir / "jd.md"
+        jd_path.write_text("\n".join(lines), encoding="utf-8")
+        return jd_path
 
     def slugify(self, text: str) -> str:
         """Convert text to a filesystem-safe slug.
@@ -782,7 +916,7 @@ class WorkspaceManager:
         """List all application directories in the workspace.
 
         An application directory is identified by containing an
-        ``application.toml`` file.
+        ``application.toml`` file. Results sorted by created_at timestamp.
 
         Args:
             workspace_root: Workspace root path.
@@ -794,9 +928,9 @@ class WorkspaceManager:
         if not apps_dir.is_dir():
             return []
 
-        return sorted(
-            app_toml.parent for app_toml in apps_dir.rglob("application.toml")
-        )
+        apps = [app_toml.parent for app_toml in apps_dir.rglob("application.toml")]
+
+        return sorted(apps, key=self._app_sort_key)
 
     # ------------------------------------------------------------------
     # Version resolution
@@ -810,12 +944,8 @@ class WorkspaceManager:
     ) -> Path | None:
         """Find the most recent application directory.
 
-        When ``company`` is provided, only that company's subdirectory
-        is searched.  Otherwise, all companies are considered.
-
-        Directories are identified by containing ``application.toml``
-        and are sorted lexicographically (the ``YYYY-MM-`` prefix
-        ensures chronological order).
+        Sorts by created_at timestamp from application.toml, falling back
+        to lexicographic order for entries without timestamps.
 
         Args:
             workspace_root: Workspace root path.
@@ -831,13 +961,22 @@ class WorkspaceManager:
         if company is not None:
             company_slug = self.slugify(company)
             apps_dir = self.get_applications_dir(workspace_root)
-            company_dir = apps_dir / company_slug
-            all_apps = [app for app in all_apps if app.parent == company_dir]
+            all_apps = [
+                app
+                for app in all_apps
+                if self._matches_company(app, apps_dir, company_slug)
+            ]
 
-        return all_apps[-1] if all_apps else None
+        if not all_apps:
+            return None
+
+        return max(all_apps, key=self._app_sort_key)
 
     def resolve_resume_path(self, app_dir: Path) -> Path | None:
-        """Find resume.yaml within an application directory.
+        """Find the latest resume.yaml within an application directory.
+
+        Checks new layout (resumes/v{latest}/resume.yaml) first,
+        then falls back to old layout (app_dir/resume.yaml).
 
         Args:
             app_dir: Path to the application directory.
@@ -845,8 +984,166 @@ class WorkspaceManager:
         Returns:
             Path to resume.yaml if it exists, or None.
         """
+        # New layout: find latest version in resumes/
+        resumes_dir = app_dir / "resumes"
+        if resumes_dir.is_dir():
+            latest = self._find_latest_version(resumes_dir)
+            if latest is not None:
+                resume = latest / "resume.yaml"
+                if resume.is_file():
+                    return resume
+
+        # Old layout fallback
         resume = app_dir / "resume.yaml"
         return resume if resume.is_file() else None
+
+    def resolve_cover_letter_path(self, app_dir: Path) -> Path | None:
+        """Find the latest cover letter in an application directory.
+
+        Checks new layout (cover-letter/v{latest}/) first,
+        then falls back to old layout (app_dir/cover_letter.*).
+
+        Args:
+            app_dir: Path to the application directory.
+
+        Returns:
+            Path to cover_letter.md or .pdf if it exists, or None.
+        """
+        # New layout
+        cl_dir = app_dir / "cover-letter"
+        if cl_dir.is_dir():
+            latest = self._find_latest_version(cl_dir)
+            if latest is not None:
+                for name in ("cover_letter.md", "cover_letter.pdf"):
+                    path = latest / name
+                    if path.is_file():
+                        return path
+
+        # Old layout fallback
+        for name in ("cover_letter.md", "cover_letter.pdf"):
+            path = app_dir / name
+            if path.is_file():
+                return path
+
+        return None
+
+    def create_output_version(
+        self,
+        app_dir: Path,
+        output_type: str,
+    ) -> Path:
+        """Create a new versioned output directory within an application.
+
+        Args:
+            app_dir: Application directory path.
+            output_type: One of ``"resumes"``, ``"cover-letter"``.
+
+        Returns:
+            Path to the new version directory (e.g., app_dir/resumes/v2/).
+        """
+        parent = app_dir / output_type
+        parent.mkdir(parents=True, exist_ok=True)
+
+        version = self._next_version_subfolder(parent)
+        version_dir = parent / f"v{version}"
+        version_dir.mkdir()
+        (version_dir / ".mkcv").mkdir()
+
+        return version_dir
+
+    def _detect_layout(self, app_dir: Path) -> str:
+        """Detect whether an application uses the old or new layout.
+
+        Args:
+            app_dir: Directory containing application.toml.
+
+        Returns:
+            ``"v1"`` for old layout, ``"v2"`` for new layout.
+        """
+        if (app_dir / "resumes").is_dir() or (app_dir / "jd.md").is_file():
+            return "v2"
+        return "v1"
+
+    def _matches_company(
+        self,
+        app_dir: Path,
+        apps_dir: Path,
+        company_slug: str,
+    ) -> bool:
+        """Check if an application belongs to a company.
+
+        Works for both v1 (company is direct parent) and v2
+        (company is the first segment after applications/).
+        """
+        try:
+            relative = app_dir.relative_to(apps_dir)
+            return relative.parts[0] == company_slug
+        except (ValueError, IndexError):
+            return False
+
+    @staticmethod
+    def _app_sort_key(app_dir: Path) -> tuple[str, str]:
+        """Build a sort key for application directories.
+
+        Tries to read created_at from application.toml.
+        Falls back to directory name for lexicographic sort.
+        """
+        import tomllib
+
+        toml_path = app_dir / "application.toml"
+        if toml_path.is_file():
+            try:
+                with toml_path.open("rb") as f:
+                    data = tomllib.load(f)
+                created = data.get("application", {}).get("created_at", "")
+                if created:
+                    return (str(created), str(app_dir))
+            except Exception:
+                pass
+        return ("", str(app_dir))
+
+    @staticmethod
+    def _next_version_subfolder(parent: Path) -> int:
+        """Find the next version number in a directory.
+
+        Scans for directories matching v{N} and returns N+1.
+        Returns 1 when no versions exist.
+        """
+        if not parent.is_dir():
+            return 1
+
+        pattern = re.compile(r"^v(\d+)$")
+        max_version = 0
+        for entry in parent.iterdir():
+            if entry.is_dir():
+                match = pattern.match(entry.name)
+                if match:
+                    max_version = max(max_version, int(match.group(1)))
+
+        return max_version + 1
+
+    def _find_latest_version(self, parent: Path) -> Path | None:
+        """Find the highest-numbered v{N} directory.
+
+        Args:
+            parent: Directory containing v{N} subdirectories.
+
+        Returns:
+            Path to the latest version directory, or None.
+        """
+        pattern = re.compile(r"^v(\d+)$")
+        versions: list[tuple[int, Path]] = []
+        for entry in parent.iterdir():
+            if entry.is_dir():
+                match = pattern.match(entry.name)
+                if match:
+                    versions.append((int(match.group(1)), entry))
+
+        if not versions:
+            return None
+
+        versions.sort(key=lambda x: x[0])
+        return versions[-1][1]
 
     def find_latest_resume(self, workspace_root: Path) -> Path | None:
         """Find the latest generic resume from the resumes/ directory.
@@ -893,8 +1190,21 @@ class WorkspaceManager:
                 "status": metadata.status,
                 "url": metadata.url or "",
                 "created_at": metadata.created_at.isoformat(),
+                "preset": metadata.preset or "",
+                "location": metadata.location or "",
+                "workplace": metadata.workplace or "",
+                "source": metadata.source or "",
+                "tags": metadata.tags,
+                "notes": metadata.notes,
             },
         }
+
+        # Add compensation sub-table if present
+        if metadata.compensation is not None:
+            comp = metadata.compensation.model_dump(exclude_none=True)
+            if comp:
+                data["application"]["compensation"] = comp
+
         toml_path = app_dir / "application.toml"
         with toml_path.open("wb") as f:
             tomli_w.dump(data, f)

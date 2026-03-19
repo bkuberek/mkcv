@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from mkcv.core.models.jd_document import JDDocument
 from mkcv.core.ports.workspace import WorkspacePort
 
 
@@ -50,23 +51,22 @@ class WorkspaceService:
         workspace_root: Path,
         company: str,
         position: str,
-        jd_source: Path,
+        jd_source: Path | str,
         *,
         preset_name: str = "standard",
         url: str | None = None,
+        jd_document: JDDocument | None = None,
     ) -> Path:
         """Create an application directory within the workspace.
-
-        Creates: applications/{company}/{YYYY-MM-position-preset-vN}/
-        With: application.toml, jd.txt (copied), .mkcv/
 
         Args:
             workspace_root: Path to workspace root.
             company: Company name (will be slugified).
             position: Position title (will be slugified).
-            jd_source: Path to job description file (will be copied).
-            preset_name: Preset name included in directory naming.
+            jd_source: Path to JD file (copied in) or raw text.
+            preset_name: Preset name stored in metadata.
             url: Optional job posting URL.
+            jd_document: Optional parsed JD for frontmatter writing.
 
         Returns:
             Path to the created application directory.
@@ -78,6 +78,7 @@ class WorkspaceService:
             jd_source=jd_source,
             preset_name=preset_name,
             url=url,
+            jd_document=jd_document,
         )
 
     def list_applications(self, workspace_root: Path) -> list[Path]:
@@ -118,3 +119,26 @@ class WorkspaceService:
             Path to resume.yaml if it exists, or None.
         """
         return self._workspace.resolve_resume_path(app_dir)
+
+    def resolve_cover_letter_path(self, app_dir: Path) -> Path | None:
+        """Find the latest cover letter in an application directory.
+
+        Args:
+            app_dir: Path to the application directory.
+
+        Returns:
+            Path to cover_letter.md or .pdf if it exists, or None.
+        """
+        return self._workspace.resolve_cover_letter_path(app_dir)
+
+    def create_output_version(self, app_dir: Path, output_type: str) -> Path:
+        """Create a new versioned output subdirectory.
+
+        Args:
+            app_dir: Application directory path.
+            output_type: One of ``"resumes"``, ``"cover-letter"``.
+
+        Returns:
+            Path to the new version directory.
+        """
+        return self._workspace.create_output_version(app_dir, output_type)

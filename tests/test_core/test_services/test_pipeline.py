@@ -14,6 +14,7 @@ from mkcv.core.models.ats_check import ATSCheck
 from mkcv.core.models.bullet_review import BulletReview
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
+from mkcv.core.models.jd_frontmatter import JDFrontmatter
 from mkcv.core.models.keyword_coverage import KeywordCoverage
 from mkcv.core.models.mission_statement import MissionStatement
 from mkcv.core.models.pipeline_result import PipelineResult
@@ -1479,3 +1480,63 @@ class TestDensityPassedToPrompts:
         assert len(analyze_calls) == 1
         ctx = analyze_calls[0][1]
         assert "density" not in ctx
+
+
+# ------------------------------------------------------------------
+# Tests for extract_jd_metadata
+# ------------------------------------------------------------------
+
+
+class TestExtractJDMetadata:
+    """Tests for PipelineService.extract_jd_metadata."""
+
+    @pytest.fixture
+    def sample_frontmatter(self) -> JDFrontmatter:
+        return JDFrontmatter(
+            company="TestCorp",
+            position="Senior Engineer",
+            location="Remote",
+            workplace="remote",
+        )
+
+    @pytest.mark.asyncio
+    async def test_extract_returns_frontmatter(
+        self, sample_frontmatter: JDFrontmatter
+    ) -> None:
+        stub = StubLLMAdapter(responses={JDFrontmatter: sample_frontmatter})
+        pipeline = PipelineService(
+            providers={"default": stub},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+        )
+
+        result = await pipeline.extract_jd_metadata("Some JD text")
+        assert result.company == "TestCorp"
+        assert result.position == "Senior Engineer"
+
+    @pytest.mark.asyncio
+    async def test_extract_uses_stage1_provider(
+        self, sample_frontmatter: JDFrontmatter
+    ) -> None:
+        stub = StubLLMAdapter(responses={JDFrontmatter: sample_frontmatter})
+        pipeline = PipelineService(
+            providers={"default": stub},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+        )
+
+        await pipeline.extract_jd_metadata("JD text")
+        assert len(stub.call_log) == 1
+        assert stub.call_log[0]["response_model"] == "JDFrontmatter"
+
+    @pytest.mark.asyncio
+    async def test_extract_raises_pipeline_error_on_failure(self) -> None:
+        stub = StubLLMAdapter()  # no response configured -> raises
+        pipeline = PipelineService(
+            providers={"default": stub},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+        )
+
+        with pytest.raises(PipelineStageError, match="JD metadata extraction"):
+            await pipeline.extract_jd_metadata("Some JD text")

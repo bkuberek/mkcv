@@ -119,10 +119,12 @@ def cover_letter_command(
     jd_is_stdin = jd in ("-", "")
 
     try:
-        jd_text = read_jd(jd)
+        jd_doc = read_jd(jd)
     except MkcvError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(exc.exit_code)
+
+    jd_text = jd_doc.body
 
     # Resolve resume text and output directory
     resume_text: str | None = None
@@ -178,7 +180,15 @@ def cover_letter_command(
     if needs_deferred_placement:
         gen_dir = Path(tempfile.mkdtemp(prefix="mkcv-cl-"))
     elif resolved_output is not None:
-        gen_dir = resolved_output
+        # If output points to an app dir, create a versioned cover-letter subfolder
+        if (resolved_output / "application.toml").is_file() and output_dir is None:
+            workspace_service = create_workspace_service()
+            gen_dir = workspace_service.create_output_version(
+                resolved_output, "cover-letter"
+            )
+            console.print(f"  [dim]Output version: cover-letter/{gen_dir.name}[/dim]")
+        else:
+            gen_dir = resolved_output
     else:
         gen_dir = Path.cwd()
 

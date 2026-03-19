@@ -8,9 +8,12 @@ Import models from this package:
 from mkcv.core.models.application_metadata import ApplicationMetadata
 from mkcv.core.models.ats_check import ATSCheck
 from mkcv.core.models.bullet_review import BulletReview
+from mkcv.core.models.compensation import Compensation
 from mkcv.core.models.experience_entry import ExperienceEntry
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
+from mkcv.core.models.jd_document import JDDocument
+from mkcv.core.models.jd_frontmatter import JDFrontmatter
 from mkcv.core.models.kb_validation import KBValidationResult
 from mkcv.core.models.keyword_coverage import KeywordCoverage
 from mkcv.core.models.mission_statement import MissionStatement
@@ -21,6 +24,7 @@ from mkcv.core.models.requirement import Requirement
 from mkcv.core.models.resume_cv import ResumeCV
 from mkcv.core.models.resume_design import ResumeDesign
 from mkcv.core.models.review_report import ReviewReport
+from mkcv.core.models.run_metadata import RunMetadata
 from mkcv.core.models.selected_experience import SelectedExperience
 from mkcv.core.models.skill_entry import SkillEntry
 from mkcv.core.models.skill_group import SkillGroup
@@ -42,9 +46,12 @@ __all__ = [
     "ATSCheck",
     "ApplicationMetadata",
     "BulletReview",
+    "Compensation",
     "ExperienceEntry",
     "ExperienceSelection",
     "JDAnalysis",
+    "JDDocument",
+    "JDFrontmatter",
     "KBValidationResult",
     "KeywordCoverage",
     "MissionStatement",
@@ -54,6 +61,7 @@ __all__ = [
     "ResumeCV",
     "ResumeDesign",
     "ReviewReport",
+    "RunMetadata",
     "SelectedExperience",
     "SkillEntry",
     "SkillGroup",

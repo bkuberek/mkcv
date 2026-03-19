@@ -1,11 +1,12 @@
 """mkcv generate — run the AI pipeline to generate a tailored resume."""
 
 import asyncio
+import json
 import logging
 import re
 import sys
 import time
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -26,6 +27,7 @@ from mkcv.config import settings
 from mkcv.core.exceptions import MkcvError
 from mkcv.core.models.kb_validation import KBValidationResult
 from mkcv.core.models.pipeline_result import PipelineResult
+from mkcv.core.models.run_metadata import RunMetadata
 from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.services.jd_reader import read_jd
 from mkcv.core.services.kb_validator import validate_kb
@@ -206,13 +208,31 @@ def generate_command(
     # Generic mode (no JD): skip application directory creation even in a
     # workspace. Resolve KB from workspace config but output to .mkcv/.
     is_generic = jd is None
-    use_workspace_mode = (
-        settings.in_workspace and not is_generic and company and position
-    )
+    use_workspace_mode = settings.in_workspace and not is_generic
 
     # Resolve per-output-type presets
     effective_cv_preset = cv_preset or resolved_preset
     effective_cl_preset = cl_preset or resolved_preset
+
+    # If in workspace mode without company/position, extract from JD via LLM
+    if use_workspace_mode and (not company or not position):
+        extracted_company, extracted_position = _extract_jd_metadata(
+            jd_text,
+            preset=effective_cv_preset,
+            provider_override=resolved_provider,
+            theme=effective_theme,
+        )
+        if not company:
+            company = extracted_company
+        if not position:
+            position = extracted_position
+
+        if not company or not position:
+            console.print(
+                "[red]Error:[/red] Could not determine company/position from JD.\n"
+                "  Provide --company and --position explicitly."
+            )
+            sys.exit(2)
 
     if use_workspace_mode:
         _generate_workspace_mode(
@@ -231,14 +251,6 @@ def generate_command(
             chain_cover_letter=cover_letter,
             cl_preset=effective_cl_preset,
         )
-    elif settings.in_workspace and not is_generic and (not company or not position):
-        # Targeted resume in workspace but missing company/position
-        console.print(
-            "[red]Error:[/red] --company and --position are required "
-            "when using --jd in a workspace.\n"
-            "  For a generic resume, omit --jd."
-        )
-        sys.exit(2)
     else:
         # Standalone mode, or generic mode inside a workspace.
         # In a workspace, resolve KB from config if not provided.
@@ -386,6 +398,52 @@ def _build_generic_jd(target: str | None) -> str:
     )
 
 
+def _extract_jd_metadata(
+    jd_text: str,
+    *,
+    preset: str,
+    provider_override: str | None,
+    theme: str,
+) -> tuple[str | None, str | None]:
+    """Use a lightweight LLM call to extract company and position from JD text.
+
+    Args:
+        jd_text: Raw job description text.
+        preset: Preset name for pipeline creation.
+        provider_override: Optional provider override.
+        theme: Theme name for pipeline creation.
+
+    Returns:
+        Tuple of (company, position), either may be None.
+    """
+    console.print("  [dim]Extracting company/position from JD via LLM...[/dim]")
+
+    try:
+        pipeline = create_pipeline_service(
+            settings,
+            preset_name=preset,
+            provider_override=provider_override,
+            theme=theme,
+        )
+        metadata = asyncio.run(pipeline.extract_jd_metadata(jd_text))
+    except MkcvError as exc:
+        logger.warning("JD metadata extraction failed: %s", exc)
+        return None, None
+    except Exception:
+        logger.warning("JD metadata extraction failed", exc_info=True)
+        return None, None
+
+    company = metadata.company
+    position = metadata.position
+
+    if company:
+        console.print(f"  [green]\u2713[/green] Company:  {company}")
+    if position:
+        console.print(f"  [green]\u2713[/green] Position: {position}")
+
+    return company, position
+
+
 def _resolve_jd(source: str) -> tuple[str, str]:
     """Resolve the JD source to text and a display label.
 
@@ -401,10 +459,12 @@ def _resolve_jd(source: str) -> tuple[str, str]:
         console.print("  Reading JD from stdin...")
 
     try:
-        jd_text = read_jd(source)
+        jd_doc = read_jd(source)
     except MkcvError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(exc.exit_code)
+
+    jd_text = jd_doc.body
 
     if is_url:
         display = source
@@ -496,8 +556,15 @@ def _generate_workspace_mode(
 
     console.print(f"  [green]\u2713[/green] Created application: {app_dir.name}")
 
-    # Use application dir as output if not specified
-    run_dir = output_dir or app_dir
+    # Create versioned output sub-folder for resumes
+    if output_dir is not None:
+        run_dir = output_dir
+    else:
+        version_dir = workspace_service.create_output_version(app_dir, "resumes")
+        run_dir = version_dir
+        console.print(
+            f"  [green]\u2713[/green] Output version: resumes/{version_dir.name}"
+        )
 
     # Write JD to the run directory for the pipeline
     jd_path = _write_jd_file(jd_text, run_dir)
@@ -516,6 +583,7 @@ def _generate_workspace_mode(
         chain_cover_letter=chain_cover_letter,
         jd_text=jd_text,
         cl_preset=cl_preset,
+        app_dir=app_dir,
     )
 
 
@@ -593,6 +661,7 @@ def _run_pipeline(
     chain_cover_letter: bool = False,
     jd_text: str = "",
     cl_preset: str = "standard",
+    app_dir: Path | None = None,
 ) -> None:
     """Execute the AI pipeline, display results, and optionally render PDF."""
     # ---- Validate KB before running pipeline ----
@@ -634,6 +703,14 @@ def _run_pipeline(
         console.print(f"  [red]Error:[/red] {exc}")
         sys.exit(exc.exit_code)
 
+    # Write run metadata in the output directory
+    _write_run_metadata(
+        output_dir=output_dir,
+        result=result,
+        preset_name=preset_name,
+        provider_override=provider_override,
+    )
+
     # Display stage summary
     _display_pipeline_summary(result)
 
@@ -656,7 +733,54 @@ def _run_pipeline(
             output_dir=output_dir,
             provider_override=provider_override,
             cl_preset=cl_preset,
+            app_dir=app_dir,
         )
+
+
+def _write_run_metadata(
+    *,
+    output_dir: Path,
+    result: PipelineResult,
+    preset_name: str,
+    provider_override: str | None,
+) -> None:
+    """Write run-metadata.json in the output directory.
+
+    Records the preset, provider, model, score, cost, and duration
+    for traceability and later inspection.
+
+    Args:
+        output_dir: Directory where the pipeline output was written.
+        result: PipelineResult from the completed pipeline run.
+        preset_name: The preset name used for this run.
+        provider_override: Provider override if used, or None.
+    """
+    if not result.stages:
+        return
+
+    # Use the first stage's provider/model as representative
+    first_stage = result.stages[0]
+    provider = provider_override or first_stage.provider
+    model = first_stage.model
+
+    metadata = RunMetadata(
+        preset=preset_name,
+        provider=provider,
+        model=model,
+        timestamp=datetime.now(tz=UTC),
+        duration_seconds=result.total_duration_seconds,
+        review_score=result.review_score,
+        total_cost_usd=result.total_cost_usd,
+    )
+
+    mkcv_dir = output_dir / ".mkcv"
+    mkcv_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = mkcv_dir / "run_metadata.json"
+    metadata_path.write_text(
+        json.dumps(metadata.model_dump(), indent=2, default=str),
+        encoding="utf-8",
+    )
+    logger.debug("Wrote run metadata: %s", metadata_path)
 
 
 def _display_kb_validation(result: KBValidationResult) -> None:
@@ -792,6 +916,7 @@ def _chain_cover_letter(
     output_dir: Path,
     provider_override: str | None,
     cl_preset: str,
+    app_dir: Path | None = None,
 ) -> None:
     """Chain cover letter generation after a successful resume pipeline."""
     console.print()
@@ -814,6 +939,19 @@ def _chain_cover_letter(
 
     resume_text = yaml_path.read_text(encoding="utf-8")
 
+    # Create versioned cover-letter output directory if in workspace mode
+    cl_output_dir = output_dir
+    if app_dir is not None:
+        workspace_service = create_workspace_service()
+        cl_version_dir = workspace_service.create_output_version(
+            app_dir, "cover-letter"
+        )
+        cl_output_dir = cl_version_dir
+        console.print(
+            f"  [green]\u2713[/green] Output version: "
+            f"cover-letter/{cl_version_dir.name}"
+        )
+
     try:
         cl_service = create_cover_letter_service(
             settings, provider_override=provider_override
@@ -827,7 +965,7 @@ def _chain_cover_letter(
             cl_service.generate(
                 jd_text,
                 resume_text=resume_text,
-                output_dir=output_dir,
+                output_dir=cl_output_dir,
                 company=result.company,
                 role_title=result.role_title,
             )

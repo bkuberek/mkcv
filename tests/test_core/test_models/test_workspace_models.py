@@ -36,7 +36,7 @@ class TestWorkspaceConfig:
     def test_default_naming(self) -> None:
         config = WorkspaceConfig()
         assert config.naming.company_slug is True
-        assert config.naming.application_pattern == "{date}-{position}"
+        assert config.naming.application_pattern == "{company}/{position}/{date}"
 
     def test_default_theme(self) -> None:
         config = WorkspaceConfig()
@@ -164,3 +164,81 @@ class TestApplicationMetadata:
             date=date(2025, 6, 15),
         )
         assert meta.created_at is not None
+
+    # --- v2 field tests ---
+
+    def test_v2_fields_default_to_none(self) -> None:
+        meta = ApplicationMetadata(
+            company="DeepL",
+            position="Staff Engineer",
+            date=date(2025, 6, 15),
+        )
+        assert meta.preset is None
+        assert meta.compensation is None
+        assert meta.location is None
+        assert meta.workplace is None
+        assert meta.source is None
+
+    def test_v2_tags_default_to_empty_list(self) -> None:
+        meta = ApplicationMetadata(
+            company="DeepL",
+            position="Staff Engineer",
+            date=date(2025, 6, 15),
+        )
+        assert meta.tags == []
+
+    def test_v2_notes_default_to_empty_string(self) -> None:
+        meta = ApplicationMetadata(
+            company="DeepL",
+            position="Staff Engineer",
+            date=date(2025, 6, 15),
+        )
+        assert meta.notes == ""
+
+    def test_v2_all_fields_populated(self) -> None:
+        from mkcv.core.models.compensation import Compensation
+
+        meta = ApplicationMetadata(
+            company="Acme",
+            position="Engineer",
+            date=date(2026, 3, 19),
+            preset="standard",
+            compensation=Compensation(base="$150k"),
+            location="NYC",
+            workplace="hybrid",
+            source="linkedin",
+            tags=["python", "backend"],
+            notes="Great opportunity",
+        )
+        assert meta.preset == "standard"
+        assert meta.compensation is not None
+        assert meta.compensation.base == "$150k"
+        assert meta.location == "NYC"
+        assert meta.workplace == "hybrid"
+        assert meta.source == "linkedin"
+        assert meta.tags == ["python", "backend"]
+        assert meta.notes == "Great opportunity"
+
+    def test_v1_compat_missing_new_fields(self) -> None:
+        """v1 application.toml data with only old fields."""
+        data = {
+            "company": "Acme",
+            "position": "Engineer",
+            "date": date(2025, 1, 1),
+        }
+        meta = ApplicationMetadata(**data)
+        assert meta.company == "Acme"
+        assert meta.preset is None
+        assert meta.tags == []
+
+    def test_compensation_as_nested_model(self) -> None:
+        from mkcv.core.models.compensation import Compensation
+
+        meta = ApplicationMetadata(
+            company="Acme",
+            position="Engineer",
+            date=date(2026, 3, 19),
+            compensation=Compensation(base="$150k", equity="0.5%"),
+        )
+        assert meta.compensation is not None
+        assert meta.compensation.equity == "0.5%"

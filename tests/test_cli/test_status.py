@@ -246,16 +246,95 @@ class TestStatusEmptyWorkspace:
 class TestBuildApplicationTable:
     """Tests for the _build_application_table helper."""
 
-    def test_table_has_six_columns(self, workspace_dir: Path) -> None:
+    def test_table_has_eight_columns(self, workspace_dir: Path) -> None:
         app_dir = _make_application(workspace_dir, "acme", "2025-06-engineer")
         table = _build_application_table([app_dir])
-        assert len(table.columns) == 6
+        assert len(table.columns) == 8
 
     def test_table_has_correct_row_count(self, workspace_dir: Path) -> None:
         app1 = _make_application(workspace_dir, "acme", "2025-06-engineer")
         app2 = _make_application(workspace_dir, "globex", "2025-06-dev")
         table = _build_application_table([app1, app2])
         assert table.row_count == 2
+
+
+class TestDetectResumeArtifacts:
+    """Tests for _detect_resume_artifacts helper."""
+
+    def test_detects_resume_in_versioned_layout(self, workspace_dir: Path) -> None:
+        from mkcv.cli.commands.status import _detect_resume_artifacts
+
+        app_dir = _make_application(workspace_dir, "acme", "2025-06-engineer")
+        version_dir = app_dir / "resumes" / "v1"
+        version_dir.mkdir(parents=True)
+        (version_dir / "resume.yaml").write_text("cv: {}")
+        (version_dir / "resume.pdf").write_bytes(b"%PDF")
+
+        has_yaml, has_pdf = _detect_resume_artifacts(app_dir)
+        assert has_yaml is True
+        assert has_pdf is True
+
+    def test_detects_resume_in_old_layout(self, workspace_dir: Path) -> None:
+        from mkcv.cli.commands.status import _detect_resume_artifacts
+
+        app_dir = _make_application(workspace_dir, "acme", "2025-06-engineer")
+        (app_dir / "resume.yaml").write_text("cv: {}")
+        (app_dir / "resume.pdf").write_bytes(b"%PDF")
+
+        has_yaml, has_pdf = _detect_resume_artifacts(app_dir)
+        assert has_yaml is True
+        assert has_pdf is True
+
+    def test_no_artifacts_detected(self, workspace_dir: Path) -> None:
+        from mkcv.cli.commands.status import _detect_resume_artifacts
+
+        app_dir = _make_application(workspace_dir, "acme", "2025-06-engineer")
+
+        has_yaml, has_pdf = _detect_resume_artifacts(app_dir)
+        assert has_yaml is False
+        assert has_pdf is False
+
+
+class TestCountVersions:
+    """Tests for _count_versions helper."""
+
+    def test_counts_version_directories(self, workspace_dir: Path) -> None:
+        from mkcv.cli.commands.status import _count_versions
+
+        app_dir = _make_application(workspace_dir, "acme", "2025-06-engineer")
+        resumes_dir = app_dir / "resumes"
+        resumes_dir.mkdir()
+        (resumes_dir / "v1").mkdir()
+        (resumes_dir / "v2").mkdir()
+        (resumes_dir / "v3").mkdir()
+
+        assert _count_versions(resumes_dir) == 3
+
+    def test_returns_zero_for_empty_dir(self, workspace_dir: Path) -> None:
+        from mkcv.cli.commands.status import _count_versions
+
+        app_dir = _make_application(workspace_dir, "acme", "2025-06-engineer")
+        resumes_dir = app_dir / "resumes"
+        resumes_dir.mkdir()
+
+        assert _count_versions(resumes_dir) == 0
+
+    def test_returns_zero_for_nonexistent_dir(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.status import _count_versions
+
+        assert _count_versions(tmp_path / "nonexistent") == 0
+
+    def test_ignores_non_version_directories(self, workspace_dir: Path) -> None:
+        from mkcv.cli.commands.status import _count_versions
+
+        app_dir = _make_application(workspace_dir, "acme", "2025-06-engineer")
+        resumes_dir = app_dir / "resumes"
+        resumes_dir.mkdir()
+        (resumes_dir / "v1").mkdir()
+        (resumes_dir / ".mkcv").mkdir()
+        (resumes_dir / "old-stuff").mkdir()
+
+        assert _count_versions(resumes_dir) == 1
 
 
 class TestReadApplicationMetadata:
