@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
 from mkcv.adapters.filesystem.prompt_loader import FileSystemPromptLoader
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
+from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.models.stage_config import StageConfig
@@ -109,16 +110,21 @@ def _resolve_stage_configs(
 def _create_llm_adapter(
     provider: str,
     config: Configuration,
+    *,
+    with_retry: bool = True,
 ) -> LLMPort:
     """Create an LLM adapter for a specific provider.
 
     Args:
         provider: Provider name ("anthropic", "openai", "stub").
         config: Application configuration.
+        with_retry: Wrap with exponential backoff retry (default True).
 
     Returns:
         An object implementing LLMPort.
     """
+    adapter: LLMPort
+
     if provider == "stub":
         from mkcv.adapters.llm.stub import StubLLMAdapter
 
@@ -138,17 +144,23 @@ def _create_llm_adapter(
     if provider == "anthropic":
         from mkcv.adapters.llm.anthropic import AnthropicAdapter
 
-        return AnthropicAdapter(api_key=api_key)
+        adapter = AnthropicAdapter(api_key=api_key)
 
-    if provider == "openai":
+    elif provider == "openai":
         from mkcv.adapters.llm.openai import OpenAIAdapter
 
-        return OpenAIAdapter(api_key=api_key)
+        adapter = OpenAIAdapter(api_key=api_key)
 
-    raise AuthenticationError(
-        f"Unknown LLM provider: '{provider}'",
-        provider=provider,
-    )
+    else:
+        raise AuthenticationError(
+            f"Unknown LLM provider: '{provider}'",
+            provider=provider,
+        )
+
+    if with_retry:
+        adapter = RetryingLLMAdapter(adapter)
+
+    return adapter
 
 
 def _create_providers(
