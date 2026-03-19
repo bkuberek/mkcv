@@ -6,13 +6,15 @@ Context variables:
 
 Output: Valid YAML matching RenderCV schema.
 #}
-You are an expert at structuring resume data into RenderCV YAML format.
+You are an expert at structuring resume data into the RenderCV YAML format.
+Your job is to take pre-tailored content and personal information and produce
+a valid, well-structured YAML document that RenderCV can render to PDF.
 
-## Tailored Content
+## Tailored Content (pre-written — use as-is)
 
 {{ tailored_content | tojson(indent=2) }}
 
-## Knowledge Base (for personal information)
+## Knowledge Base (extract personal info from here)
 
 {{ kb_text }}
 
@@ -20,18 +22,26 @@ You are an expert at structuring resume data into RenderCV YAML format.
 
 Convert the tailored content into a valid RenderCV YAML document.
 
-Extract personal information (name, email, phone, location, website, social networks) from the knowledge base. If specific personal info is not found, use reasonable placeholder text like "Your Name" or "your@email.com".
+### Step 1: Extract Personal Information from the Knowledge Base
 
-The output must follow this exact RenderCV schema structure:
+Look for: full name, email, phone number, location (city/country), personal
+website URL, LinkedIn username, GitHub username, and any other social profiles.
+
+If a field is NOT found in the KB, omit it entirely — do NOT use placeholder
+text like "Your Name" or "your@email.com".
+
+### Step 2: Build the YAML
+
+The output must follow this exact structure:
 
 ```yaml
 cv:
   name: "Full Name"
   location: "City, Country"
   email: "email@example.com"
-  phone: "+1-234-567-8900"
-  website: "https://example.com"  # optional
-  social_networks:  # optional
+  phone: "+1-234-567-8900"       # omit if not in KB
+  website: "https://example.com"  # omit if not in KB
+  social_networks:                # omit section if none found
     - network: LinkedIn
       username: johndoe
     - network: GitHub
@@ -41,24 +51,63 @@ cv:
     experience:
       - company: "Company Name"
         position: "Job Title"
-        location: "City, Country"  # optional
+        location: "City, Country"  # omit if null in tailored content
         start_date: "2020-01"
-        end_date: "present"
+        end_date: "present"        # or "YYYY-MM" format
         highlights:
-          - "Bullet point 1"
-          - "Bullet point 2"
+          - "First bullet (strongest/most relevant)"
+          - "Second bullet"
     skills:
       - label: "Category Name"
         details: "Skill 1, Skill 2, Skill 3"
+    # Include these sections ONLY if data exists in the KB:
+    education:
+      - institution: "University Name"
+        area: "Field of Study"
+        degree: "BS/MS/PhD"
+        start_date: "2012-09"
+        end_date: "2016-06"
+        highlights:              # omit if no notable items
+          - "Relevant coursework or achievement"
+    publications:
+      - title: "Publication Title"
+        authors:
+          - "Author Name"
+        url: "https://..."
+        date: "2023-01"
+    certifications:
+      - name: "Certification Name"
+        date: "2023-01"
 design:
   theme: sb2nov
 ```
 
-Key rules:
-- Use the `rewritten` text from tailored bullets (not the originals).
-- The `summary` field is the mission statement text.
-- Each skill group becomes a single entry with `label` and `details` (comma-separated skills).
-- Experience entries use `highlights` for bullet points.
-- Include only the YAML content. No markdown fences, no commentary.
+### Key Rules
 
-Respond with valid YAML only. No other text.
+1. **Use rewritten bullets** — take the `rewritten` text from tailored_content
+   roles, NOT the originals. These are already optimized.
+
+2. **summary** = the mission statement `text` from tailored_content.
+
+3. **Skills** — each SkillGroup becomes one entry with `label` and `details`
+   (skills joined with ", "). Preserve the order from tailored_content.
+
+4. **Experience ordering** — maintain the order from tailored_content (already
+   sorted by relevance). Use `start_date` and `end_date` exactly as provided.
+
+5. **Education** — include only if found in the KB. Extract institution, degree,
+   field, and dates. Omit if not mentioned.
+
+6. **Publications / Certifications** — include only if found in the KB.
+
+7. **Earlier experience** — if `earlier_experience` is not null, you may add a
+   brief "Other Experience" or similar section, or incorporate it as a final
+   experience entry with a single highlight.
+
+8. **Languages** — if `languages` is not null, add a languages section.
+
+9. **Dates** — always use "YYYY-MM" format. Use "present" for current roles.
+
+10. **No markdown fences** — output raw YAML only. No ```yaml wrapper.
+
+Respond with valid YAML only. No commentary, no code fences.

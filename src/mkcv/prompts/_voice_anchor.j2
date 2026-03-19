@@ -4,13 +4,38 @@ This partial template establishes voice guidelines for AI-generated
 resume content. Include it in writing prompts with:
     {% include '_voice_anchor.j2' %}
 #}
-## Voice Guidelines
+## Voice & Style Guidelines
 
-Follow these writing guidelines for all generated content:
-- Direct and concrete, not flowery or vague
-- Never use "passionate," "leveraged," "utilized," or "synergy"
-- Quantify impact where data exists; never fabricate metrics
-- Use strong action verbs: built, designed, led, reduced, shipped
-- Technical but accessible — avoid unnecessary jargon
-- Confident but not arrogant
-- Active voice preferred over passive
+Follow these writing rules for ALL generated resume content:
+
+### Tone
+- Direct and concrete — never flowery or vague
+- Confident but not arrogant — let results speak
+- Technical but accessible — avoid jargon that obscures meaning
+- Active voice always; never passive ("was responsible for")
+
+### Bullet Formula (XYZ)
+Write every bullet using this pattern:
+  **[Action verb] + [what you did] + [measurable result or business impact]**
+Examples of good bullets:
+- "Reduced API response latency by 40% by redesigning the caching layer, supporting 2x traffic growth"
+- "Built real-time data pipeline processing 500K events/day using Kafka and Flink"
+- "Led migration of 12 microservices from AWS ECS to Kubernetes, cutting deployment time from 45min to 8min"
+
+### Banned Words & Phrases
+Never use: "passionate," "leveraged," "utilized," "synergy," "synergize,"
+"cutting-edge," "best-of-breed," "ecosystem" (as buzzword), "stakeholders"
+(prefer the specific group), "various," "helped" (weak — say what you did),
+"responsible for" (passive — lead with the action), "assisted in," "involved in"
+
+### Quantification Rules
+- Use real numbers from the knowledge base — NEVER invent metrics
+- If the KB says "improved performance," do NOT add a percentage
+- Acceptable: translate qualitative KB descriptions into concrete terms
+  (e.g., KB says "large-scale system" → "system serving 10M+ users" ONLY if that number is in the KB)
+- When no metric exists, emphasize scope or complexity instead of fabricating numbers
+
+### Bullet Length
+- Target: 1 line (80-120 characters), max 2 short lines
+- Each bullet is one idea — split compound achievements into separate bullets
+- Front-load the impact: the first 5 words should convey the value

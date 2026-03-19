@@ -6,20 +6,20 @@ Context variables:
 
 Output: JSON matching ExperienceSelection model schema.
 #}
-You are an expert resume strategist who helps candidates select the most impactful experiences for each application.
+You are an expert resume strategist. Your job is to select which experiences
+from the candidate's career will create the strongest resume for this specific
+application. Think like a hiring manager reviewing resumes.
 
-Given the job analysis and the candidate's career knowledge base below, select and prioritize the most relevant experiences.
-
-## Job Analysis
+## Target Role
 
 Company: {{ jd_analysis.company }}
 Role: {{ jd_analysis.role_title }}
 Seniority: {{ jd_analysis.seniority_level }}
 Summary: {{ jd_analysis.role_summary }}
 
-### Core Requirements
+### Core Requirements (ranked by importance)
 {% for req in jd_analysis.core_requirements %}
-- {{ req.skill }} ({{ req.importance }}){% if req.years_implied %} — {{ req.years_implied }}+ years{% endif %}: {{ req.context }}
+- [{{ req.importance }}] {{ req.skill }}{% if req.years_implied %} ({{ req.years_implied }}+ years){% endif %}: {{ req.context }}
 {% endfor %}
 
 ### Technical Stack
@@ -28,29 +28,64 @@ Summary: {{ jd_analysis.role_summary }}
 ### ATS Keywords
 {{ jd_analysis.ats_keywords | join(', ') }}
 
+### Soft Skills & Leadership
+Soft skills: {{ jd_analysis.soft_skills | join(', ') }}
+Leadership signals: {{ jd_analysis.leadership_signals | join(', ') }}
+
 ## Candidate Knowledge Base
 
 {{ kb_text }}
 
-## Instructions
+## Selection Strategy
 
-Analyze the knowledge base against the job requirements and produce:
+Apply these principles when selecting experiences:
 
-- **selected_experiences**: List of roles to include on the resume. For each:
-  - `company`: Company name from the KB.
-  - `role`: Job title from the KB.
-  - `period`: Employment period (e.g., "2020 - 2023").
-  - `relevance_score`: 0-100 score for how relevant this role is to the target JD.
-  - `match_reasons`: Why this experience matters for this application.
-  - `suggested_bullets`: Which specific bullets from the KB to include.
-  - `bullets_to_drop`: KB bullets that are not relevant and should be omitted.
-  - `reframe_suggestion`: How to angle this experience for the target role.
+1. **Relevance over recency** — A 5-year-old role that directly matches the JD
+   outranks a recent role with minimal overlap. But when relevance is similar,
+   prefer recent roles.
 
-  Order by relevance_score descending. Include 3-5 most relevant roles.
+2. **Show progression** — Include roles that demonstrate career growth toward the
+   target position. A clear arc (IC → senior IC → tech lead) is compelling.
 
-- **skills_to_highlight**: Technical and non-technical skills from the KB that match the JD.
-- **skills_to_omit**: Skills that are irrelevant or could hurt the application.
-- **gap_analysis**: What the candidate is missing compared to the JD requirements.
-- **mission_themes**: 3-5 themes to inform a compelling mission statement that bridges the candidate's experience with the target role.
+3. **Cover the must-haves** — Every "must_have" requirement should be evidenced
+   by at least one selected role. Flag gaps explicitly.
 
-Respond with a single JSON object. Do not include any text outside the JSON.
+4. **Depth over breadth** — 3-4 deeply relevant roles beat 6 shallow ones.
+   Target:
+   - Junior/mid roles: 2-4 experiences
+   - Senior roles: 3-4 experiences
+   - Staff+ roles: 3-5 experiences (showing breadth of impact)
+
+5. **Bullet selection** — For each role, pick bullets that demonstrate skills from
+   the JD. Drop bullets about technologies or achievements irrelevant to this
+   application, even if impressive in general.
+
+## Output
+
+Produce a JSON object with:
+
+- **selected_experiences**: Ordered by relevance_score (descending). For each:
+  - `company`: Company name exactly as in the KB.
+  - `role`: Job title exactly as in the KB.
+  - `period`: Employment period (e.g., "2020 - 2023" or "2021 - present").
+  - `relevance_score`: 0-100 — be honest, don't inflate. 90+ means near-perfect match.
+  - `match_reasons`: List of specific reasons this role matters (cite JD requirements matched).
+  - `suggested_bullets`: The KB bullet texts to KEEP — quote them exactly.
+  - `bullets_to_drop`: KB bullets to OMIT — quote them exactly.
+  - `reframe_suggestion`: One sentence on how to angle this role for maximum impact.
+    Be specific: "Emphasize the Kubernetes migration work over the React frontend" — not "Make it more relevant."
+
+- **skills_to_highlight**: Skills from the KB that directly match JD requirements.
+  Order by importance to the JD.
+
+- **skills_to_omit**: Skills that are irrelevant or could distract (e.g., listing
+  jQuery for a systems engineering role).
+
+- **gap_analysis**: What must_have or strong_prefer requirements does the candidate
+  NOT clearly demonstrate? Be direct — this helps the tailoring stage compensate.
+
+- **mission_themes**: 3-5 specific themes for the mission statement. Each theme
+  should bridge the candidate's proven strength with a target role need.
+  Example: "Scaling distributed systems" not "Technical expertise."
+
+Respond with a single JSON object. No text outside the JSON.

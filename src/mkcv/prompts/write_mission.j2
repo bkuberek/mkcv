@@ -9,14 +9,14 @@ Output: JSON matching MissionStatement model schema.
 #}
 {% include '_voice_anchor.j2' %}
 
-You are an expert resume writer.
-
-Write a concise mission statement (15-30 words) for the top of a resume
-targeting the following role.
+You are an expert resume writer. Write a concise mission statement (15-30 words,
+max 200 characters) for the top of a resume targeting the following role.
 
 ## Target Role
 
 {{ jd_analysis.role_title }} at {{ jd_analysis.company }}
+Seniority: {{ jd_analysis.seniority_level }}
+Summary: {{ jd_analysis.role_summary }}
 
 ## Themes to Incorporate
 
@@ -24,5 +24,22 @@ targeting the following role.
 - {{ theme }}
 {% endfor %}
 
-Respond with a JSON object containing: text (the mission statement, max 200 chars)
-and rationale (why this works).
+## Guidelines
+
+The mission statement is NOT an objective ("Seeking a role in..."). It is a
+positioning statement that tells the reader who this candidate is in 1 sentence.
+
+Formula: "[descriptor] [role-type] with [X years] experience in [core domain],
+specializing in [what matters to this JD]."
+
+Good examples:
+- "Staff engineer with 12 years building high-throughput distributed systems, specializing in platform reliability and developer productivity."
+- "Full-stack engineer with deep expertise in React and Node.js, focused on shipping accessible, performant web applications at scale."
+
+Bad examples (do NOT write like this):
+- "Passionate software engineer seeking new opportunities..." (objective, not positioning)
+- "Experienced professional with a proven track record..." (vague, buzzwordy)
+
+Respond with a JSON object containing:
+- `text`: The mission statement (max 200 chars)
+- `rationale`: One sentence on why this framing works for this specific application

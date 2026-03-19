@@ -5,10 +5,11 @@ Context variables:
 
 Output: JSON matching JDAnalysis model schema.
 #}
-You are an expert job description analyst specializing in tech industry roles.
+You are an expert job description analyst with deep knowledge of tech industry
+hiring patterns, ATS systems, and how recruiters write job postings.
 
 Analyze the following job description and extract structured information.
-Be thorough — identify both explicit and implied requirements.
+Be thorough — identify both explicit requirements AND those implied by context.
 
 ## Job Description
 
@@ -16,25 +17,53 @@ Be thorough — identify both explicit and implied requirements.
 
 ## Instructions
 
-Extract the following fields:
+Extract each field as described below. Think carefully about each one.
 
+### Basic Information
 - **company**: The hiring company name.
-- **role_title**: The exact job title as written.
-- **seniority_level**: One of "junior", "mid", "senior", "staff", "principal", "director", "vp".
-- **team_or_org**: The team or organization within the company, if mentioned. Null if not stated.
-- **location**: Work location or "Remote" if applicable. Null if not stated.
+- **role_title**: The exact job title as written in the posting.
+- **team_or_org**: The team, division, or org mentioned. Null if not stated.
+- **location**: Work location, "Remote," or "Hybrid — [city]." Null if not stated.
 - **compensation**: Salary range or compensation details if mentioned. Null if not stated.
-- **core_requirements**: A list of requirements, each with:
-  - `skill`: The specific skill or qualification.
-  - `importance`: One of "must_have", "strong_prefer", "nice_to_have".
-  - `years_implied`: Number of years of experience implied (null if not stated).
-  - `context`: How this skill is used in the role.
-- **technical_stack**: List of specific technologies, languages, frameworks, and tools mentioned.
-- **soft_skills**: List of non-technical skills (communication, leadership, etc.).
-- **leadership_signals**: List of indicators that the role involves leadership or mentoring.
-- **culture_keywords**: Phrases that reveal company culture or values.
-- **ats_keywords**: Exact phrases likely used as ATS keyword filters. Include both the full phrase and common abbreviations (e.g., "CI/CD", "continuous integration").
-- **hidden_requirements**: Requirements implied but not explicitly stated (e.g., a "senior" title implies mentoring ability).
-- **role_summary**: A 2-3 sentence synthesis of what the company actually needs from this hire.
 
-Respond with a single JSON object. Do not include any text outside the JSON.
+### Seniority Level
+- **seniority_level**: One of "junior", "mid", "senior", "staff", "principal", "director", "vp".
+  Do NOT rely on the title alone. Infer from:
+  - Years of experience requested (3-5 → mid/senior, 7+ → senior/staff, 10+ → staff/principal)
+  - Scope of responsibility (individual contributor vs. org-wide impact)
+  - Whether the role involves mentoring, architectural decisions, or cross-team leadership
+  - Phrases like "own," "drive," "define strategy" signal staff+
+
+### Core Requirements
+- **core_requirements**: Each requirement must include:
+  - `skill`: The specific skill, technology, or qualification.
+  - `importance`: Classify carefully:
+    - "must_have" — explicitly required, or clearly essential from context (e.g., "5+ years of Python" = must_have)
+    - "strong_prefer" — strongly desired but not a hard gate (e.g., "experience with Kubernetes is a plus")
+    - "nice_to_have" — bonus qualifications, "bonus points," "familiarity with"
+  - `years_implied`: Years of experience implied (null if no indication).
+  - `context`: ONE sentence on how this skill is used in the role.
+
+### Lists
+- **technical_stack**: Every specific technology, language, framework, tool, and platform named. Include version numbers if mentioned. Include infrastructure (AWS, GCP), databases, CI/CD tools, monitoring, etc.
+- **soft_skills**: Non-technical skills and competencies (communication, collaboration, mentoring, etc.).
+- **leadership_signals**: Specific phrases indicating leadership scope — mentoring, team lead, architecture ownership, cross-team coordination, hiring involvement.
+- **culture_keywords**: Phrases revealing company values, work style, or culture (e.g., "move fast," "customer-obsessed," "work-life balance").
+
+### ATS Keywords
+- **ats_keywords**: Extract exact phrases a recruiter would search for. Include:
+  - Technical terms as written AND common variations ("CI/CD" + "continuous integration/continuous deployment")
+  - Both acronyms and spelled-out forms ("ML" + "machine learning")
+  - Role-specific terminology ("distributed systems," "system design")
+  - Certifications if mentioned ("AWS Solutions Architect")
+  Aim for 15-30 keywords. These directly affect ATS pass rates.
+
+### Analysis
+- **hidden_requirements**: Requirements NOT explicitly stated but clearly implied:
+  - A "senior" title implies mentoring and code review ability
+  - "Fast-paced environment" implies comfort with ambiguity
+  - "Cross-functional" implies stakeholder communication skills
+  - B2B SaaS companies implicitly need understanding of enterprise customers
+- **role_summary**: A 2-3 sentence synthesis of what this company actually needs from this hire. Focus on the core problem they're solving and the type of person who would thrive. Do not just restate the requirements — interpret them.
+
+Respond with a single JSON object matching the schema exactly. No text outside the JSON.

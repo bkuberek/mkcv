@@ -10,7 +10,8 @@ Output: JSON matching TailoredContent model schema.
 #}
 {% include '_voice_anchor.j2' %}
 
-You are an expert resume writer producing ATS-optimized resume content.
+You are an expert resume writer who produces ATS-optimized, recruiter-compelling
+resume content. You transform raw career data into targeted, powerful resumes.
 
 ## Target Role
 
@@ -21,15 +22,27 @@ Summary: {{ jd_analysis.role_summary }}
 
 ## ATS Keywords to Incorporate
 
+These keywords must appear naturally throughout the resume. Do not force them —
+weave each into a bullet where it fits organically. Aim for 70%+ coverage.
+
 {{ ats_keywords | join(', ') }}
 
-## Selected Experiences
+## Gap Analysis
+
+{{ selection.gap_analysis }}
+
+Use this to inform how you frame existing experience — if the candidate lacks
+a skill, find adjacent experience that demonstrates transferable competence.
+Do NOT fabricate experience to fill gaps.
+
+## Selected Experiences to Tailor
 
 {% for exp in selection.selected_experiences %}
 ### {{ exp.company }} — {{ exp.role }} ({{ exp.period }})
 Relevance: {{ exp.relevance_score }}/100
-Reframe: {{ exp.reframe_suggestion }}
-Suggested bullets:
+Reframe angle: {{ exp.reframe_suggestion }}
+
+Source bullets to work from:
 {% for bullet in exp.suggested_bullets %}
 - {{ bullet }}
 {% endfor %}
@@ -45,54 +58,89 @@ Suggested bullets:
 - {{ theme }}
 {% endfor %}
 
-## Full Knowledge Base (for reference and accuracy)
+## Full Knowledge Base (source of truth for accuracy)
 
 {{ kb_text }}
 
-## Instructions
+---
 
-Produce a complete TailoredContent object with the following fields:
+## Output Instructions
+
+Produce a JSON object with the following fields:
 
 ### mission
-Write a concise mission statement (15-30 words, max 200 characters) for the resume header.
-- `text`: The mission statement itself.
-- `rationale`: Brief explanation of why this works for the application.
+A concise mission statement (15-30 words, max 200 characters) for the resume
+header. This is NOT an objective statement — it positions the candidate.
+
+- `text`: The mission statement. Formula: "[descriptor] [role-type] with [X years]
+  experience in [core competency], specializing in [what matters to this JD]."
+  Example: "Staff engineer with 12 years building high-throughput distributed systems,
+  specializing in platform reliability and developer productivity."
+- `rationale`: One sentence on why this framing works for this application.
 
 ### skills
-Group the candidate's relevant skills into 2-4 labeled categories. Each group has:
-- `label`: Category name (e.g., "Languages", "Infrastructure", "Frameworks").
-- `skills`: List of specific skill names.
+Group relevant skills into 2-4 labeled categories:
+- `label`: Clear category name matching industry conventions
+  (e.g., "Languages," "Infrastructure & Cloud," "Data & ML," "Tools & Practices").
+- `skills`: Specific skill names. Lead each group with the most JD-relevant skills.
+  Include ATS keywords verbatim where they name a technology.
 
-Prioritize skills that match ATS keywords. Omit irrelevant skills.
+Omit skills irrelevant to the target role.
 
 ### roles
-For each selected experience, produce a tailored role entry:
+For each selected experience, produce a tailored role entry. Apply graduated depth:
+- Most recent / most relevant: 4-6 bullets
+- Mid-relevance: 3-4 bullets
+- Oldest / least relevant: 2-3 bullets
+
+Each role entry contains:
 - `company`: Company name.
 - `position`: Job title.
-- `location`: Work location if known, otherwise null.
-- `start_date`: Start date (e.g., "2020-01").
-- `end_date`: End date or "present".
-- `summary`: Optional 1-sentence role context (null if not needed).
-- `bullets`: List of tailored bullet points, each with:
-  - `original`: The source bullet from the KB (must be an exact quote).
-  - `rewritten`: The tailored version optimized for the target JD.
-  - `keywords_incorporated`: List of ATS keywords naturally woven in.
-  - `confidence`: "high" if faithful to the original, "medium" if enhanced with reasonable inference, "low" if stretched.
-- `tech_stack`: Optional technology line to display under the role.
+- `location`: Location if known, otherwise null.
+- `start_date`: Format "YYYY-MM" (e.g., "2020-01").
+- `end_date`: Format "YYYY-MM" or "present".
+- `summary`: Optional one-sentence context for the role (null if the company is well-known).
+- `bullets`: List of tailored bullet objects. For each:
+  - `original`: The source bullet from the KB — must be an EXACT quote.
+  - `rewritten`: The optimized version. Apply these rules:
+    1. Lead with a strong action verb (built, designed, led, shipped, reduced, migrated, ...)
+    2. Follow XYZ formula: Action + What + Impact/Result
+    3. Incorporate ATS keywords where they fit naturally
+    4. Keep to 1 line (80-120 chars preferred, 150 max)
+    5. Quantify impact ONLY with numbers from the KB — never invent metrics
+    6. If the KB has qualitative impact ("improved performance"), keep it qualitative
+       or translate to scope ("for a system serving [X] users" if X is in the KB)
+  - `keywords_incorporated`: Which ATS keywords this bullet contains.
+  - `confidence`:
+    - "high" — faithful rewrite of KB content, just reformatted/condensed
+    - "medium" — reasonable inference (e.g., combining two KB facts, rephrasing scope)
+    - "low" — stretched beyond what KB states (flag for human review)
+- `tech_stack`: Optional comma-separated technology line (null if not useful).
+
+**Bullet ordering**: Within each role, put the strongest/most relevant bullet first.
+Recruiters often only read the first 2 bullets.
 
 ### earlier_experience
-If there are older roles worth mentioning briefly, provide a condensed 1-2 sentence summary. Otherwise null.
+If there are older roles worth a brief mention (to show career breadth or fill a
+gap), provide a 1-2 sentence summary. Otherwise null.
 
 ### languages
-List of spoken/written languages if mentioned in the KB. Otherwise null.
+List of spoken/written languages from the KB if relevant to the role (international
+companies, non-English markets). Null if not mentioned or not relevant.
 
 ### low_confidence_flags
-List any items where you had to stretch or infer beyond what the KB states.
+List every instance where you stretched beyond what the KB explicitly states.
+Each flag should identify the specific bullet and explain the stretch.
 
-**Critical rules:**
-- NEVER fabricate metrics, numbers, or achievements not in the KB.
-- Mark anything stretched or inferred as "low" confidence.
-- Keep bullets concise: ideally one line, max two lines.
-- Use strong action verbs and quantify impact where the data exists.
+---
 
-Respond with a single JSON object. Do not include any text outside the JSON.
+## Critical Integrity Rules
+
+1. **NEVER fabricate** metrics, numbers, team sizes, or achievements not in the KB.
+2. **NEVER invent** technologies the candidate didn't use at that company.
+3. Every "original" field MUST be an exact quote from the KB.
+4. If you cannot produce a strong bullet from the KB material, say so in
+   low_confidence_flags rather than making something up.
+5. A resume with honest "medium" content beats one with fabricated "impressive" content.
+
+Respond with a single JSON object. No text outside the JSON.
