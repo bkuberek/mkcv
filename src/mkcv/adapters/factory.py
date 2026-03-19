@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
 from mkcv.adapters.filesystem.prompt_loader import FileSystemPromptLoader
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
-from mkcv.adapters.renderers.stub import StubRenderer
+from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
@@ -159,7 +159,7 @@ def create_render_service(config: Configuration) -> RenderService:
     Returns:
         RenderService with renderer adapter connected.
     """
-    renderer = StubRenderer()  # TODO: select based on config
+    renderer = RenderCVAdapter()
     return RenderService(renderer=renderer)
 
 

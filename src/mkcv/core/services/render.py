@@ -28,4 +28,4 @@ class RenderService:
         Returns:
             RenderedOutput with paths to generated files.
         """
-        raise NotImplementedError("Resume rendering not yet implemented")
+        return self._renderer.render(yaml_path, output_dir, theme=theme)
