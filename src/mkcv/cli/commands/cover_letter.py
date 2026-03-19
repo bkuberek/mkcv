@@ -2,10 +2,9 @@
 
 import asyncio
 import logging
-import re
+import shutil
 import sys
 import tempfile
-from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -47,12 +46,6 @@ def cover_letter_command(
         str | None,
         cyclopts.Parameter(
             help=("Company name — auto-resolves to latest application."),
-        ),
-    ] = None,
-    position: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            help="Position title (used with --company for output naming).",
         ),
     ] = None,
     resume: Annotated[
@@ -106,11 +99,11 @@ def cover_letter_command(
 
     The --jd option accepts a file path, URL, or "-" for stdin.
 
-    Output location is determined automatically:
-      - JD from an application dir → output alongside resume
-      - --company → output in that company's latest application
-      - In workspace → creates/reuses application dir from JD context
-      - Standalone → output in current directory or --output-dir
+    Output is always placed alongside the JD in an application directory:
+      - JD already in applications/ → output there
+      - --app-dir / --company → output in that application dir
+      - External JD → company/position inferred from LLM, app dir created
+      - --output-dir overrides all automatic resolution
     """
     # Validate mutual exclusivity
     explicit_count = sum(1 for x in [app_dir, company, resume] if x is not None)
@@ -124,7 +117,6 @@ def cover_letter_command(
     # Determine JD source type and read content
     jd_is_url = jd.startswith("http://") or jd.startswith("https://")
     jd_is_stdin = jd in ("-", "")
-    jd_is_file = not jd_is_url and not jd_is_stdin
 
     try:
         jd_text = read_jd(jd)
@@ -138,6 +130,7 @@ def cover_letter_command(
     resolved_company: str | None = None
     resolved_role: str | None = None
     resolved_output = output_dir
+    needs_deferred_placement = False
 
     if app_dir is not None:
         resume_text, resolved_output, resolved_company, resolved_role = (
@@ -145,28 +138,22 @@ def cover_letter_command(
         )
     elif company is not None:
         resume_text, resolved_output, resolved_company, resolved_role = (
-            _resolve_from_company(company, position, resolved_output)
+            _resolve_from_company(company, resolved_output)
         )
     elif resume is not None:
         resume_text = _read_resume_file(resume)
     elif settings.in_workspace and settings.workspace_root:
-        # Smart resolution: check if JD file is inside applications/
-        if jd_is_file and output_dir is None:
-            jd_app_dir = _detect_jd_app_dir(jd)
-            if jd_app_dir is not None:
-                resume_text, resolved_output, resolved_company, resolved_role = (
-                    _resolve_from_app_dir(jd_app_dir, None)
-                )
-                console.print(f"  [dim]JD is in app dir:[/dim] {jd_app_dir.name}")
-
-        # If still no output, try auto-resolve
-        if resolved_output is None and output_dir is None:
-            resume_text_auto, auto_output, auto_company, auto_role = _resolve_auto(None)
-            if resume_text is None:
-                resume_text = resume_text_auto
-            resolved_company = resolved_company or auto_company
-            resolved_role = resolved_role or auto_role
-            resolved_output = auto_output
+        # Check if JD file is already inside an application dir
+        jd_app_dir = _detect_jd_app_dir(jd) if not jd_is_url else None
+        if jd_app_dir is not None:
+            resume_text, resolved_output, resolved_company, resolved_role = (
+                _resolve_from_app_dir(jd_app_dir, output_dir)
+            )
+            console.print(f"  [dim]JD is in app dir:[/dim] {jd_app_dir.name}")
+        elif output_dir is None:
+            # JD is external — we'll generate to a temp dir, then
+            # use the LLM result to create the proper app dir.
+            needs_deferred_placement = True
 
     # Resolve KB text
     if kb is not None:
@@ -187,42 +174,24 @@ def cover_letter_command(
         )
         sys.exit(2)
 
-    # Smart output dir: in workspace, create application dir if needed
-    if resolved_output is None and output_dir is None:
-        if settings.in_workspace and settings.workspace_root:
-            resolved_output = _ensure_workspace_output(
-                jd_text=jd_text,
-                jd_source=jd,
-                jd_is_url=jd_is_url,
-                jd_is_file=jd_is_file,
-                company_hint=resolved_company,
-                position_hint=resolved_role,
-                preset=preset or "standard",
-            )
-        else:
-            resolved_output = Path.cwd()
+    # Determine generation directory — may be temp if deferred
+    if needs_deferred_placement:
+        gen_dir = Path(tempfile.mkdtemp(prefix="mkcv-cl-"))
+    elif resolved_output is not None:
+        gen_dir = resolved_output
+    else:
+        gen_dir = Path.cwd()
 
-    if resolved_output is None:
-        resolved_output = Path.cwd()
+    gen_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_output.mkdir(parents=True, exist_ok=True)
-
-    # Save JD in the output dir if it came from URL or stdin
-    if jd_is_url or jd_is_stdin:
-        _save_jd_copy(jd_text, resolved_output, as_markdown=True)
-    elif jd_is_file:
-        # Copy JD file if output dir is different from JD's parent
-        jd_path = Path(jd).resolve()
-        if jd_path.parent != resolved_output.resolve():
-            _save_jd_copy(jd_text, resolved_output, as_markdown=False)
-
-    # Display mode info
+    # Display header (output dir may change if deferred)
     _display_header(
         jd_source=jd,
         resume_text=resume_text,
         kb_text=kb_text,
-        output_dir=resolved_output,
+        output_dir=gen_dir,
         company=resolved_company,
+        deferred=needs_deferred_placement,
     )
 
     # Create and run the service
@@ -238,7 +207,7 @@ def cover_letter_command(
                 jd_text,
                 resume_text=resume_text,
                 kb_text=kb_text,
-                output_dir=resolved_output,
+                output_dir=gen_dir,
                 company=resolved_company,
                 role_title=resolved_role,
                 render=render,
@@ -248,7 +217,23 @@ def cover_letter_command(
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(exc.exit_code)
 
-    _display_result(result, resolved_output)
+    # Deferred placement: now we know company/role from the LLM result
+    final_output = gen_dir
+    if needs_deferred_placement:
+        final_output = _place_in_application_dir(
+            result=result,
+            temp_dir=gen_dir,
+            jd_text=jd_text,
+            jd_source=jd,
+            jd_is_url=jd_is_url,
+            preset=preset or "standard",
+        )
+
+    # Save JD in the output dir if from URL/stdin (and not already there)
+    if jd_is_url or jd_is_stdin:
+        _save_jd_copy(jd_text, final_output, as_markdown=True)
+
+    _display_result(result, final_output)
 
 
 # ------------------------------------------------------------------
@@ -257,7 +242,7 @@ def cover_letter_command(
 
 
 def _detect_jd_app_dir(jd_source: str) -> Path | None:
-    """Check if a JD file path is inside an applications/ directory.
+    """Check if a JD file path is inside an application directory.
 
     Returns the application directory if the JD lives inside one
     (identified by ``application.toml``), or None.
@@ -266,11 +251,9 @@ def _detect_jd_app_dir(jd_source: str) -> Path | None:
     if not jd_path.is_file():
         return None
 
-    # Walk up from JD's parent looking for application.toml
     for parent in [jd_path.parent, *jd_path.parent.parents]:
         if (parent / "application.toml").is_file():
             return parent
-        # Stop if we hit the workspace root or top of applications/
         if (parent / "mkcv.toml").is_file():
             break
 
@@ -280,7 +263,7 @@ def _detect_jd_app_dir(jd_source: str) -> Path | None:
 def _resolve_from_app_dir(
     app_dir: Path,
     output_dir: Path | None,
-) -> tuple[str | None, Path | None, str | None, str | None]:
+) -> tuple[str | None, Path, str | None, str | None]:
     """Resolve resume from an explicit application directory."""
     if not app_dir.is_dir():
         console.print(f"[red]Error:[/red] Application directory not found: {app_dir}")
@@ -297,9 +280,8 @@ def _resolve_from_app_dir(
 
 def _resolve_from_company(
     company: str,
-    position: str | None,
     output_dir: Path | None,
-) -> tuple[str | None, Path | None, str | None, str | None]:
+) -> tuple[str | None, Path, str | None, str | None]:
     """Resolve resume from the latest application for a company."""
     if not settings.in_workspace or not settings.workspace_root:
         console.print(
@@ -325,7 +307,6 @@ def _resolve_from_company(
         resume_text = resume_path.read_text(encoding="utf-8")
 
     resolved_company, role = _read_app_metadata(app_dir)
-    resolved_role = position or role
 
     console.print(f"  [dim]Auto-resolved:[/dim] {app_dir.name}")
 
@@ -333,138 +314,119 @@ def _resolve_from_company(
         resume_text,
         output_dir or app_dir,
         resolved_company or company,
-        resolved_role,
+        role,
     )
 
 
-def _resolve_auto(
-    output_dir: Path | None,
-) -> tuple[str | None, Path | None, str | None, str | None]:
-    """Auto-resolve the latest resume from the workspace."""
-    assert settings.workspace_root is not None
-
-    workspace_service = create_workspace_service()
-
-    app_dir = workspace_service.find_latest_application(settings.workspace_root)
-    if app_dir is not None:
-        resume_path = app_dir / "resume.yaml"
-        if resume_path.is_file():
-            resume_text = resume_path.read_text(encoding="utf-8")
-            company, role = _read_app_metadata(app_dir)
-            console.print(f"  [dim]Auto-resolved:[/dim] {app_dir.name}")
-            return (
-                resume_text,
-                output_dir or app_dir,
-                company,
-                role,
-            )
-
-    return None, output_dir, None, None
-
-
-def _ensure_workspace_output(
+def _place_in_application_dir(
     *,
+    result: CoverLetterResult,
+    temp_dir: Path,
     jd_text: str,
     jd_source: str,
     jd_is_url: bool,
-    jd_is_file: bool,
-    company_hint: str | None,
-    position_hint: str | None,
     preset: str,
 ) -> Path:
-    """Create or find the right workspace output directory.
+    """Move generated files from temp dir to a proper application dir.
 
-    When a JD is provided but no explicit output dir, this function
-    creates an application directory if company/position can be inferred.
-    Falls back to a ``cover-letters/`` generic directory otherwise.
+    Uses company and role_title from the LLM result to create a
+    workspace application directory, then moves all output files there.
     """
     assert settings.workspace_root is not None
-    workspace_root = settings.workspace_root
 
-    # If we have company+position hints, create a proper application dir
-    if company_hint and position_hint:
-        return _create_app_dir_for_cover_letter(
-            workspace_root=workspace_root,
-            jd_text=jd_text,
-            jd_source=jd_source,
-            jd_is_url=jd_is_url,
-            jd_is_file=jd_is_file,
-            company=company_hint,
-            position=position_hint,
-            preset=preset,
+    company = result.company
+    position = result.role_title
+
+    if not company or not position:
+        console.print(
+            "  [yellow]\u26a0[/yellow] Could not infer company/position "
+            "from JD — files remain in temp dir."
         )
+        return temp_dir
 
-    # Fall back to cover-letters/ generic directory
-    return _create_generic_cl_output_dir(workspace_root, preset)
-
-
-def _create_app_dir_for_cover_letter(
-    *,
-    workspace_root: Path,
-    jd_text: str,
-    jd_source: str,
-    jd_is_url: bool,
-    jd_is_file: bool,
-    company: str,
-    position: str,
-    preset: str,
-) -> Path:
-    """Create an application directory for a cover letter.
-
-    Reuses the workspace service to create a properly versioned
-    application directory with the JD copied in.
-    """
+    # Create the application dir via workspace service
     workspace_service = create_workspace_service()
 
     # Write JD to a temp file for workspace service
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".md" if jd_is_url else ".txt",
-        delete=False,
-        encoding="utf-8",
-    ) as f:
-        f.write(jd_text)
-        tmp_jd = Path(f.name)
+    jd_ext = ".md" if jd_is_url else ".txt"
+    jd_tmp = temp_dir / f"jd{jd_ext}"
+    if not jd_tmp.exists():
+        jd_tmp.write_text(jd_text, encoding="utf-8")
 
     try:
         app_dir = workspace_service.setup_application(
-            workspace_root=workspace_root,
+            workspace_root=settings.workspace_root,
             company=company,
             position=position,
-            jd_source=tmp_jd,
+            jd_source=jd_tmp,
             preset_name=preset,
             url=jd_source if jd_is_url else None,
         )
     except MkcvError as exc:
         console.print(
-            f"  [yellow]\u26a0[/yellow] Could not create application dir: {exc}"
+            f"  [yellow]\u26a0[/yellow] Could not create app dir: "
+            f"{exc} — files remain in: {temp_dir}"
         )
-        return _create_generic_cl_output_dir(workspace_root, preset)
-    finally:
-        tmp_jd.unlink(missing_ok=True)
+        return temp_dir
 
     console.print(f"  [green]\u2713[/green] Created application: {app_dir.name}")
+
+    # Move all generated files from temp to app dir
+    moved = _move_outputs(temp_dir, app_dir, result)
+
+    # Clean up temp dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+    if moved:
+        console.print(f"  [green]\u2713[/green] Moved {moved} files to {app_dir.name}")
+
     return app_dir
 
 
-def _create_generic_cl_output_dir(
-    workspace_root: Path,
-    preset: str,
-) -> Path:
-    """Create a versioned cover-letters/ output directory."""
-    from mkcv.adapters.filesystem.workspace_manager import (
-        _next_version,
-    )
+def _move_outputs(
+    src_dir: Path,
+    dst_dir: Path,
+    result: CoverLetterResult,
+) -> int:
+    """Move cover letter output files and update result paths.
 
-    cl_dir = workspace_root / "cover-letters"
-    cl_dir.mkdir(exist_ok=True)
+    Returns the number of files moved.
+    """
+    moved = 0
+    updated_paths: dict[str, str] = {}
 
-    date_prefix = date.today().strftime("%Y-%m")
-    base_name = f"{date_prefix}-cover-letter-{preset}"
-    version = _next_version(cl_dir, base_name)
-    output = cl_dir / f"{base_name}-v{version}"
-    output.mkdir(parents=True, exist_ok=True)
-    return output
+    for key, path_str in result.output_paths.items():
+        src = Path(path_str)
+        if src.is_file():
+            dst = dst_dir / src.name
+            shutil.move(str(src), str(dst))
+            updated_paths[key] = str(dst)
+            moved += 1
+        else:
+            updated_paths[key] = path_str
+
+    # Also move the .mkcv/ artifacts and .typ source if present
+    for pattern in ("*.typ", ".mkcv"):
+        for item in src_dir.glob(pattern):
+            dst = dst_dir / item.name
+            if item.is_dir():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.move(str(item), str(dst))
+            elif item.is_file():
+                shutil.move(str(item), str(dst))
+            moved += 1
+
+    # Update result in place (output_paths is a regular dict)
+    result.output_paths.clear()
+    result.output_paths.update(updated_paths)
+
+    return moved
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
 
 
 def _save_jd_copy(
@@ -516,12 +478,6 @@ def _read_app_metadata(
         return None, None
 
 
-def _slugify(text: str) -> str:
-    """Simple slug for output naming."""
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return slug[:40] or "cover-letter"
-
-
 # ------------------------------------------------------------------
 # Display helpers
 # ------------------------------------------------------------------
@@ -534,6 +490,7 @@ def _display_header(
     kb_text: str | None,
     output_dir: Path,
     company: str | None,
+    deferred: bool = False,
 ) -> None:
     """Display the generation header."""
     console.print()
@@ -547,7 +504,10 @@ def _display_header(
         console.print("  Resume:   [dim]none (KB-only mode)[/dim]")
     if kb_text is not None:
         console.print("  KB:       [green]provided[/green]")
-    console.print(f"  Output:   {output_dir}")
+    if deferred:
+        console.print("  Output:   [dim]will auto-create application dir[/dim]")
+    else:
+        console.print(f"  Output:   {output_dir}")
     console.print()
 
 
