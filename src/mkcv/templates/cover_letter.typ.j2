@@ -2,24 +2,29 @@
 // Theme: {{ theme }}
 
 #set page(
-  paper: "us-letter",
-  margin: (top: 1.2in, bottom: 1in, left: 1in, right: 1in),
+  paper: "{{ page_size | default('us-letter') }}",
+  margin: (
+    top: {{ margin_top | default('1.2in') }},
+    bottom: {{ margin_bottom | default('1in') }},
+    left: {{ margin_left | default('1in') }},
+    right: {{ margin_right | default('1in') }},
+  ),
 )
 
 #set text(
-  font: "Source Sans Pro",
-  size: 11pt,
+  font: "{{ font | default('Source Sans Pro') }}",
+  size: {{ font_size | default('11pt') }},
   lang: "en",
 )
 
 #set par(
   justify: true,
-  leading: 0.7em,
+  leading: {{ line_spacing | default('0.7em') }},
 )
 
 // Header — candidate name
 #align(center)[
-  #text(size: 16pt, weight: "bold")[{{ candidate_name }}]
+  #text(size: {{ name_size | default('16pt') }}, weight: "bold")[{{ candidate_name }}]
 ]
 
 #v(0.3in)
@@ -32,10 +37,16 @@
 #v(0.15in)
 
 // Company and role reference
+{% if show_company %}
 #text(weight: "bold")[{{ company }}] \
+{% endif %}
+{% if show_role %}
 _Re: {{ role_title }}_
+{% endif %}
+{% if show_company or show_role %}
 
 #v(0.2in)
+{% endif %}
 
 // Salutation
 {{ salutation }}

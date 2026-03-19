@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from mkcv.core.exceptions.cover_letter import CoverLetterError
 from mkcv.core.models.cover_letter import CoverLetter
+from mkcv.core.models.cover_letter_design import CoverLetterDesign
 from mkcv.core.models.cover_letter_result import CoverLetterResult
 from mkcv.core.models.cover_letter_review import CoverLetterReview
 from mkcv.core.models.jd_analysis import JDAnalysis
@@ -57,12 +58,14 @@ class CoverLetterService:
         artifacts: ArtifactStorePort,
         renderer: CoverLetterRendererPort,
         stage_configs: dict[int, StageConfig] | None = None,
+        design: CoverLetterDesign | None = None,
     ) -> None:
         self._providers = providers
         self._prompts = prompts
         self._artifacts = artifacts
         self._renderer = renderer
         self._stage_configs = stage_configs or DEFAULT_COVER_LETTER_STAGE_CONFIGS
+        self._design = design
 
     async def generate(
         self,
@@ -159,7 +162,9 @@ class CoverLetterService:
         # Render PDF (optional)
         if render:
             try:
-                rendered = self._renderer.render(cover_letter, output_dir)
+                rendered = self._renderer.render(
+                    cover_letter, output_dir, design=self._design
+                )
                 output_paths["cover_letter_pdf"] = str(rendered.pdf_path)
             except Exception:
                 logger.warning(

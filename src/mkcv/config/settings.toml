@@ -50,6 +50,20 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 temperature = 0.2
 
+# Cover letter layout/design settings
+# Uncomment and modify to customize cover letter appearance:
+# [default.cover_letter.design]
+# page_size = "us-letter"
+# margin_top = "1.2in"
+# margin_bottom = "1in"
+# margin_left = "1in"
+# margin_right = "1in"
+# font = "Source Sans Pro"
+# font_size = "11pt"
+# name_size = "16pt"
+# line_spacing = "0.7em"
+# default_salutation = "Dear Hiring Manager,"
+
 [default.rendering]
 theme = "sb2nov"
 font = "SourceSansPro"
@@ -62,6 +76,35 @@ page_size = "letterpaper"
 # font_size = "11pt"
 # page_size = "a4paper"
 # primary_color = "004080"
+
+# Resume page layout — controls margins and page geometry
+# Uncomment to override RenderCV theme defaults:
+# [default.rendering.page]
+# top_margin = "0.7in"
+# bottom_margin = "0.7in"
+# left_margin = "0.5in"
+# right_margin = "0.5in"
+
+# Resume header layout — controls spacing below name/headline/connections
+# [default.rendering.header]
+# space_below_name = "0.15cm"
+# space_below_headline = "0.15cm"
+# space_below_connections = "0.3cm"
+
+# Resume entry layout — controls experience section geometry
+# [default.rendering.entries]
+# date_and_location_width = "3.6cm"
+
+# Resume section titles — controls heading style
+# [default.rendering.section_titles]
+# type = "with-full-line"
+# space_above = "0.3cm"
+# space_below = "0.15cm"
+
+# Resume typography — controls line spacing and alignment
+# [default.rendering.typography]
+# line_spacing = "0.7em"
+# alignment = "justified"
 
 [default.workspace]
 knowledge_base = "knowledge-base/career.md"

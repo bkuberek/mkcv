@@ -24,9 +24,15 @@ from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
+from mkcv.core.models.cover_letter_design import CoverLetterDesign
+from mkcv.core.models.entry_layout import EntryLayout
+from mkcv.core.models.header_layout import HeaderLayout
+from mkcv.core.models.page_layout import PageLayout
 from mkcv.core.models.profile_preset import Preset, resolve_preset
 from mkcv.core.models.resume_design import ResumeDesign
+from mkcv.core.models.section_title_layout import SectionTitleLayout
 from mkcv.core.models.stage_config import StageConfig
+from mkcv.core.models.typography_layout import TypographyLayout
 from mkcv.core.services.cover_letter import CoverLetterService
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
@@ -240,6 +246,9 @@ def _create_providers(
 def _build_resume_design(config: Configuration, theme: str) -> ResumeDesign:
     """Build a ResumeDesign from configuration settings.
 
+    Reads both legacy flat fields and nested sub-model sections
+    from config. Nested sections take precedence over flat fields.
+
     Args:
         config: Application configuration.
         theme: Resolved theme name.
@@ -263,7 +272,6 @@ def _build_resume_design(config: Configuration, theme: str) -> ResumeDesign:
             primary = getattr(overrides, "primary_color", None)
             if primary and isinstance(primary, str):
                 colors["primary"] = primary
-            # Override fields take precedence over top-level rendering fields
             override_font = getattr(overrides, "font", None)
             if override_font and isinstance(override_font, str):
                 font = override_font
@@ -276,6 +284,13 @@ def _build_resume_design(config: Configuration, theme: str) -> ResumeDesign:
     except (AttributeError, TypeError):
         pass
 
+    # Read nested sub-model sections from config
+    page = _read_page_layout(config)
+    header = _read_header_layout(config)
+    entries = _read_entry_layout(config)
+    section_titles = _read_section_title_layout(config)
+    typography = _read_typography_layout(config)
+
     try:
         return ResumeDesign(
             theme=theme,
@@ -283,6 +298,11 @@ def _build_resume_design(config: Configuration, theme: str) -> ResumeDesign:
             font_size=font_size,
             page_size=page_size,
             colors=colors,
+            page=page,
+            header=header,
+            entries=entries,
+            section_titles=section_titles,
+            typography=typography,
         )
     except Exception:
         logger.warning(
@@ -290,6 +310,113 @@ def _build_resume_design(config: Configuration, theme: str) -> ResumeDesign:
             exc_info=True,
         )
         return ResumeDesign(theme=theme)
+
+
+def _read_sub_config(
+    config: Configuration,
+    section: str,
+    fields: tuple[str, ...],
+) -> dict[str, str]:
+    """Read named fields from a nested config section.
+
+    Returns a dict of non-None string field values.
+    """
+    result: dict[str, str] = {}
+    try:
+        rendering = getattr(config, "rendering", None)
+        if rendering is None:
+            return result
+        sub = getattr(rendering, section, None)
+        if sub is None or isinstance(sub, str):
+            return result
+        for field in fields:
+            val = getattr(sub, field, None)
+            if val is not None and isinstance(val, str) and val:
+                result[field] = val
+    except (AttributeError, TypeError):
+        pass
+    return result
+
+
+def _read_page_layout(config: Configuration) -> PageLayout | None:
+    """Read page layout from [rendering.page] config section."""
+    fields = _read_sub_config(
+        config, "page", ("top_margin", "bottom_margin", "left_margin", "right_margin")
+    )
+    return PageLayout(**fields) if fields else None
+
+
+def _read_header_layout(config: Configuration) -> HeaderLayout | None:
+    """Read header layout from [rendering.header] config section."""
+    fields = _read_sub_config(
+        config,
+        "header",
+        ("space_below_name", "space_below_headline", "space_below_connections"),
+    )
+    return HeaderLayout(**fields) if fields else None
+
+
+def _read_entry_layout(config: Configuration) -> EntryLayout | None:
+    """Read entry layout from [rendering.entries] config section."""
+    fields = _read_sub_config(
+        config,
+        "entries",
+        (
+            "date_and_location_width",
+            "left_and_right_margin",
+            "horizontal_space_between_connections",
+        ),
+    )
+    return EntryLayout(**fields) if fields else None
+
+
+def _read_section_title_layout(config: Configuration) -> SectionTitleLayout | None:
+    """Read section title layout from [rendering.section_titles] config."""
+    fields = _read_sub_config(
+        config, "section_titles", ("type", "space_above", "space_below")
+    )
+    return SectionTitleLayout(**fields) if fields else None
+
+
+def _read_typography_layout(config: Configuration) -> TypographyLayout | None:
+    """Read typography from [rendering.typography] config section."""
+    fields = _read_sub_config(
+        config,
+        "typography",
+        ("line_spacing", "alignment", "headline_size", "connections_size"),
+    )
+    return TypographyLayout(**fields) if fields else None
+
+
+def _build_cover_letter_design(config: Configuration) -> CoverLetterDesign:
+    """Build a CoverLetterDesign from configuration settings.
+
+    Reads from [cover_letter.design] config section.
+
+    Args:
+        config: Application configuration.
+
+    Returns:
+        CoverLetterDesign populated from config, with model defaults
+        for any missing values.
+    """
+    try:
+        cl_section = getattr(config, "cover_letter", None)
+        if cl_section is None:
+            return CoverLetterDesign()
+        design_section = getattr(cl_section, "design", None)
+        if design_section is None or isinstance(design_section, str):
+            return CoverLetterDesign()
+
+        raw: dict[str, object] = {}
+        for field_name in CoverLetterDesign.model_fields:
+            val = getattr(design_section, field_name, None)
+            if val is not None:
+                raw[field_name] = val
+
+        return CoverLetterDesign.model_validate(raw)
+    except (AttributeError, TypeError):
+        return CoverLetterDesign()
 
 
 def create_pipeline_service(
@@ -486,6 +613,7 @@ def create_cover_letter_service(
         }
 
     providers = _create_providers(config, stage_configs)
+    design = _build_cover_letter_design(config)
 
     return CoverLetterService(
         providers=providers,
@@ -493,6 +621,7 @@ def create_cover_letter_service(
         artifacts=artifact_store,
         renderer=renderer,
         stage_configs=stage_configs,
+        design=design,
     )
 
 

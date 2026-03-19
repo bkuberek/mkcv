@@ -6,7 +6,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from mkcv.core.models.resume_design import PAGE_SIZE_MAP, ResumeDesign
+from mkcv.core.models.resume_design import ResumeDesign
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,10 @@ class YamlPostProcessor:
     ) -> str:
         """Replace or insert the design section in resume YAML.
 
+        Delegates to ``ResumeDesign.to_rendercv_dict()`` which produces
+        a RenderCV-compatible nested design dict, emitting only non-default
+        values so that theme defaults are respected.
+
         Args:
             yaml_str: Raw YAML string from LLM or file.
             design: Validated design configuration to inject.
@@ -43,27 +47,11 @@ class YamlPostProcessor:
         if not yaml_str or not yaml_str.strip():
             raise ValueError("Empty or invalid YAML")
 
-        data = self._yaml.load(yaml_str)
+        data: dict[str, Any] | None = self._yaml.load(yaml_str)
         if data is None:
             raise ValueError("Empty or invalid YAML")
 
-        # Build the design dict matching RenderCV schema
-        design_dict: dict[str, Any] = {"theme": design.theme}
-
-        if design.has_overrides():
-            defaults = ResumeDesign()
-            if design.font != defaults.font:
-                design_dict["font"] = design.font
-            if design.font_size != defaults.font_size:
-                design_dict["font_size"] = design.font_size
-            if design.page_size != defaults.page_size:
-                design_dict["page_size"] = PAGE_SIZE_MAP.get(
-                    design.page_size, design.page_size
-                )
-            if design.colors.get("primary") != defaults.colors.get("primary"):
-                design_dict["color"] = design.colors.get("primary", "003366")
-
-        data["design"] = design_dict
+        data["design"] = design.to_rendercv_dict()
 
         stream = StringIO()
         self._yaml.dump(data, stream)
