@@ -15,6 +15,15 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4.1": (0.002, 0.008),
     "gpt-4.1-mini": (0.0004, 0.0016),
     "gpt-4.1-nano": (0.0001, 0.0004),
+    # OpenRouter — models use their canonical names; pricing reflects
+    # OpenRouter's pass-through rates (may include small markup).
+    "anthropic/claude-sonnet-4": (0.003, 0.015),
+    "anthropic/claude-haiku-4": (0.0008, 0.004),
+    "openai/gpt-4o": (0.0025, 0.010),
+    "openai/gpt-4.1": (0.002, 0.008),
+    "google/gemini-2.5-pro-preview": (0.00125, 0.010),
+    "google/gemini-2.5-flash-preview": (0.00015, 0.0006),
+    "deepseek/deepseek-chat-v3": (0.00014, 0.00028),
 }
 
 _TOKENS_PER_UNIT = 1000

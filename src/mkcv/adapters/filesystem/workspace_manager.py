@@ -118,6 +118,131 @@ _GITIGNORE_TEMPLATE = """\
 Thumbs.db
 """
 
+_README_TEMPLATE = """\
+# My CV Workspace
+
+This is an [mkcv](https://github.com/bkuberek/mkcv) workspace for generating
+ATS-compliant resumes tailored to specific job applications.
+
+## Setup
+
+### 1. Install mkcv
+
+```bash
+pip install mkcv
+# or
+uv tool install mkcv
+```
+
+### 2. Set up an API key
+
+You need at least one AI provider. Pick one:
+
+```bash
+# Anthropic (recommended)
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI
+export OPENAI_API_KEY=sk-...
+
+# OpenRouter (access Claude, GPT, Gemini, DeepSeek, etc. with one key)
+export OPENROUTER_API_KEY=sk-or-...
+
+# Ollama (free, local — no key needed)
+# Just run: ollama serve
+```
+
+Add the export to your shell profile (`~/.zshrc` or `~/.bashrc`) so it persists.
+
+### 3. Fill in your knowledge base
+
+Edit `knowledge-base/career.md` with your complete career history. The more
+detail you include (metrics, technologies, outcomes), the better the AI can
+tailor your resume.
+
+## Usage
+
+### Generate a resume
+
+```bash
+# From a file
+mkcv generate --jd path/to/job_description.txt \\
+  --company "Company Name" --position "Job Title"
+
+# From a URL
+mkcv generate --jd https://example.com/job-posting \\
+  --company "Company Name" --position "Job Title"
+
+# From clipboard (macOS)
+pbpaste | mkcv generate --jd - \\
+  --company "Company Name" --position "Job Title"
+```
+
+This creates `applications/{company}/{date-position}/` with your tailored
+resume YAML and rendered PDF.
+
+### Other commands
+
+```bash
+mkcv status                        # See workspace overview
+mkcv render resume.yaml            # Re-render a resume to PDF
+mkcv validate resume.yaml          # Check resume quality
+mkcv validate resume.yaml --jd job.txt  # Check keyword coverage
+mkcv validate --kb knowledge-base/career.md  # Check KB structure
+mkcv themes                        # List available themes
+mkcv themes --preview sb2nov       # Preview a theme
+```
+
+### Provider profiles
+
+```bash
+mkcv generate --jd job.txt --profile budget   # Ollama (free, local)
+mkcv generate --jd job.txt --profile premium  # Anthropic Claude (best quality)
+```
+
+### Using OpenRouter
+
+To use [OpenRouter](https://openrouter.ai), set the API key and configure
+your `mkcv.toml`:
+
+```toml
+[pipeline.stages.analyze]
+provider = "openrouter"
+model = "anthropic/claude-sonnet-4"
+
+[pipeline.stages.review]
+provider = "openrouter"
+model = "anthropic/claude-sonnet-4"
+```
+
+## Workspace Structure
+
+```
+.
+├── mkcv.toml                     # Workspace configuration
+├── knowledge-base/
+│   ├── career.md                 # Your career history
+│   └── voice.md                  # Writing tone preferences
+├── applications/
+│   └── {company}/
+│       └── {date-position}/
+│           ├── application.toml  # Application metadata
+│           ├── jd.txt            # Job description
+│           ├── resume.yaml       # Generated resume
+│           └── resume.pdf        # Rendered PDF
+└── templates/                    # Custom prompt overrides
+```
+
+## Tips
+
+- **Keep your KB detailed** — include every role, project, and metric. The AI
+  selects what's relevant for each job.
+- **Run `mkcv validate --kb career.md`** to check your KB for missing sections.
+- **Use `--interactive`** to review and stop after any pipeline stage.
+- **Re-run from a stage** with `--from-stage 3` to iterate on tailoring without
+  re-analyzing the JD.
+"""
+
 _MAX_SLUG_LENGTH = 64
 _MAX_COLLISION_ATTEMPTS = 99
 
@@ -190,6 +315,11 @@ class WorkspaceManager:
         gitignore_path = workspace_root / ".gitignore"
         gitignore_path.write_text(_GITIGNORE_TEMPLATE, encoding="utf-8")
         logger.info("Created %s", gitignore_path)
+
+        # Create README.md
+        readme_path = workspace_root / "README.md"
+        readme_path.write_text(_README_TEMPLATE, encoding="utf-8")
+        logger.info("Created %s", readme_path)
 
         return workspace_root
 

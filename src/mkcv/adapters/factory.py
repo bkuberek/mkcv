@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _PROVIDER_ENV_KEYS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
     "ollama": "",  # Ollama doesn't require an API key
 }
 
@@ -170,6 +171,14 @@ def _create_llm_adapter(
         from mkcv.adapters.llm.openai import OpenAIAdapter
 
         adapter = OpenAIAdapter(api_key=api_key)
+
+    elif provider == "openrouter":
+        from mkcv.adapters.llm.openai import OpenAIAdapter
+
+        adapter = OpenAIAdapter(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
 
     else:
         raise AuthenticationError(
