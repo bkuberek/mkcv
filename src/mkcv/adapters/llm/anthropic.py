@@ -129,11 +129,10 @@ class AnthropicAdapter:
             if system:
                 kwargs["system"] = system
 
-            # Stream the response and collect the final message
+            # Stream the response and collect tool JSON fragments
             input_json_parts: list[str] = []
             async with self._client.messages.stream(**kwargs) as stream:
                 async for event in stream:
-                    # Collect tool input JSON fragments
                     if hasattr(event, "type") and event.type == "content_block_delta":
                         delta = getattr(event, "delta", None)
                         if (
@@ -148,25 +147,41 @@ class AnthropicAdapter:
                 output_tokens=response.usage.output_tokens,
             )
 
-            # Extract tool call input from the final message
+            # Prefer reassembled JSON from stream fragments — this is
+            # the most reliable path for large tool responses.
+            if input_json_parts:
+                raw_json = "".join(input_json_parts)
+                try:
+                    data: dict[str, Any] = json.loads(raw_json)
+                    return validate_structured_response(data, response_model)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse streamed JSON fragments (%d parts, "
+                        "%d chars); falling back to final message",
+                        len(input_json_parts),
+                        len(raw_json),
+                    )
+
+            # Fallback: extract from the final assembled message
             for block in response.content:
                 if (
                     block.type == "tool_use"
                     and hasattr(block, "name")
                     and block.name == tool_name
                 ):
+                    tool_data = block.input
+                    logger.debug(
+                        "Tool response keys: %s",
+                        list(tool_data.keys())
+                        if isinstance(tool_data, dict)
+                        else type(tool_data),
+                    )
                     return validate_structured_response(
-                        block.input,
+                        tool_data,
                         response_model,
                     )
 
-            # Fallback: try reassembling from streamed JSON fragments
-            if input_json_parts:
-                raw_json = "".join(input_json_parts)
-                data = json.loads(raw_json)
-                return validate_structured_response(data, response_model)
-
-            # Fallback: try to extract JSON from text blocks
+            # Last resort: try to extract JSON from text blocks
             for block in response.content:
                 if block.type == "text":
                     data = extract_json_from_text(str(block.text))

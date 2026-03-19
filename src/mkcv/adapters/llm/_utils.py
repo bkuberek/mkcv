@@ -69,6 +69,11 @@ def validate_structured_response(
 ) -> BaseModel:
     """Validate a JSON dict against a Pydantic model.
 
+    Handles a common LLM pattern where the response is wrapped under
+    a single key (e.g. ``{"tailored_content": {...actual data...}}``).
+    If direct validation fails and the dict has exactly one key whose
+    value is also a dict, try validating that inner dict.
+
     Args:
         data: Parsed JSON data.
         response_model: The Pydantic model class to validate against.
@@ -83,12 +88,31 @@ def validate_structured_response(
         ValidationError as MkcvValidationError,
     )
 
+    # Try direct validation first
     try:
         return response_model.model_validate(data)
-    except Exception as e:
+    except Exception as direct_error:
+        # If the dict has a single key wrapping the actual data, unwrap it
+        if len(data) == 1:
+            inner = next(iter(data.values()))
+            if isinstance(inner, dict):
+                logger.debug(
+                    "Direct validation failed; trying unwrapped key '%s'",
+                    next(iter(data.keys())),
+                )
+                try:
+                    return response_model.model_validate(inner)
+                except Exception:
+                    pass  # Fall through to original error
+
+        logger.error(
+            "LLM response validation failed. Top-level keys: %s",
+            list(data.keys()),
+        )
         raise MkcvValidationError(
-            f"LLM response failed validation against {response_model.__name__}: {e}"
-        ) from e
+            f"LLM response failed validation against "
+            f"{response_model.__name__}: {direct_error}"
+        ) from direct_error
 
 
 def build_schema_prompt(response_model: type[BaseModel]) -> str:
