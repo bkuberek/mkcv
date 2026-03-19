@@ -7,7 +7,7 @@
 ## Phase Overview
 
 ```
-Phase 1: CLI Tool        ← WE ARE HERE
+Phase 1: CLI Tool        ← WE ARE HERE (core complete, iterating)
 Phase 2: Web Service API
 Phase 3: Web Application
 Phase 4: Mobile App
@@ -19,43 +19,51 @@ Phase 4: Mobile App
 
 **Goal:** A working CLI that generates tailored, ATS-compliant PDF resumes from a knowledge base + job description.
 
-**Timeline:** 2-4 weeks
-
 ### Milestones
 
-#### M1.1: Rendering Pipeline (Week 1)
-- [ ] Project scaffolding (pyproject.toml, uv, src layout)
-- [ ] RenderCV integration: YAML → PDF rendering
-- [ ] Base YAML template with the creator's career data
-- [ ] `mkcv render` command working end-to-end
-- [ ] Theme selection (sb2nov, classic, moderncv)
+#### M1.1: Rendering Pipeline ✅
+- [x] Project scaffolding (pyproject.toml, uv, src layout)
+- [x] Hexagonal architecture (core/ports/adapters, one class per file)
+- [x] RenderCV integration: YAML → PDF rendering (Typst engine)
+- [x] `mkcv render` command working end-to-end (PDF, PNG, MD, HTML)
+- [x] Theme selection (sb2nov and RenderCV built-in themes)
 
-#### M1.2: AI Pipeline — Core (Week 2)
-- [ ] Provider abstraction layer (Anthropic, OpenAI, Ollama, OpenRouter)
-- [ ] Stage 1: JD analysis
-- [ ] Stage 2: Experience selection
-- [ ] Stage 3: Content tailoring + mission statement
-- [ ] Stage 4: YAML structuring
-- [ ] `mkcv generate` command working end-to-end
+#### M1.2: AI Pipeline — Core ✅
+- [x] Provider abstraction layer (Anthropic, OpenAI, configurable StubLLM)
+- [x] Stage 1: JD analysis (structured extraction via tool_use/JSON mode)
+- [x] Stage 2: Experience selection
+- [x] Stage 3: Content tailoring + mission statement
+- [x] Stage 4: YAML structuring
+- [x] `mkcv generate` command working end-to-end
+- [x] Workspace model (`mkcv init`, applications/{company}/{YYYY-MM-position}/)
 
-#### M1.3: Quality & Polish (Week 3)
-- [ ] Stage 5: Review + ATS compliance check
-- [ ] Confidence scoring on generated bullets
-- [ ] Intermediate artifact persistence (JSON files per stage)
-- [ ] Config file support (~/.config/mkcv/config.yaml)
-- [ ] Error handling and retry logic for API calls
+#### M1.3: Quality & Polish ✅
+- [x] Stage 5: Review + ATS compliance check
+- [x] Confidence scoring on generated bullets (high/medium/low)
+- [x] Intermediate artifact persistence (JSON files per stage)
+- [x] Dynaconf config (5-layer: built-in → global → workspace → env → CLI)
+- [x] Error handling hierarchy (MkcvError + 12 specific exception types)
+- [x] Exponential backoff retry for rate-limited API calls
+- [x] Per-stage provider/model/temperature selection
 
-#### M1.4: Iteration & UX (Week 4)
-- [ ] Resume from specific stage (`--from-stage 3`)
-- [ ] Interactive mode (review and edit between stages)
-- [ ] Provider profiles (budget vs premium)
-- [ ] Documentation and README
-- [ ] Test suite with mocked API calls
+#### M1.4: Iteration & UX ✅
+- [x] Resume from specific stage (`--from-stage 3`)
+- [x] Interactive mode (`--interactive` — pause after each stage for review)
+- [x] Prompt tuning — XYZ bullet formula, voice guidelines, ATS keyword strategy
+- [x] `mkcv validate` command — LLM-powered resume quality review
+- [x] Test suite: 284 tests with mocked API calls, ruff + mypy --strict clean
+
+#### M1.5: Remaining Work (Next)
+- [ ] Ollama adapter — local model support for offline/budget usage
+- [ ] Cost tracking — token counts from adapters, cost calculation in pipeline
+- [ ] Prompt iteration with real JDs (ongoing quality improvement)
+- [ ] Update outdated docs (research.md references old architecture)
 
 ### Deliverables
-- `mkcv generate --jd <file> --kb <file>` → `resume.yaml` + `review_report.json`
-- `mkcv render <file>` → `resume.pdf` + `resume.png`
-- `mkcv validate <file>` → ATS compliance report
+- `mkcv generate --jd <file> --kb <file>` → `resume.yaml` + `review_report.json` + auto-rendered PDF
+- `mkcv render <file>` → `resume.pdf` + `resume.png` + `resume.md` + `resume.html`
+- `mkcv validate <file> [--jd <file>]` → ATS compliance + quality report
+- `mkcv init [path]` → workspace with KB templates, config, application dirs
 
 ---
 

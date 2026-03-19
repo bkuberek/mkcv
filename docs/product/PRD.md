@@ -1,8 +1,8 @@
 # mkcv — Product Requirements Document
 
-**Version:** 0.1.0<br>
+**Version:** 0.2.0<br>
 **Date:** 2026-03-18<br>
-**Status:** Draft<br>
+**Status:** Active<br>
 
 ---
 
@@ -111,7 +111,7 @@ Creating a tailored resume for each job application is time-consuming and error-
 
 | ID | Requirement | Priority |
 |----|------------|----------|
-| FR-7.1 | YAML config file for defaults (models, theme, voice guidelines) | Must |
+| FR-7.1 | TOML config file for defaults (models, theme, voice guidelines) via Dynaconf | Must |
 | FR-7.2 | Environment variables for API keys | Must |
 | FR-7.3 | CLI flags override config file | Must |
 | FR-7.4 | Support provider profiles (e.g., "budget" uses Ollama, "premium" uses Claude) | Should |
