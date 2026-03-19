@@ -566,6 +566,174 @@ class TestPipelineFromStage:
                 jd_file, kb_file, output_dir=output_dir, from_stage=2
             )
 
+    async def test_from_stage_3_runs_stages_3_to_5(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+    ) -> None:
+        """from_stage=3 loads stages 1-2, runs 3-5."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir(parents=True)
+
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=output_dir,
+        )
+        artifacts.save(
+            "stage2_selection",
+            sample_selection.model_dump(),
+            run_dir=output_dir,
+        )
+
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, from_stage=3
+        )
+
+        assert len(result.stages) == 3
+        stage_numbers = [s.stage_number for s in result.stages]
+        assert stage_numbers == [3, 4, 5]
+
+    async def test_from_stage_4_runs_stages_4_to_5(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+    ) -> None:
+        """from_stage=4 loads stages 1-3, runs 4-5."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir(parents=True)
+
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=output_dir,
+        )
+        artifacts.save(
+            "stage2_selection",
+            sample_selection.model_dump(),
+            run_dir=output_dir,
+        )
+        artifacts.save(
+            "stage3_content",
+            sample_tailored_content.model_dump(),
+            run_dir=output_dir,
+        )
+
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, from_stage=4
+        )
+
+        assert len(result.stages) == 2
+        stage_numbers = [s.stage_number for s in result.stages]
+        assert stage_numbers == [4, 5]
+
+    async def test_from_stage_5_runs_review_only(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+    ) -> None:
+        """from_stage=5 loads everything, runs review only."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir(parents=True)
+
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=output_dir,
+        )
+        artifacts.save(
+            "stage2_selection",
+            sample_selection.model_dump(),
+            run_dir=output_dir,
+        )
+        artifacts.save(
+            "stage3_content",
+            sample_tailored_content.model_dump(),
+            run_dir=output_dir,
+        )
+        # Stage 4 saves resume.yaml as a file (not JSON artifact)
+        resume_yaml = "cv:\n  name: Test\n  summary: Test resume\n"
+        (output_dir / "resume.yaml").write_text(resume_yaml, encoding="utf-8")
+
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, from_stage=5
+        )
+
+        assert len(result.stages) == 1
+        assert result.stages[0].stage_number == 5
+
+    async def test_from_stage_3_makes_three_llm_calls(
+        self,
+        pipeline: PipelineService,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+    ) -> None:
+        """from_stage=3 should make 3 LLM calls (stages 3, 4, 5)."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir(parents=True)
+
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=output_dir,
+        )
+        artifacts.save(
+            "stage2_selection",
+            sample_selection.model_dump(),
+            run_dir=output_dir,
+        )
+
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir, from_stage=3)
+
+        assert len(stub_llm.call_log) == 3
+
+    async def test_from_stage_3_missing_stage2_raises(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+    ) -> None:
+        """from_stage=3 without stage 2 artifact should fail."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir(parents=True)
+
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=output_dir,
+        )
+        # Stage 2 artifact intentionally missing
+
+        with pytest.raises(FileNotFoundError):
+            await pipeline.generate(
+                jd_file, kb_file, output_dir=output_dir, from_stage=3
+            )
+
 
 # ------------------------------------------------------------------
 # Test: LLM call log
