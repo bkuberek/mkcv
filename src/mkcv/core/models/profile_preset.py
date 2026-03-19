@@ -30,6 +30,7 @@ class Preset(BaseModel):
     max_bullets_primary: int
     max_bullets_secondary: int
     include_earlier_experience: bool
+    max_tokens: int = 8192
     stage_configs: dict[int, StageConfig]
 
 
@@ -109,6 +110,7 @@ BUILT_IN_PRESETS: dict[str, Preset] = {
         max_bullets_primary=7,
         max_bullets_secondary=5,
         include_earlier_experience=True,
+        max_tokens=16384,
         stage_configs=dict(_OPUS_STAGE_CONFIGS),
     ),
 }

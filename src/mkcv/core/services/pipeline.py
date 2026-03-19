@@ -79,6 +79,20 @@ class PipelineService:
         self._stage_configs = stage_configs or DEFAULT_STAGE_CONFIGS
         self._preset = preset
 
+    @property
+    def _max_tokens(self) -> int:
+        """Max output tokens for structured calls, from preset or default."""
+        if self._preset is not None:
+            return self._preset.max_tokens
+        return DEFAULT_MAX_TOKENS
+
+    @property
+    def _max_tokens_yaml(self) -> int:
+        """Max output tokens for YAML/large structured calls."""
+        if self._preset is not None:
+            return self._preset.max_tokens
+        return STAGE_MAX_TOKENS_YAML
+
     def _density_context(self) -> dict[str, object]:
         """Build density template variables from the preset.
 
@@ -415,7 +429,7 @@ class PipelineService:
             model=config.model,
             temperature=config.temperature,
             stage_number=stage_number,
-            max_tokens=STAGE_MAX_TOKENS_YAML,
+            max_tokens=self._max_tokens_yaml,
         )
 
         usage = llm.get_last_usage()
@@ -473,7 +487,7 @@ class PipelineService:
                 messages,
                 model=config.model,
                 temperature=config.temperature,
-                max_tokens=STAGE_MAX_TOKENS_YAML,
+                max_tokens=self._max_tokens_yaml,
             )
         except Exception as exc:
             raise PipelineStageError(
@@ -541,7 +555,7 @@ class PipelineService:
             model=config.model,
             temperature=config.temperature,
             stage_number=stage_number,
-            max_tokens=STAGE_MAX_TOKENS_YAML,
+            max_tokens=self._max_tokens_yaml,
         )
 
         usage = llm.get_last_usage()
