@@ -143,8 +143,16 @@ Set to null — only include the selected roles above.
 {% endif %}
 
 ### languages
-List of spoken/written languages from the KB if relevant to the role (international
+{% if density | default("standard") == "comprehensive" %}
+List ALL spoken/written languages from the KB, including level (e.g., "Native",
+"Proficient", "Advanced", "Intermediate"). In comprehensive mode, always include
+every language — multilingual ability is a differentiator.
+{% elif density | default("standard") == "concise" %}
+Include only languages directly relevant to the target role. Null if not relevant.
+{% else %}
+List spoken/written languages from the KB if relevant to the role (international
 companies, non-English markets). Null if not mentioned or not relevant.
+{% endif %}
 
 ### low_confidence_flags
 List every instance where you stretched beyond what the KB explicitly states.
