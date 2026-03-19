@@ -112,17 +112,27 @@ Concrete implementations of core ports:
 - `FileSystemPromptLoader` — implements `PromptLoaderPort` (Jinja2 templates)
 - `WorkspaceManager` — filesystem operations for workspace/application creation
 
-**`adapters/llm/`**:
-- `StubLLMAdapter` — test stub (future: `AnthropicAdapter`, `OpenAIAdapter`, etc.)
+**`adapters/llm/`** — Provider-agnostic LLM adapters. The factory selects
+the adapter based on configuration and available API keys:
+- `AnthropicAdapter` — Anthropic Claude (structured output via tool-use)
+- `OpenAIAdapter` — OpenAI GPT models (structured output via JSON mode)
+- `StubLLMAdapter` — deterministic test/dev stub (no API key needed)
+- `_utils.py` — shared utilities (retry logic, token counting)
 
-**`adapters/renderers/`**:
-- `StubRenderer` — test stub (future: `RenderCVRenderer`, `WeasyPrintRenderer`)
+Provider selection: config → API key lookup → adapter instantiation.
+Falls back to `StubLLMAdapter` if no API key is found.
+
+**`adapters/renderers/`** — PDF rendering backends:
+- `RenderCVAdapter` — renders via RenderCV's Python API (Typst engine).
+  Parses YAML, generates Typst source, compiles to PDF/PNG, and produces
+  Markdown/HTML. Non-PDF formats are best-effort (failures are non-fatal).
+- `StubRenderer` — test stub returning dummy paths
 
 **`adapters/factory.py`** — Manual DI wiring. Factory functions assemble
 fully-wired service instances:
 ```python
 def create_pipeline_service(config) -> PipelineService:
-    llm = StubLLMAdapter()  # future: select based on config
+    llm = _create_llm_adapter(config)  # Anthropic/OpenAI/Stub based on config
     prompts = FileSystemPromptLoader(override_dir=...)
     artifacts = FileSystemArtifactStore()
     return PipelineService(llm=llm, prompts=prompts, artifacts=artifacts)
@@ -184,6 +194,13 @@ Resume YAML ──▶ Render ──▶ resume.pdf + resume.png
 Each stage output is a Pydantic model validated before passing downstream.
 Artifacts are persisted to the `.mkcv/` directory for caching and debugging.
 
+The `generate` command auto-renders the PDF after pipeline completion
+(controlled by `--render/--no-render`, default: render). Render failures
+produce a warning but do not fail the pipeline — the YAML is always saved.
+
+The `--from-stage` flag allows resuming from any stage (2–5), loading
+previously saved artifacts from `.mkcv/` instead of re-running earlier stages.
+
 ---
 
 ## Error Handling
@@ -210,8 +227,8 @@ The CLI meta handler catches `MkcvError` and exits with the appropriate code.
 
 ## Security
 
-1. **API keys** via env vars (`MKCV_ANTHROPIC_API_KEY`, etc.) — never in config files or logs
-2. **Knowledge base** may contain PII — Ollama provides local-only processing
+1. **API keys** via env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) — never in config files or logs
+2. **Knowledge base** may contain PII — local stub adapter provides offline processing
 3. **Artifacts** may contain sensitive data — `.mkcv/` is in `.gitignore`
 4. **Provider calls** use HTTPS only
 5. **No telemetry** without explicit opt-in

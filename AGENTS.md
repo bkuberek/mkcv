@@ -12,6 +12,16 @@ analyze JD, select experience, tailor content, structure YAML, review.
 Organized around a **workspace model**: `mkcv init PATH` creates a workspace with
 a knowledge base, config, and `applications/{company}/{YYYY-MM-position}/` dirs.
 
+## Implementation Status
+
+| Command    | Status        | Notes                                         |
+|------------|---------------|-----------------------------------------------|
+| `init`     | Implemented   | Creates workspace with config, KB templates   |
+| `generate` | Implemented   | Full 5-stage LLM pipeline + auto-render PDF   |
+| `render`   | Implemented   | RenderCV Python API (Typst → PDF/PNG/MD/HTML) |
+| `validate` | Stubbed       | ATS compliance check — ports wired, no logic  |
+| `themes`   | Stubbed       | Lists built-in theme names only               |
+
 ## Tech Stack
 
 - **Python >=3.12** with `uv` for package management
@@ -20,9 +30,9 @@ a knowledge base, config, and `applications/{company}/{YYYY-MM-position}/` dirs.
 - **Pydantic v2** for all data models — never raw dicts
 - **asyncio + httpx** for async AI provider calls
 - **Jinja2** for prompt templates (`.j2` files in `src/mkcv/prompts/`)
-- **RenderCV** (Typst) for PDF rendering, WeasyPrint as secondary
+- **RenderCV** (Typst) for PDF rendering via Python API
 - **pytest + pytest-asyncio** for tests, **ruff** for lint/format, **mypy --strict** for types
-- AI providers: Anthropic, OpenAI, Ollama, OpenRouter (provider-agnostic)
+- AI providers: Anthropic, OpenAI, Stub (provider-agnostic via `LLMPort`)
 
 ## Build / Run / Test
 
@@ -31,6 +41,7 @@ uv sync                                          # Install dependencies
 uv run mkcv --help                               # CLI help
 uv run mkcv init ./my-workspace                  # Create workspace
 uv run mkcv generate --jd job.txt --kb career.md # Generate resume
+uv run mkcv render resume.yaml                   # Render YAML to PDF
 uv run pytest                                    # All tests
 uv run pytest tests/test_cli/test_app.py         # Single file
 uv run pytest -k test_version_flag               # Single test by name
@@ -59,8 +70,8 @@ src/mkcv/
 └── adapters/             # Implementations of core ports
     ├── factory.py        # DI wiring — creates fully-assembled services
     ├── filesystem/       # ArtifactStore, PromptLoader, WorkspaceManager
-    ├── llm/              # LLM provider adapters (stub, future: anthropic, openai)
-    └── renderers/        # PDF rendering adapters (stub, future: rendercv)
+    ├── llm/              # Anthropic, OpenAI, Stub adapters + utils
+    └── renderers/        # RenderCV (Typst → PDF), Stub renderer
 ```
 
 ## Code Style
@@ -102,13 +113,13 @@ from mkcv.core.ports.llm import LLMPort
 
 ### Naming
 
-| Element           | Convention         | Example                       |
-|-------------------|--------------------|-------------------------------|
-| Files/modules     | `snake_case`       | `jd_analysis.py`              |
+| Element           | Convention         | Example                         |
+|-------------------|--------------------|---------------------------------|
+| Files/modules     | `snake_case`       | `jd_analysis.py`                |
 | Classes           | `PascalCase`       | `JDAnalysis`, `PipelineService` |
-| Functions/methods | `snake_case`       | `analyze_jd`, `render_pdf`    |
-| Constants         | `UPPER_SNAKE_CASE` | `DEFAULT_TEMPERATURE`         |
-| Private members   | `_` prefix         | `_build_prompt`               |
+| Functions/methods | `snake_case`       | `analyze_jd`, `render_pdf`      |
+| Constants         | `UPPER_SNAKE_CASE` | `DEFAULT_TEMPERATURE`           |
+| Private members   | `_` prefix         | `_build_prompt`                 |
 
 ### Error Handling
 
@@ -128,7 +139,7 @@ Never catch bare `Exception` — always catch specific types.
 4. Environment variables (`MKCV_` prefix)
 5. CLI flags (applied at runtime)
 
-Secrets via env vars: `MKCV_ANTHROPIC_API_KEY`, `MKCV_OPENAI_API_KEY`, etc.
+Secrets via env vars: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.
 
 ### Testing
 
@@ -137,15 +148,6 @@ Secrets via env vars: `MKCV_ANTHROPIC_API_KEY`, `MKCV_OPENAI_API_KEY`, etc.
 - Fixtures in `conftest.py` for shared test data
 - One assertion per test where practical
 - Descriptive names: `test_version_flag_prints_version`
-
-## Key Design Principles
-
-1. **Hexagonal architecture** — core logic is framework-free and testable in isolation
-2. **Workspace-centric** — `mkcv init` creates a project, applications are organized per-company
-3. **Pipeline stages are independent** — each can be run, tested, retried in isolation
-4. **Provider-agnostic** — switching AI providers is a config change, not a code change
-5. **Schema-validated** — all AI outputs validated against Pydantic models before use
-6. **Config layering** — 5 layers from built-in defaults to CLI flags
 
 ## Reference Documentation
 

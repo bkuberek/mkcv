@@ -9,9 +9,14 @@ from typing import Annotated
 import cyclopts
 from rich.console import Console
 
-from mkcv.adapters.factory import create_pipeline_service, create_workspace_manager
+from mkcv.adapters.factory import (
+    create_pipeline_service,
+    create_render_service,
+    create_workspace_manager,
+)
 from mkcv.config import settings
 from mkcv.core.exceptions import MkcvError
+from mkcv.core.models.pipeline_result import PipelineResult
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +195,8 @@ def _generate_workspace_mode(
         kb=kb,
         output_dir=run_dir,
         from_stage=from_stage,
+        render_pdf=render_pdf,
+        theme=theme,
     )
 
 
@@ -235,6 +242,8 @@ def _generate_standalone_mode(
         kb=kb,
         output_dir=run_dir,
         from_stage=from_stage,
+        render_pdf=render_pdf,
+        theme=theme,
     )
 
 
@@ -244,8 +253,10 @@ def _run_pipeline(
     kb: Path,
     output_dir: Path,
     from_stage: int,
+    render_pdf: bool = True,
+    theme: str = "sb2nov",
 ) -> None:
-    """Execute the AI pipeline and display results."""
+    """Execute the AI pipeline, display results, and optionally render PDF."""
     pipeline = create_pipeline_service(settings)
 
     console.print("  [bold]Running AI pipeline...[/bold]")
@@ -264,20 +275,108 @@ def _run_pipeline(
         console.print(f"  [red]Error:[/red] {exc}")
         sys.exit(exc.exit_code)
 
-    # Display stage results
+    # Display stage summary
+    _display_pipeline_summary(result)
+
+    # Auto-render PDF
+    pdf_rendered = False
+    pdf_path_str: str | None = None
+    if render_pdf:
+        pdf_rendered, pdf_path_str = _auto_render(result, output_dir, theme=theme)
+
+    # Display output tree
+    _display_output_tree(
+        result, output_dir, pdf_rendered=pdf_rendered, pdf_path=pdf_path_str
+    )
+
+
+def _display_pipeline_summary(result: PipelineResult) -> None:
+    """Display a summary of pipeline stage results."""
     for stage in result.stages:
+        summary = _stage_summary(stage.stage_number, stage.stage_name, result)
         console.print(
             f"  [green]✓[/green] Stage {stage.stage_number}: "
-            f"{stage.stage_name} ({stage.duration_seconds:.1f}s)"
+            f"{summary} ({stage.duration_seconds:.1f}s)"
         )
 
     console.print()
-    console.print(f"  Company:  {result.company}")
-    console.print(f"  Role:     {result.role_title}")
-    console.print(f"  Score:    [bold]{result.review_score}[/bold]/100")
-    console.print(f"  Duration: {result.total_duration_seconds:.1f}s")
+    console.print(
+        f"  Score: [bold]{result.review_score}[/bold]/100  "
+        f"  Duration: {result.total_duration_seconds:.1f}s"
+    )
 
-    if result.output_paths.get("resume_yaml"):
-        console.print(f"  Output:   {result.output_paths['resume_yaml']}")
+
+def _stage_summary(
+    stage_number: int,
+    stage_name: str,
+    result: PipelineResult,
+) -> str:
+    """Build a human-readable summary string for a pipeline stage."""
+    if stage_number == 1:
+        return f"Analyzed JD — {result.company}, {result.role_title}"
+    if stage_number == 2:
+        return f"Selected experience ({stage_name})"
+    if stage_number == 3:
+        return f"Tailored content ({stage_name})"
+    if stage_number == 4:
+        return "Structured resume.yaml"
+    if stage_number == 5:
+        return f"Review score: {result.review_score}/100"
+    return stage_name
+
+
+def _auto_render(
+    result: PipelineResult,
+    output_dir: Path,
+    *,
+    theme: str,
+) -> tuple[bool, str | None]:
+    """Attempt to render the resume YAML to PDF.
+
+    Returns:
+        Tuple of (success, pdf_path_string).
+    """
+    yaml_path_str = result.output_paths.get("resume_yaml")
+    if not yaml_path_str:
+        console.print("  [yellow]⚠[/yellow] No resume.yaml found; skipping render.")
+        return False, None
+
+    yaml_path = Path(yaml_path_str)
+    if not yaml_path.is_file():
+        console.print(
+            f"  [yellow]⚠[/yellow] resume.yaml not found at {yaml_path}; "
+            "skipping render."
+        )
+        return False, None
+
+    try:
+        render_service = create_render_service(settings)
+        rendered = render_service.render_resume(yaml_path, output_dir, theme=theme)
+        console.print(f"  [green]✓[/green] Rendered → {rendered.pdf_path.name}")
+        return True, str(rendered.pdf_path)
+    except Exception as exc:
+        console.print(f"  [yellow]⚠[/yellow] Render failed: {exc}")
+        logger.warning("Auto-render failed", exc_info=True)
+        return False, None
+
+
+def _display_output_tree(
+    result: PipelineResult,
+    output_dir: Path,
+    *,
+    pdf_rendered: bool,
+    pdf_path: str | None,
+) -> None:
+    """Display a tree of output files."""
+    console.print()
+    console.print(f"  Output: {output_dir}/")
+
+    yaml_path = result.output_paths.get("resume_yaml")
+    if yaml_path:
+        connector = "├──" if pdf_rendered else "└──"
+        console.print(f"  {connector} resume.yaml")
+    if pdf_rendered and pdf_path:
+        pdf_name = Path(pdf_path).name
+        console.print(f"  └── {pdf_name}")
 
     console.print()
