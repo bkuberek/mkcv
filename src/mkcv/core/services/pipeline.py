@@ -17,6 +17,7 @@ from mkcv.core.models.review_report import ReviewReport
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.models.tailored_content import TailoredContent
+from mkcv.core.models.token_usage import TokenUsage
 from mkcv.core.ports.artifacts import ArtifactStorePort
 from mkcv.core.ports.llm import LLMPort
 from mkcv.core.ports.prompts import PromptLoaderPort
@@ -273,6 +274,7 @@ class PipelineService:
             stage_number=stage_number,
         )
 
+        usage = llm.get_last_usage()
         self._artifacts.save("stage1_analysis", result.model_dump(), run_dir=run_dir)
 
         meta = self._build_stage_metadata(
@@ -281,6 +283,7 @@ class PipelineService:
             model=config.model,
             temperature=config.temperature,
             duration=time.monotonic() - start,
+            usage=usage,
         )
 
         logger.info(
@@ -322,6 +325,7 @@ class PipelineService:
             stage_number=stage_number,
         )
 
+        usage = llm.get_last_usage()
         self._artifacts.save("stage2_selection", result.model_dump(), run_dir=run_dir)
 
         meta = self._build_stage_metadata(
@@ -330,6 +334,7 @@ class PipelineService:
             model=config.model,
             temperature=config.temperature,
             duration=time.monotonic() - start,
+            usage=usage,
         )
 
         logger.info(
@@ -374,6 +379,7 @@ class PipelineService:
             max_tokens=STAGE_MAX_TOKENS_YAML,
         )
 
+        usage = llm.get_last_usage()
         self._artifacts.save("stage3_content", result.model_dump(), run_dir=run_dir)
 
         meta = self._build_stage_metadata(
@@ -382,6 +388,7 @@ class PipelineService:
             model=config.model,
             temperature=config.temperature,
             duration=time.monotonic() - start,
+            usage=usage,
         )
 
         logger.info(
@@ -437,6 +444,7 @@ class PipelineService:
 
         # Strip markdown code fences if the LLM wraps output
         resume_yaml = _strip_code_fences(resume_yaml)
+        usage = llm.get_last_usage()
 
         # Save metadata about the stage
         self._artifacts.save(
@@ -451,6 +459,7 @@ class PipelineService:
             model=config.model,
             temperature=config.temperature,
             duration=time.monotonic() - start,
+            usage=usage,
         )
 
         logger.info(
@@ -494,6 +503,7 @@ class PipelineService:
             max_tokens=STAGE_MAX_TOKENS_YAML,
         )
 
+        usage = llm.get_last_usage()
         self._artifacts.save("stage5_review", result.model_dump(), run_dir=run_dir)
 
         meta = self._build_stage_metadata(
@@ -502,6 +512,7 @@ class PipelineService:
             model=config.model,
             temperature=config.temperature,
             duration=time.monotonic() - start,
+            usage=usage,
         )
 
         logger.info(
@@ -587,20 +598,20 @@ class PipelineService:
         model: str,
         temperature: float,
         duration: float,
+        usage: TokenUsage | None = None,
     ) -> StageMetadata:
-        """Build metadata for a completed stage.
+        """Build metadata for a completed stage."""
+        input_tokens = usage.input_tokens if usage else 0
+        output_tokens = usage.output_tokens if usage else 0
 
-        Token counts and cost are placeholders until the LLM adapters
-        report actual usage.
-        """
         return StageMetadata(
             stage_number=stage_number,
             stage_name=STAGE_NAMES[stage_number],
             provider=provider,
             model=model,
             temperature=temperature,
-            input_tokens=0,
-            output_tokens=0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             cost_usd=0.0,
             duration_seconds=round(duration, 3),
         )

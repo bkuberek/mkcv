@@ -4,6 +4,8 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
+from mkcv.core.models.token_usage import TokenUsage
+
 
 @runtime_checkable
 class LLMPort(Protocol):
@@ -33,4 +35,11 @@ class LLMPort(Protocol):
         max_tokens: int = 4096,
     ) -> BaseModel:
         """Send a completion request and return a validated Pydantic model."""
+        ...
+
+    def get_last_usage(self) -> TokenUsage:
+        """Return token usage from the most recent call.
+
+        Returns TokenUsage(0, 0) if usage tracking is not supported.
+        """
         ...

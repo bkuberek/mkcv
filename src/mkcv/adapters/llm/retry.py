@@ -6,6 +6,7 @@ import logging
 from pydantic import BaseModel
 
 from mkcv.core.exceptions.rate_limit import RateLimitError
+from mkcv.core.models.token_usage import TokenUsage
 from mkcv.core.ports.llm import LLMPort
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,10 @@ class RetryingLLMAdapter:
         self._base_delay = base_delay
         self._max_delay = max_delay
         self._backoff_factor = backoff_factor
+
+    def get_last_usage(self) -> TokenUsage:
+        """Delegate to the inner adapter's usage tracking."""
+        return self._inner.get_last_usage()
 
     async def complete(
         self,

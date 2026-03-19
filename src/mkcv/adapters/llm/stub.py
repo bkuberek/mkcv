@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from mkcv.core.models.token_usage import TokenUsage
+
 
 class StubLLMAdapter:
     """Configurable stub LLM adapter for testing.
@@ -85,6 +87,10 @@ class StubLLMAdapter:
     def call_log(self) -> list[dict[str, Any]]:
         """Access the log of all calls made to this adapter."""
         return self._call_log.copy()
+
+    def get_last_usage(self) -> TokenUsage:
+        """Return zero usage (stub has no real token counts)."""
+        return TokenUsage()
 
     def reset(self) -> None:
         """Clear the call log."""

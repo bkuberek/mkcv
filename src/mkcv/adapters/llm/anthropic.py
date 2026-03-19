@@ -15,6 +15,7 @@ from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.exceptions.context_length import ContextLengthError
 from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.rate_limit import RateLimitError
+from mkcv.core.models.token_usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class AnthropicAdapter:
         if base_url:
             kwargs["base_url"] = base_url
         self._client = anthropic.AsyncAnthropic(**kwargs)
+        self._last_usage = TokenUsage()
 
     async def complete(
         self,
@@ -51,6 +53,10 @@ class AnthropicAdapter:
             if system:
                 kwargs["system"] = system
             response = await self._client.messages.create(**kwargs)
+            self._last_usage = TokenUsage(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            )
             # Extract text from first content block
             for block in response.content:
                 if block.type == "text":
@@ -115,6 +121,10 @@ class AnthropicAdapter:
             if system:
                 kwargs["system"] = system
             response = await self._client.messages.create(**kwargs)
+            self._last_usage = TokenUsage(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            )
 
             # Extract tool call input
             for block in response.content:
@@ -152,3 +162,7 @@ class AnthropicAdapter:
             raise AuthenticationError(str(e), provider="anthropic") from e
         except anthropic.APIError as e:
             raise ProviderError(str(e), provider="anthropic") from e
+
+    def get_last_usage(self) -> TokenUsage:
+        """Return token usage from the most recent API call."""
+        return self._last_usage

@@ -17,6 +17,7 @@ from mkcv.adapters.llm._utils import (
     validate_structured_response,
 )
 from mkcv.core.exceptions.provider import ProviderError
+from mkcv.core.models.token_usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class OllamaAdapter:
             base_url=base_url,
         )
         self._default_model = model
+        self._last_usage = TokenUsage()
 
     async def complete(
         self,
@@ -63,6 +65,11 @@ class OllamaAdapter:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            if response.usage:
+                self._last_usage = TokenUsage(
+                    input_tokens=response.usage.prompt_tokens,
+                    output_tokens=response.usage.completion_tokens,
+                )
             return response.choices[0].message.content or ""
         except openai.APIConnectionError as e:
             raise ProviderError(
@@ -101,6 +108,11 @@ class OllamaAdapter:
                 "response_format": {"type": "json_object"},
             }
             response = await self._client.chat.completions.create(**create_kwargs)
+            if response.usage:
+                self._last_usage = TokenUsage(
+                    input_tokens=response.usage.prompt_tokens,
+                    output_tokens=response.usage.completion_tokens,
+                )
 
             content = response.choices[0].message.content or ""
             data = extract_json_from_text(content)
@@ -116,6 +128,10 @@ class OllamaAdapter:
             ) from e
         except openai.APIError as e:
             raise ProviderError(str(e), provider="ollama") from e
+
+    def get_last_usage(self) -> TokenUsage:
+        """Return token usage from the most recent API call."""
+        return self._last_usage
 
 
 def _augment_with_schema(

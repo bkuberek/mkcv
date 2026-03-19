@@ -15,6 +15,7 @@ from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.exceptions.context_length import ContextLengthError
 from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.rate_limit import RateLimitError
+from mkcv.core.models.token_usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class OpenAIAdapter:
         if base_url:
             kwargs["base_url"] = base_url
         self._client = openai.AsyncOpenAI(**kwargs)
+        self._last_usage = TokenUsage()
 
     async def complete(
         self,
@@ -50,6 +52,11 @@ class OpenAIAdapter:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            if response.usage:
+                self._last_usage = TokenUsage(
+                    input_tokens=response.usage.prompt_tokens,
+                    output_tokens=response.usage.completion_tokens,
+                )
             return response.choices[0].message.content or ""
         except openai.RateLimitError as e:
             raise RateLimitError(str(e), provider="openai") from e
@@ -107,6 +114,11 @@ class OpenAIAdapter:
                 "response_format": {"type": "json_object"},
             }
             response = await self._client.chat.completions.create(**create_kwargs)
+            if response.usage:
+                self._last_usage = TokenUsage(
+                    input_tokens=response.usage.prompt_tokens,
+                    output_tokens=response.usage.completion_tokens,
+                )
 
             content = response.choices[0].message.content or ""
             data = extract_json_from_text(content)
@@ -125,3 +137,7 @@ class OpenAIAdapter:
             raise AuthenticationError(str(e), provider="openai") from e
         except openai.APIError as e:
             raise ProviderError(str(e), provider="openai") from e
+
+    def get_last_usage(self) -> TokenUsage:
+        """Return token usage from the most recent API call."""
+        return self._last_usage
