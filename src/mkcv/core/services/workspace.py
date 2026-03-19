@@ -79,3 +79,31 @@ class WorkspaceService:
             Sorted list of application directory paths.
         """
         return self._workspace.list_applications(workspace_root)
+
+    def find_latest_application(
+        self,
+        workspace_root: Path,
+        *,
+        company: str | None = None,
+    ) -> Path | None:
+        """Find the most recent application directory.
+
+        Args:
+            workspace_root: Workspace root path.
+            company: Optional company name filter (will be slugified).
+
+        Returns:
+            Path to the latest application directory, or None.
+        """
+        return self._workspace.find_latest_application(workspace_root, company=company)
+
+    def resolve_resume_path(self, app_dir: Path) -> Path | None:
+        """Find resume.yaml within an application directory.
+
+        Args:
+            app_dir: Path to the application directory.
+
+        Returns:
+            Path to resume.yaml if it exists, or None.
+        """
+        return self._workspace.resolve_resume_path(app_dir)

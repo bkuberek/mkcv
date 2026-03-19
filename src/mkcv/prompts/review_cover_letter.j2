@@ -1,0 +1,77 @@
+{# Cover Letter Review — Stage 2
+
+Context variables:
+  - cover_letter: dict — structured cover letter content
+  - jd_text: str — full job description text
+
+Output: JSON matching CoverLetterReview model schema.
+#}
+You are an expert recruiter and hiring manager reviewing a cover letter.
+Evaluate this cover letter for quality, relevance, and effectiveness.
+
+## Job Description
+
+{{ jd_text }}
+
+## Cover Letter Under Review
+
+**Company:** {{ cover_letter.company }}
+**Position:** {{ cover_letter.role_title }}
+
+{{ cover_letter.salutation }}
+
+{{ cover_letter.opening_paragraph }}
+
+{% for paragraph in cover_letter.body_paragraphs %}
+{{ paragraph }}
+
+{% endfor %}
+{{ cover_letter.closing_paragraph }}
+
+{{ cover_letter.sign_off }}
+{{ cover_letter.candidate_name }}
+
+## Evaluation Criteria
+
+Score each dimension and provide specific feedback:
+
+1. **Tone Assessment** — Is the tone appropriate for this company and role?
+   (startup vs enterprise, technical vs business, etc.)
+
+2. **Specificity** (0-100) — How specific vs generic is the letter?
+   - 90+: References specific company products, projects, or values
+   - 70-89: Mentions company by name with some specific details
+   - 50-69: Could be sent to any similar company with minor edits
+   - Below 50: Completely generic
+
+3. **Keyword Alignment** — Which JD requirements does the letter address?
+   List each requirement that is referenced.
+
+4. **Length Assessment** — Is the letter an appropriate length?
+   (Target: 250-400 words, 3-4 paragraphs)
+
+5. **Strengths** — What does the letter do well? (list 2-4 items)
+
+6. **Improvements** — Specific, actionable suggestions (list 2-4 items)
+
+7. **Red Flags** — Any factual errors, inappropriate tone, or content issues?
+   (empty list if none)
+
+8. **Overall Score** (0-100) — Weighted assessment:
+   - 40% specificity and relevance to JD
+   - 25% tone and professionalism
+   - 20% compelling narrative and structure
+   - 15% grammar, clarity, and polish
+
+### Output Format
+Return a JSON object matching this schema:
+{
+  "overall_score": 0-100,
+  "tone_assessment": "string — tone evaluation",
+  "specificity_score": 0-100,
+  "keyword_alignment": ["string — JD requirement addressed"],
+  "length_assessment": "string — length evaluation",
+  "strengths": ["string — what works well"],
+  "improvements": ["string — specific suggestion"],
+  "red_flags": ["string — issue found"]
+}

@@ -572,6 +572,83 @@ class WorkspaceManager:
         )
 
     # ------------------------------------------------------------------
+    # Version resolution
+    # ------------------------------------------------------------------
+
+    def find_latest_application(
+        self,
+        workspace_root: Path,
+        *,
+        company: str | None = None,
+    ) -> Path | None:
+        """Find the most recent application directory.
+
+        When ``company`` is provided, only that company's subdirectory
+        is searched.  Otherwise, all companies are considered.
+
+        Directories are identified by containing ``application.toml``
+        and are sorted lexicographically (the ``YYYY-MM-`` prefix
+        ensures chronological order).
+
+        Args:
+            workspace_root: Workspace root path.
+            company: Optional company name filter (will be slugified).
+
+        Returns:
+            Path to the latest application directory, or None.
+        """
+        all_apps = self.list_applications(workspace_root)
+        if not all_apps:
+            return None
+
+        if company is not None:
+            company_slug = self.slugify(company)
+            apps_dir = self.get_applications_dir(workspace_root)
+            company_dir = apps_dir / company_slug
+            all_apps = [app for app in all_apps if app.parent == company_dir]
+
+        return all_apps[-1] if all_apps else None
+
+    def resolve_resume_path(self, app_dir: Path) -> Path | None:
+        """Find resume.yaml within an application directory.
+
+        Args:
+            app_dir: Path to the application directory.
+
+        Returns:
+            Path to resume.yaml if it exists, or None.
+        """
+        resume = app_dir / "resume.yaml"
+        return resume if resume.is_file() else None
+
+    def find_latest_resume(self, workspace_root: Path) -> Path | None:
+        """Find the latest generic resume from the resumes/ directory.
+
+        Scans ``resumes/`` for versioned directories containing
+        ``resume.yaml``, sorted lexicographically, and returns
+        the resume.yaml from the last (most recent) directory.
+
+        Args:
+            workspace_root: Workspace root path.
+
+        Returns:
+            Path to the latest resume.yaml, or None.
+        """
+        resumes_dir = workspace_root / "resumes"
+        if not resumes_dir.is_dir():
+            return None
+
+        resume_dirs = sorted(
+            d
+            for d in resumes_dir.iterdir()
+            if d.is_dir() and (d / "resume.yaml").is_file()
+        )
+        if not resume_dirs:
+            return None
+
+        return resume_dirs[-1] / "resume.yaml"
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 

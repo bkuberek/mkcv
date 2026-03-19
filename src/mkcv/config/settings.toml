@@ -37,6 +37,19 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 temperature = 0.3
 
+[default.cover_letter]
+auto_render = true
+
+[default.cover_letter.stages.generate]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+temperature = 0.6
+
+[default.cover_letter.stages.review]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+temperature = 0.2
+
 [default.rendering]
 theme = "sb2nov"
 font = "SourceSansPro"

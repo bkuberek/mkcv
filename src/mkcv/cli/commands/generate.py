@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from rich.status import Status
 
 from mkcv.adapters.factory import (
+    create_cover_letter_service,
     create_pipeline_service,
     create_render_service,
     create_workspace_service,
@@ -151,6 +152,27 @@ def generate_command(
             help="Pause after each stage for review.",
         ),
     ] = False,
+    cover_letter: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--cover-letter", "--no-cover-letter"],
+            help="Chain cover letter generation after resume pipeline.",
+        ),
+    ] = False,
+    cv_preset: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name="--cv-preset",
+            help="Override preset for resume only (default: --preset value).",
+        ),
+    ] = None,
+    cl_preset: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name="--cl-preset",
+            help="Override preset for cover letter only (default: --preset value).",
+        ),
+    ] = None,
 ) -> None:
     """Generate a tailored resume from a job description and knowledge base.
 
@@ -181,6 +203,10 @@ def generate_command(
         settings.in_workspace and not is_generic and company and position
     )
 
+    # Resolve per-output-type presets
+    effective_cv_preset = cv_preset or resolved_preset
+    effective_cl_preset = cl_preset or resolved_preset
+
     if use_workspace_mode:
         _generate_workspace_mode(
             jd_text=jd_text,
@@ -190,11 +216,13 @@ def generate_command(
             position=position,
             output_dir=output_dir,
             theme=theme,
-            preset=resolved_preset,
+            preset=effective_cv_preset,
             provider=resolved_provider,
             from_stage=from_stage,
             render_pdf=render,
             interactive=interactive,
+            chain_cover_letter=cover_letter,
+            cl_preset=effective_cl_preset,
         )
     elif settings.in_workspace and not is_generic and (not company or not position):
         # Targeted resume in workspace but missing company/position
@@ -217,11 +245,13 @@ def generate_command(
             kb=kb,
             output_dir=output_dir,
             theme=theme,
-            preset=resolved_preset,
+            preset=effective_cv_preset,
             provider=resolved_provider,
             from_stage=from_stage,
             render_pdf=render,
             interactive=interactive,
+            chain_cover_letter=cover_letter,
+            cl_preset=effective_cl_preset,
         )
 
 
@@ -405,6 +435,8 @@ def _generate_workspace_mode(
     from_stage: int,
     render_pdf: bool,
     interactive: bool,
+    chain_cover_letter: bool = False,
+    cl_preset: str = "standard",
 ) -> None:
     """Generate in workspace mode — creates application directory."""
     workspace_root = settings.workspace_root
@@ -474,6 +506,9 @@ def _generate_workspace_mode(
         render_pdf=render_pdf,
         theme=theme,
         interactive=interactive,
+        chain_cover_letter=chain_cover_letter,
+        jd_text=jd_text,
+        cl_preset=cl_preset,
     )
 
 
@@ -489,6 +524,8 @@ def _generate_standalone_mode(
     from_stage: int,
     render_pdf: bool,
     interactive: bool,
+    chain_cover_letter: bool = False,
+    cl_preset: str = "standard",
 ) -> None:
     """Generate in standalone mode (no workspace)."""
     if kb is None:
@@ -529,6 +566,9 @@ def _generate_standalone_mode(
         render_pdf=render_pdf,
         theme=theme,
         interactive=interactive,
+        chain_cover_letter=chain_cover_letter,
+        jd_text=jd_text,
+        cl_preset=cl_preset,
     )
 
 
@@ -543,6 +583,9 @@ def _run_pipeline(
     render_pdf: bool = True,
     theme: str = "sb2nov",
     interactive: bool = False,
+    chain_cover_letter: bool = False,
+    jd_text: str = "",
+    cl_preset: str = "standard",
 ) -> None:
     """Execute the AI pipeline, display results, and optionally render PDF."""
     # ---- Validate KB before running pipeline ----
@@ -593,6 +636,16 @@ def _run_pipeline(
     _display_output_tree(
         result, output_dir, pdf_rendered=pdf_rendered, pdf_path=pdf_path_str
     )
+
+    # Chain cover letter if requested
+    if chain_cover_letter:
+        _chain_cover_letter(
+            result=result,
+            jd_text=jd_text,
+            output_dir=output_dir,
+            provider_override=provider_override,
+            cl_preset=cl_preset,
+        )
 
 
 def _display_kb_validation(result: KBValidationResult) -> None:
@@ -712,6 +765,83 @@ def _display_output_tree(
     if pdf_rendered and pdf_path:
         pdf_name = Path(pdf_path).name
         console.print(f"  \u2514\u2500\u2500 {pdf_name}")
+
+    console.print()
+
+
+# ------------------------------------------------------------------
+# Cover letter chaining
+# ------------------------------------------------------------------
+
+
+def _chain_cover_letter(
+    *,
+    result: PipelineResult,
+    jd_text: str,
+    output_dir: Path,
+    provider_override: str | None,
+    cl_preset: str,
+) -> None:
+    """Chain cover letter generation after a successful resume pipeline."""
+    console.print()
+    console.print("  [bold]Chaining cover letter...[/bold]")
+
+    # Read the generated resume
+    yaml_path_str = result.output_paths.get("resume_yaml")
+    if not yaml_path_str:
+        console.print(
+            "  [yellow]\u26a0[/yellow] No resume.yaml produced — skipping cover letter."
+        )
+        return
+
+    yaml_path = Path(yaml_path_str)
+    if not yaml_path.is_file():
+        console.print(
+            "  [yellow]\u26a0[/yellow] resume.yaml not found — skipping cover letter."
+        )
+        return
+
+    resume_text = yaml_path.read_text(encoding="utf-8")
+
+    try:
+        cl_service = create_cover_letter_service(
+            settings, provider_override=provider_override
+        )
+    except MkcvError as exc:
+        console.print(f"  [yellow]\u26a0[/yellow] Cover letter setup failed: {exc}")
+        return
+
+    try:
+        cl_result = asyncio.run(
+            cl_service.generate(
+                jd_text,
+                resume_text=resume_text,
+                output_dir=output_dir,
+                company=result.company,
+                role_title=result.role_title,
+            )
+        )
+    except MkcvError as exc:
+        console.print(
+            f"  [yellow]\u26a0[/yellow] Cover letter generation failed: {exc}"
+        )
+        return
+
+    # Display CL results
+    for stage in cl_result.stages:
+        model_short = stage.model.split("/")[-1]
+        cost_str = f"${stage.cost_usd:.4f}" if stage.cost_usd > 0 else "free"
+        console.print(
+            f"  [green]\u2713[/green] CL: {stage.stage_name} "
+            f"[dim]({stage.duration_seconds:.1f}s, "
+            f"{model_short}, {cost_str})[/dim]"
+        )
+
+    console.print(f"  Cover letter score: [bold]{cl_result.review_score}[/bold]/100")
+
+    for path_str in cl_result.output_paths.values():
+        name = Path(path_str).name
+        console.print(f"  \u2514\u2500\u2500 {name}")
 
     console.print()
 

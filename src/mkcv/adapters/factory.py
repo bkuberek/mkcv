@@ -25,6 +25,7 @@ from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.models.profile_preset import Preset, resolve_preset
 from mkcv.core.models.stage_config import StageConfig
+from mkcv.core.services.cover_letter import CoverLetterService
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
 from mkcv.core.services.validation import ValidationService
@@ -325,6 +326,114 @@ def create_workspace_service() -> WorkspaceService:
     """
     manager = WorkspaceManager()
     return WorkspaceService(workspace=manager)
+
+
+_CL_STAGE_CONFIG_KEYS: dict[int, str] = {
+    1: "generate",
+    2: "review",
+}
+
+
+def _resolve_cl_stage_configs(
+    config: Configuration,
+) -> dict[int, StageConfig]:
+    """Read cover letter stage configs from settings.
+
+    Falls back to sensible defaults if ``[cover_letter.stages.*]``
+    is not configured.
+
+    Args:
+        config: Application configuration.
+
+    Returns:
+        Dict mapping CL stage number (1-2) to StageConfig.
+    """
+    stage_configs: dict[int, StageConfig] = {}
+    default_temps = {1: 0.6, 2: 0.2}
+
+    for stage_num, key in _CL_STAGE_CONFIG_KEYS.items():
+        try:
+            cl_section = getattr(config, "cover_letter", None)
+            if cl_section is not None:
+                stages = getattr(cl_section, "stages", None)
+                if stages is not None:
+                    stage_section = getattr(stages, key)
+                    provider = str(getattr(stage_section, "provider", "anthropic"))
+                    model = str(
+                        getattr(
+                            stage_section,
+                            "model",
+                            "claude-sonnet-4-20250514",
+                        )
+                    )
+                    temperature = float(
+                        getattr(
+                            stage_section,
+                            "temperature",
+                            default_temps[stage_num],
+                        )
+                    )
+                    stage_configs[stage_num] = StageConfig(
+                        provider=provider,
+                        model=model,
+                        temperature=temperature,
+                    )
+                    continue
+        except AttributeError:
+            pass
+
+        # Default fallback
+        stage_configs[stage_num] = StageConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            temperature=default_temps[stage_num],
+        )
+
+    return stage_configs
+
+
+def create_cover_letter_service(
+    config: Configuration,
+    *,
+    provider_override: str | None = None,
+) -> CoverLetterService:
+    """Create a fully-wired CoverLetterService.
+
+    Args:
+        config: Application configuration.
+        provider_override: Override provider for all CL stages.
+
+    Returns:
+        CoverLetterService with LLM, prompt, artifact, and renderer adapters.
+    """
+    from mkcv.adapters.renderers.typst_cover_letter import (
+        TypstCoverLetterRenderer,
+    )
+
+    prompt_loader = _create_prompt_loader(config)
+    artifact_store = FileSystemArtifactStore()
+    renderer = TypstCoverLetterRenderer()
+    stage_configs = _resolve_cl_stage_configs(config)
+
+    if provider_override is not None:
+        stage_configs = {
+            num: StageConfig(
+                provider=provider_override,
+                model=sc.model,
+                temperature=sc.temperature,
+            )
+            for num, sc in stage_configs.items()
+        }
+
+    providers = _create_providers(config, stage_configs)
+
+    return CoverLetterService(
+        providers=providers,
+        prompts=prompt_loader,
+        artifacts=artifact_store,
+        renderer=renderer,
+        stage_configs=stage_configs,
+    )
 
 
 def _create_prompt_loader(config: Configuration) -> FileSystemPromptLoader:

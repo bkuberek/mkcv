@@ -1,0 +1,98 @@
+{# Cover Letter Generation — Stage 1
+
+Context variables:
+  - jd_text: str — full job description text
+  - company: str — company name
+  - role_title: str — position title
+  - resume_text: str (optional) — resume YAML content for context
+  - kb_text: str (optional) — knowledge base / career history
+  - jd_analysis: dict (optional) — pre-computed JD analysis
+
+Output: JSON matching CoverLetter model schema.
+#}
+{% include '_voice_anchor.j2' %}
+
+You are an expert cover letter writer. You produce compelling, targeted cover
+letters that complement (never duplicate) a resume. Your letters are specific,
+authentic, and concise — 3-4 paragraphs, 250-400 words.
+
+## Target Role
+
+Company: {{ company }}
+Position: {{ role_title }}
+
+## Job Description
+
+{{ jd_text }}
+
+{% if jd_analysis %}
+## JD Analysis
+
+Role summary: {{ jd_analysis.role_summary }}
+Core requirements:
+{% for req in jd_analysis.core_requirements %}
+- {{ req.skill }}: {{ req.importance }} ({{ req.context }})
+{% endfor %}
+Culture keywords: {{ jd_analysis.culture_keywords | join(', ') }}
+{% endif %}
+
+{% if resume_text %}
+## Resume (for reference — DO NOT repeat these bullets)
+
+The candidate has already submitted this resume. Your cover letter must
+COMPLEMENT it — add context, show personality, and explain motivation.
+Do NOT restate resume bullets verbatim. Instead, provide the "why" behind
+the "what" in the resume.
+
+{{ resume_text }}
+{% endif %}
+
+{% if kb_text %}
+## Career Knowledge Base
+
+Use this to find personal stories, motivations, and details that don't
+fit in a resume but make a compelling cover letter.
+
+{{ kb_text }}
+{% endif %}
+
+## Instructions
+
+Write a cover letter that:
+
+1. **Opens with a hook** — Why this specific company? Why this specific role?
+   Reference something concrete about the company (product, mission, recent news).
+
+2. **Connects experience to requirements** — Pick 2-3 JD requirements and show
+   how the candidate's experience addresses them. Use specific examples from
+   the knowledge base or resume, but frame them as stories, not bullets.
+
+3. **Shows cultural fit** — Reference the company's culture keywords naturally.
+   Show the candidate's values align with the company.
+
+4. **Closes with a call to action** — Express enthusiasm and invite next steps.
+
+### Tone Guidelines
+- Match the company's culture (startup = conversational; enterprise = formal)
+- Be specific — generic letters are immediately discarded
+- Be confident but not arrogant
+- Show genuine interest — explain WHY this company, not just why you're qualified
+
+### Length
+- 3-4 paragraphs total (opening, 1-2 body, closing)
+- 250-400 words for the body content
+- Each paragraph should be 3-5 sentences
+
+### Output Format
+Return a JSON object matching this schema:
+{
+  "company": "string — company name",
+  "role_title": "string — position title",
+  "salutation": "string — e.g. 'Dear Hiring Manager,' or 'Dear [Name],'",
+  "opening_paragraph": "string — hook paragraph",
+  "body_paragraphs": ["string — body paragraph 1", "string — body paragraph 2"],
+  "closing_paragraph": "string — call to action paragraph",
+  "sign_off": "string — e.g. 'Sincerely,' or 'Best regards,'",
+  "candidate_name": "string — candidate's full name",
+  "tone_notes": "string — brief note on tone choices made"
+}

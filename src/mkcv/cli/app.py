@@ -39,6 +39,7 @@ app.command("mkcv.cli.commands.validate:validate_command", name="validate")
 app.command("mkcv.cli.commands.init_cmd:init_command", name="init")
 app.command("mkcv.cli.commands.themes:themes_command", name="themes")
 app.command("mkcv.cli.commands.status:status_command", name="status")
+app.command("mkcv.cli.commands.cover_letter:cover_letter_command", name="cover-letter")
 
 
 # ---------------------------------------------------------------------------
