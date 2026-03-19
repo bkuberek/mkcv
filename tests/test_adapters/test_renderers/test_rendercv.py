@@ -53,7 +53,7 @@ class TestRenderCVAdapterRender:
         tmp_path: Path,
     ) -> None:
         output_dir = tmp_path / "output"
-        result = adapter.render(yaml_file, output_dir)
+        result = adapter.render(yaml_file, output_dir, theme="classic")
 
         assert isinstance(result, RenderedOutput)
         assert result.pdf_path.exists()
@@ -67,7 +67,7 @@ class TestRenderCVAdapterRender:
         tmp_path: Path,
     ) -> None:
         output_dir = tmp_path / "output"
-        result = adapter.render(yaml_file, output_dir)
+        result = adapter.render(yaml_file, output_dir, theme="classic")
 
         assert result.png_path is not None
         assert result.png_path.exists()
@@ -81,7 +81,7 @@ class TestRenderCVAdapterRender:
         tmp_path: Path,
     ) -> None:
         output_dir = tmp_path / "output"
-        result = adapter.render(yaml_file, output_dir)
+        result = adapter.render(yaml_file, output_dir, theme="classic")
 
         assert result.md_path is not None
         assert result.md_path.exists()
@@ -95,7 +95,7 @@ class TestRenderCVAdapterRender:
         tmp_path: Path,
     ) -> None:
         output_dir = tmp_path / "output"
-        result = adapter.render(yaml_file, output_dir)
+        result = adapter.render(yaml_file, output_dir, theme="classic")
 
         assert result.html_path is not None
         assert result.html_path.exists()
@@ -112,7 +112,7 @@ class TestRenderCVAdapterErrors:
     ) -> None:
         nonexistent = tmp_path / "does_not_exist.yaml"
         with pytest.raises(RenderError, match="YAML file not found"):
-            adapter.render(nonexistent, tmp_path / "output")
+            adapter.render(nonexistent, tmp_path / "output", theme="classic")
 
     def test_render_raises_for_invalid_yaml(
         self,
@@ -123,7 +123,7 @@ class TestRenderCVAdapterErrors:
         bad_yaml.write_text("not: valid: rendercv: yaml: [[[", encoding="utf-8")
 
         with pytest.raises(RenderError, match="Invalid RenderCV YAML"):
-            adapter.render(bad_yaml, tmp_path / "output")
+            adapter.render(bad_yaml, tmp_path / "output", theme="classic")
 
     def test_render_raises_for_empty_yaml(
         self,
@@ -134,4 +134,4 @@ class TestRenderCVAdapterErrors:
         empty_yaml.write_text("", encoding="utf-8")
 
         with pytest.raises(RenderError, match="Invalid RenderCV YAML"):
-            adapter.render(empty_yaml, tmp_path / "output")
+            adapter.render(empty_yaml, tmp_path / "output", theme="classic")

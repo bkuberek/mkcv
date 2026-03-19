@@ -3,6 +3,7 @@
 Context variables:
   - tailored_content: dict — complete tailored content from Stage 3
   - kb_text: str — knowledge base for extracting personal information
+  - theme: str — RenderCV theme name (default "sb2nov")
   - page_budget: str — target page count ("1", "1-2", "2+") (default "1-2")
   - density: str — "concise", "standard", or "comprehensive" (default "standard")
 
@@ -101,7 +102,7 @@ cv:
       - label: "English"
         details: "Proficient"
 design:
-  theme: sb2nov
+  theme: {{ theme | default("sb2nov") }}
 ```
 
 ### Key Rules

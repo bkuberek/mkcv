@@ -92,10 +92,12 @@ class TestGenerateStandaloneMode:
             from mkcv.cli.commands.generate import generate_command
 
             generate_command(jd=str(jd), kb=kb)
+        # theme is resolved from settings.rendering.theme via resolve_theme()
         mock_create.assert_called_once_with(
             mock_settings,
             preset_name="standard",
             provider_override=None,
+            theme=mock_settings.rendering.theme,
         )
 
     def test_standalone_missing_kb_exits_with_error(self, tmp_path: Path) -> None:
@@ -177,6 +179,7 @@ class TestGenerateStandaloneMode:
             mock_settings,
             preset_name="comprehensive",
             provider_override=None,
+            theme=mock_settings.rendering.theme,
         )
 
     def test_no_render_skips_auto_render(self, tmp_path: Path) -> None:
@@ -590,6 +593,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="concise",
             provider_override=None,
+            theme=mock_settings.rendering.theme,
         )
 
     def test_profile_budget_maps_to_concise_with_ollama(self, tmp_path: Path) -> None:
@@ -616,6 +620,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="concise",
             provider_override="ollama",
+            theme=mock_settings.rendering.theme,
         )
 
     def test_profile_premium_maps_to_standard(self, tmp_path: Path) -> None:
@@ -642,6 +647,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="standard",
             provider_override=None,
+            theme=mock_settings.rendering.theme,
         )
 
     def test_profile_triggers_deprecation_warning(
@@ -693,6 +699,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="comprehensive",
             provider_override="openrouter",
+            theme=mock_settings.rendering.theme,
         )
 
     def test_preset_label_in_standalone_output(

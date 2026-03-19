@@ -11,6 +11,7 @@ from rich.console import Console
 
 from mkcv.adapters.factory import create_render_service
 from mkcv.config import settings
+from mkcv.core.services.theme import resolve_theme
 
 console = Console()
 
@@ -33,7 +34,11 @@ def render_command(
     theme: Annotated[
         str | None,
         cyclopts.Parameter(
-            help="Override theme (default: from YAML).",
+            help=(
+                "Visual theme override (fonts, colors, layout). "
+                "Default: from YAML design section. "
+                "Run 'mkcv themes' to list options."
+            ),
         ),
     ] = None,
     format: Annotated[
@@ -64,7 +69,7 @@ def render_command(
     effective_output_dir = (
         output_dir if output_dir is not None else resolved_yaml.parent
     )
-    effective_theme = theme if theme is not None else "sb2nov"
+    effective_theme = resolve_theme(theme, settings.rendering.theme)
     requested_formats = [f.strip() for f in format.split(",") if f.strip()]
 
     service = create_render_service(settings)

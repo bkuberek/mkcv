@@ -29,6 +29,7 @@ from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.services.jd_reader import read_jd
 from mkcv.core.services.kb_validator import validate_kb
+from mkcv.core.services.theme import resolve_theme
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +106,14 @@ def generate_command(
         ),
     ] = None,
     theme: Annotated[
-        str,
+        str | None,
         cyclopts.Parameter(
-            help="RenderCV theme name.",
+            help=(
+                "Visual theme for the resume (fonts, colors, layout). "
+                "Run 'mkcv themes' to list available options."
+            ),
         ),
-    ] = "sb2nov",
+    ] = None,
     preset: Annotated[
         str,
         cyclopts.Parameter(
@@ -188,6 +192,9 @@ def generate_command(
         preset_raw=preset, profile=profile, provider=provider
     )
 
+    # ---- Resolve theme from CLI / config / default ----
+    effective_theme = resolve_theme(theme, settings.rendering.theme)
+
     # ---- Resolve JD source ----
     if jd is not None:
         jd_text, jd_display = _resolve_jd(jd)
@@ -215,7 +222,7 @@ def generate_command(
             company=company,
             position=position,
             output_dir=output_dir,
-            theme=theme,
+            theme=effective_theme,
             preset=effective_cv_preset,
             provider=resolved_provider,
             from_stage=from_stage,
@@ -244,7 +251,7 @@ def generate_command(
             jd_display=jd_display,
             kb=kb,
             output_dir=output_dir,
-            theme=theme,
+            theme=effective_theme,
             preset=effective_cv_preset,
             provider=resolved_provider,
             from_stage=from_stage,
@@ -581,7 +588,7 @@ def _run_pipeline(
     provider_override: str | None = None,
     from_stage: int,
     render_pdf: bool = True,
-    theme: str = "sb2nov",
+    theme: str,
     interactive: bool = False,
     chain_cover_letter: bool = False,
     jd_text: str = "",
@@ -596,7 +603,10 @@ def _run_pipeline(
         sys.exit(5)
 
     pipeline = create_pipeline_service(
-        settings, preset_name=preset_name, provider_override=provider_override
+        settings,
+        preset_name=preset_name,
+        provider_override=provider_override,
+        theme=theme,
     )
 
     if interactive:
@@ -617,6 +627,7 @@ def _run_pipeline(
                 output_dir=output_dir,
                 from_stage=from_stage,
                 stage_callback=callback,
+                theme=theme,
             )
         )
     except MkcvError as exc:

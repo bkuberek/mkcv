@@ -99,6 +99,29 @@ class TestThemeInfo:
         with pytest.raises(ValidationError):
             ThemeInfo()  # type: ignore[call-arg]
 
+    def test_source_defaults_to_builtin(self) -> None:
+        theme = ThemeInfo(
+            name="classic",
+            description="A theme",
+            font_family="Arial",
+            primary_color="#000",
+            accent_color="#666",
+            page_size="letterpaper",
+        )
+        assert theme.source == "built-in"
+
+    def test_source_can_be_custom(self) -> None:
+        theme = ThemeInfo(
+            name="mytheme",
+            description="Custom theme",
+            font_family="Charter",
+            primary_color="#004080",
+            accent_color="#000",
+            page_size="a4paper",
+            source="custom",
+        )
+        assert theme.source == "custom"
+
     def test_model_dump(self) -> None:
         theme = ThemeInfo(
             name="classic",
@@ -116,4 +139,5 @@ class TestThemeInfo:
             "primary_color": "#003366",
             "accent_color": "#666666",
             "page_size": "letterpaper",
+            "source": "built-in",
         }

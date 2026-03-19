@@ -15,6 +15,7 @@ from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.pricing import calculate_cost
 from mkcv.core.models.profile_preset import Preset
+from mkcv.core.models.resume_design import ResumeDesign
 from mkcv.core.models.review_report import ReviewReport
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_metadata import StageMetadata
@@ -72,12 +73,14 @@ class PipelineService:
         artifacts: ArtifactStorePort,
         stage_configs: dict[int, StageConfig] | None = None,
         preset: Preset | None = None,
+        resume_design: ResumeDesign | None = None,
     ) -> None:
         self._providers = providers
         self._prompts = prompts
         self._artifacts = artifacts
         self._stage_configs = stage_configs or DEFAULT_STAGE_CONFIGS
         self._preset = preset
+        self._resume_design = resume_design
 
     @property
     def _max_tokens(self) -> int:
@@ -148,6 +151,7 @@ class PipelineService:
         output_dir: Path,
         from_stage: int = 1,
         stage_callback: StageCallbackPort | None = None,
+        theme: str | None = None,
     ) -> PipelineResult:
         """Run the full pipeline from JD + KB to structured resume.
 
@@ -233,10 +237,11 @@ class PipelineService:
             )
 
         # Stage 4: Structure YAML
+        effective_theme = theme or "sb2nov"
         if not stopped_early and from_stage <= 4:
             self._notify_stage_start(stage_callback, 4)
             resume_yaml, meta = await self._structure_yaml(
-                content, kb_text, run_dir=artifact_dir
+                content, kb_text, run_dir=artifact_dir, theme=effective_theme
             )
             stages.append(meta)
             yaml_path = self._artifacts.save_final_output(
@@ -458,6 +463,7 @@ class PipelineService:
         kb_text: str,
         *,
         run_dir: Path,
+        theme: str = "sb2nov",
     ) -> tuple[str, StageMetadata]:
         """Stage 4: Structure tailored content into RenderCV YAML.
 
@@ -474,6 +480,7 @@ class PipelineService:
             {
                 "tailored_content": content.model_dump(),
                 "kb_text": kb_text,
+                "theme": theme,
                 **self._density_context(),
             },
         )
@@ -498,6 +505,24 @@ class PipelineService:
 
         # Strip markdown code fences if the LLM wraps output
         resume_yaml = _strip_code_fences(resume_yaml)
+
+        # Post-process to ensure correct design section
+        from mkcv.core.services.yaml_postprocessor import YamlPostProcessor
+
+        postprocessor = YamlPostProcessor()
+        try:
+            if self._resume_design is not None:
+                resume_yaml = postprocessor.inject_design(
+                    resume_yaml, self._resume_design
+                )
+            else:
+                resume_yaml = postprocessor.inject_theme(resume_yaml, theme)
+        except ValueError:
+            logger.warning(
+                "YAML post-processing failed; using raw LLM output",
+                exc_info=True,
+            )
+
         usage = llm.get_last_usage()
 
         # Save metadata about the stage

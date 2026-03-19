@@ -40,7 +40,7 @@ class TestRenderServiceDelegation:
         yaml_path = Path("/tmp/resume.yaml")
         output_dir = Path("/tmp/output")
 
-        service.render_resume(yaml_path, output_dir)
+        service.render_resume(yaml_path, output_dir, theme="sb2nov")
 
         mock_renderer.render.assert_called_once_with(
             yaml_path, output_dir, theme="sb2nov", formats=None
@@ -68,7 +68,9 @@ class TestRenderServiceDelegation:
         yaml_path = Path("/tmp/resume.yaml")
         output_dir = Path("/tmp/output")
 
-        service.render_resume(yaml_path, output_dir, formats=["pdf", "png"])
+        service.render_resume(
+            yaml_path, output_dir, theme="sb2nov", formats=["pdf", "png"]
+        )
 
         mock_renderer.render.assert_called_once_with(
             yaml_path, output_dir, theme="sb2nov", formats=["pdf", "png"]
@@ -81,7 +83,7 @@ class TestRenderServiceDelegation:
         yaml_path = Path("/tmp/resume.yaml")
         output_dir = Path("/tmp/output")
 
-        result = service.render_resume(yaml_path, output_dir)
+        result = service.render_resume(yaml_path, output_dir, theme="sb2nov")
 
         assert isinstance(result, RenderedOutput)
         assert result.pdf_path == Path("/tmp/output/resume.pdf")
@@ -94,4 +96,6 @@ class TestRenderServiceDelegation:
         service = RenderService(renderer=mock_renderer)
 
         with pytest.raises(RenderError, match="render failed"):
-            service.render_resume(Path("/tmp/resume.yaml"), Path("/tmp/output"))
+            service.render_resume(
+                Path("/tmp/resume.yaml"), Path("/tmp/output"), theme="sb2nov"
+            )

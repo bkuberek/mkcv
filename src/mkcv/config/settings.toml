@@ -56,6 +56,13 @@ font = "SourceSansPro"
 font_size = "10pt"
 page_size = "letterpaper"
 
+[default.rendering.overrides]
+# Uncomment to customize theme properties:
+# font = "Charter"
+# font_size = "11pt"
+# page_size = "a4paper"
+# primary_color = "004080"
+
 [default.workspace]
 knowledge_base = "knowledge-base/career.md"
 applications_dir = "applications"

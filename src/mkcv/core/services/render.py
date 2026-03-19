@@ -16,7 +16,7 @@ class RenderService:
         yaml_path: Path,
         output_dir: Path,
         *,
-        theme: str = "sb2nov",
+        theme: str,
         formats: list[str] | None = None,
     ) -> RenderedOutput:
         """Render a resume YAML file to the requested formats.

@@ -118,6 +118,32 @@ _GITIGNORE_TEMPLATE = """\
 Thumbs.db
 """
 
+_EXAMPLE_THEME_TEMPLATE = """\
+# Example custom theme for mkcv
+# Rename this file to use it: mv example.yaml mytheme.yaml
+#
+# Custom themes extend a built-in RenderCV theme with property overrides.
+# Available base themes: classic, engineeringclassic, engineeringresumes,
+#                        moderncv, sb2nov
+#
+# applies_to controls which documents use this theme:
+#   "all" (default) - both resumes and cover letters
+#   "resume"        - resumes only
+#   "cover_letter"  - cover letters only
+#
+# To use: mkcv generate --theme mytheme
+
+name: example
+extends: classic
+description: "Example custom theme"
+applies_to: all
+overrides:
+  # font: "Charter"
+  # font_size: "11pt"
+  # page_size: "a4paper"
+  # primary_color: "004080"
+"""
+
 
 def _build_readme() -> str:
     """Generate the workspace README from current mkcv state.
@@ -294,6 +320,8 @@ model = "anthropic/claude-sonnet-4"
 │   └── {{date}}-{{target}}/
 │       ├── resume.yaml
 │       └── resume.pdf
+├── themes/                       # Custom theme definitions
+│   └── example.yaml              # Example custom theme
 └── templates/                    # Custom prompt overrides
 ```
 
@@ -397,6 +425,7 @@ class WorkspaceManager:
             "applications",
             "resumes",
             "templates",
+            "themes",
         )
         has_existing_content = any(
             (workspace_root / marker).is_dir() for marker in workspace_markers
@@ -439,6 +468,10 @@ class WorkspaceManager:
         _write_if_missing(
             workspace_root / ".gitignore",
             _GITIGNORE_TEMPLATE,
+        )
+        _write_if_missing(
+            workspace_root / "themes" / "example.yaml",
+            _EXAMPLE_THEME_TEMPLATE,
         )
         _write_if_missing(
             workspace_root / "README.md",

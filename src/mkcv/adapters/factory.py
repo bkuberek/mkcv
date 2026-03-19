@@ -24,6 +24,7 @@ from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.models.profile_preset import Preset, resolve_preset
+from mkcv.core.models.resume_design import ResumeDesign
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.services.cover_letter import CoverLetterService
 from mkcv.core.services.pipeline import PipelineService
@@ -235,11 +236,67 @@ def _create_providers(
     return providers
 
 
+def _build_resume_design(config: Configuration, theme: str) -> ResumeDesign:
+    """Build a ResumeDesign from configuration settings.
+
+    Args:
+        config: Application configuration.
+        theme: Resolved theme name.
+
+    Returns:
+        ResumeDesign populated from config rendering settings.
+    """
+    try:
+        font = str(getattr(config.rendering, "font", "SourceSansPro"))
+        font_size = str(getattr(config.rendering, "font_size", "10pt"))
+        page_size = str(getattr(config.rendering, "page_size", "letterpaper"))
+    except (AttributeError, TypeError):
+        font = "SourceSansPro"
+        font_size = "10pt"
+        page_size = "letterpaper"
+
+    colors: dict[str, str] = {"primary": "003366"}
+    try:
+        overrides = getattr(config.rendering, "overrides", None)
+        if overrides is not None and not isinstance(overrides, str):
+            primary = getattr(overrides, "primary_color", None)
+            if primary and isinstance(primary, str):
+                colors["primary"] = primary
+            # Override fields take precedence over top-level rendering fields
+            override_font = getattr(overrides, "font", None)
+            if override_font and isinstance(override_font, str):
+                font = override_font
+            override_font_size = getattr(overrides, "font_size", None)
+            if override_font_size and isinstance(override_font_size, str):
+                font_size = override_font_size
+            override_page_size = getattr(overrides, "page_size", None)
+            if override_page_size and isinstance(override_page_size, str):
+                page_size = override_page_size
+    except (AttributeError, TypeError):
+        pass
+
+    try:
+        return ResumeDesign(
+            theme=theme,
+            font=font,
+            font_size=font_size,
+            page_size=page_size,
+            colors=colors,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to build ResumeDesign from config; using defaults",
+            exc_info=True,
+        )
+        return ResumeDesign(theme=theme)
+
+
 def create_pipeline_service(
     config: Configuration,
     preset_name: str = "default",
     *,
     provider_override: str | None = None,
+    theme: str = "sb2nov",
 ) -> PipelineService:
     """Create a fully-wired PipelineService.
 
@@ -274,6 +331,7 @@ def create_pipeline_service(
         }
 
     providers = _create_providers(config, stage_configs)
+    resume_design = _build_resume_design(config, theme)
 
     return PipelineService(
         providers=providers,
@@ -281,6 +339,7 @@ def create_pipeline_service(
         artifacts=artifact_store,
         stage_configs=stage_configs,
         preset=preset,
+        resume_design=resume_design,
     )
 
 

@@ -63,21 +63,22 @@ class TestThemeListing:
         assert "sb2nov" in captured.out
         assert "moderncv" in captured.out
 
-    def test_themes_shows_descriptions(self, capsys: object) -> None:
-        with patch(_DISCOVER_PATH, return_value=SAMPLE_THEMES):
-            themes_command()
+    def test_themes_shows_descriptions(self) -> None:
+        """Verify descriptions are present in the table data."""
+        table = _render_theme_table(SAMPLE_THEMES)
+        # Check that the description column contains expected values
+        desc_column = table.columns[2]
+        cell_texts = [str(c) for c in desc_column._cells]
+        assert any("Traditional layout" in t for t in cell_texts)
+        assert any("Single-column tech layout" in t for t in cell_texts)
 
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "Traditional layout" in captured.out
-        assert "Single-column tech layout" in captured.out
-
-    def test_themes_shows_font_names(self, capsys: object) -> None:
-        with patch(_DISCOVER_PATH, return_value=SAMPLE_THEMES):
-            themes_command()
-
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "Source Sans 3" in captured.out
-        assert "New Computer Modern" in captured.out
+    def test_themes_shows_font_names(self) -> None:
+        """Verify font names are present in the table data."""
+        table = _render_theme_table(SAMPLE_THEMES)
+        font_column = table.columns[3]
+        cell_texts = [str(c) for c in font_column._cells]
+        assert any("Source Sans 3" in t for t in cell_texts)
+        assert any("New Computer Modern" in t for t in cell_texts)
 
     def test_themes_shows_preview_hint(self, capsys: object) -> None:
         with patch(_DISCOVER_PATH, return_value=SAMPLE_THEMES):
@@ -165,9 +166,9 @@ class TestThemePreview:
 class TestThemeTable:
     """Tests for the theme table rendering helper."""
 
-    def test_table_has_three_columns(self) -> None:
+    def test_table_has_four_columns(self) -> None:
         table = _render_theme_table(SAMPLE_THEMES)
-        assert len(table.columns) == 3
+        assert len(table.columns) == 4
 
     def test_table_has_correct_row_count(self) -> None:
         table = _render_theme_table(SAMPLE_THEMES)

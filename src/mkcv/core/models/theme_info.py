@@ -1,5 +1,7 @@
 """Theme metadata model for resume themes."""
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -12,3 +14,4 @@ class ThemeInfo(BaseModel):
     primary_color: str
     accent_color: str
     page_size: str
+    source: Literal["built-in", "custom"] = "built-in"

@@ -189,6 +189,54 @@ class TestCreateApplication:
         assert "-v3" in dirs[2].name
 
 
+class TestCreateWorkspaceThemes:
+    """Tests for themes/ directory scaffolding in workspace creation."""
+
+    def test_creates_themes_directory(self, tmp_path: Path) -> None:
+        mgr = WorkspaceManager()
+        target = tmp_path / "ws"
+        mgr.create_workspace(target)
+        assert (target / "themes").is_dir()
+
+    def test_creates_example_theme(self, tmp_path: Path) -> None:
+        mgr = WorkspaceManager()
+        target = tmp_path / "ws"
+        mgr.create_workspace(target)
+        example = target / "themes" / "example.yaml"
+        assert example.is_file()
+
+    def test_example_theme_contains_expected_keys(self, tmp_path: Path) -> None:
+        """Verify the example theme YAML has the expected structure."""
+        from ruamel.yaml import YAML
+
+        mgr = WorkspaceManager()
+        target = tmp_path / "ws"
+        mgr.create_workspace(target)
+        example = target / "themes" / "example.yaml"
+        yaml = YAML()
+        content = yaml.load(example.read_text())
+        assert content["name"] == "example"
+        assert content["extends"] == "classic"
+        assert "description" in content
+        assert content["applies_to"] == "all"
+
+    def test_does_not_overwrite_existing_theme_file(self, tmp_path: Path) -> None:
+        """Pre-existing themes/example.yaml is preserved on workspace create."""
+        target = tmp_path / "ws"
+        themes_dir = target / "themes"
+        themes_dir.mkdir(parents=True)
+        custom_content = "name: example\nextends: sb2nov\ndescription: Custom\n"
+        (themes_dir / "example.yaml").write_text(custom_content)
+
+        mgr = WorkspaceManager()
+        # create_workspace raises WorkspaceExistsError if mkcv.toml exists,
+        # but here we only pre-created themes/, not mkcv.toml
+        mgr.create_workspace(target)
+
+        # Original content should be preserved
+        assert (themes_dir / "example.yaml").read_text() == custom_content
+
+
 class TestSlugify:
     """Tests for WorkspaceManager.slugify."""
 
