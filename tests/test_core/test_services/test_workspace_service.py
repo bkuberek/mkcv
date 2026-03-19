@@ -45,7 +45,7 @@ class TestPipelineService:
         from mkcv.adapters.llm.stub import StubLLMAdapter
 
         svc = PipelineService(
-            llm=StubLLMAdapter(),
+            providers={"default": StubLLMAdapter()},
             prompts=FileSystemPromptLoader(),
             artifacts=FileSystemArtifactStore(),
         )

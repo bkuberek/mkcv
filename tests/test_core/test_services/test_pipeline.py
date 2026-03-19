@@ -189,7 +189,11 @@ def pipeline(stub_llm: StubLLMAdapter) -> PipelineService:
     """PipelineService wired with stub adapters."""
     prompts = FileSystemPromptLoader()
     artifacts = FileSystemArtifactStore()
-    return PipelineService(llm=stub_llm, prompts=prompts, artifacts=artifacts)
+    return PipelineService(
+        providers={"default": stub_llm},
+        prompts=prompts,
+        artifacts=artifacts,
+    )
 
 
 @pytest.fixture
@@ -631,7 +635,11 @@ class TestPipelineErrorHandling:
         bad_llm = StubLLMAdapter()  # No canned responses
         prompts = FileSystemPromptLoader()
         artifacts = FileSystemArtifactStore()
-        pipeline = PipelineService(llm=bad_llm, prompts=prompts, artifacts=artifacts)
+        pipeline = PipelineService(
+            providers={"default": bad_llm},
+            prompts=prompts,
+            artifacts=artifacts,
+        )
 
         output_dir = tmp_path / "output"
         with pytest.raises(PipelineStageError, match="Stage 1"):
@@ -646,7 +654,11 @@ class TestPipelineErrorHandling:
         bad_llm = StubLLMAdapter()
         prompts = FileSystemPromptLoader()
         artifacts = FileSystemArtifactStore()
-        pipeline = PipelineService(llm=bad_llm, prompts=prompts, artifacts=artifacts)
+        pipeline = PipelineService(
+            providers={"default": bad_llm},
+            prompts=prompts,
+            artifacts=artifacts,
+        )
 
         output_dir = tmp_path / "output"
         with pytest.raises(PipelineStageError) as exc_info:
@@ -683,3 +695,154 @@ class TestStripCodeFences:
     def test_preserves_internal_content(self) -> None:
         text = "```yaml\nfoo: bar\nbaz: qux\n```"
         assert _strip_code_fences(text) == "foo: bar\nbaz: qux"
+
+
+# ------------------------------------------------------------------
+# Test: Per-stage provider selection
+# ------------------------------------------------------------------
+
+
+class TestPerStageProviders:
+    """Tests for per-stage LLM provider routing."""
+
+    async def test_each_stage_can_use_different_provider(
+        self,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+        sample_review_report: ReviewReport,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Different named providers get different call logs."""
+        from mkcv.core.models.stage_config import StageConfig
+
+        # Create two stub adapters to track which stages use which
+        provider_a = StubLLMAdapter(
+            default_response="cv:\n  name: Test",
+            responses={
+                JDAnalysis: sample_jd_analysis,
+                ExperienceSelection: sample_selection,
+                TailoredContent: sample_tailored_content,
+            },
+        )
+        provider_b = StubLLMAdapter(
+            default_response="cv:\n  name: Test",
+            responses={ReviewReport: sample_review_report},
+        )
+
+        stage_configs = {
+            1: StageConfig(provider="alpha", model="m1", temperature=0.2),
+            2: StageConfig(provider="alpha", model="m1", temperature=0.3),
+            3: StageConfig(provider="alpha", model="m1", temperature=0.5),
+            4: StageConfig(provider="alpha", model="m1", temperature=0.1),
+            5: StageConfig(provider="beta", model="m2", temperature=0.3),
+        }
+
+        pipeline = PipelineService(
+            providers={"alpha": provider_a, "beta": provider_b},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            stage_configs=stage_configs,
+        )
+
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        # Provider A handled stages 1-4 (4 calls)
+        assert len(provider_a.call_log) == 4
+        # Provider B handled stage 5 (1 call)
+        assert len(provider_b.call_log) == 1
+
+    async def test_stage_metadata_records_provider_name(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Stage metadata should include the provider name."""
+        output_dir = tmp_path / "output"
+        result = await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        for stage in result.stages:
+            assert stage.provider == "default"
+
+    async def test_stage_metadata_records_per_stage_model(
+        self,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+        sample_review_report: ReviewReport,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Stage metadata should reflect the model from stage config."""
+        from mkcv.core.models.stage_config import StageConfig
+
+        stub = StubLLMAdapter(
+            default_response="cv:\n  name: Test",
+            responses={
+                JDAnalysis: sample_jd_analysis,
+                ExperienceSelection: sample_selection,
+                TailoredContent: sample_tailored_content,
+                ReviewReport: sample_review_report,
+            },
+        )
+
+        stage_configs = {
+            1: StageConfig(provider="p", model="model-a", temperature=0.2),
+            2: StageConfig(provider="p", model="model-b", temperature=0.3),
+            3: StageConfig(provider="p", model="model-a", temperature=0.5),
+            4: StageConfig(provider="p", model="model-c", temperature=0.1),
+            5: StageConfig(provider="p", model="model-b", temperature=0.3),
+        }
+
+        pipeline = PipelineService(
+            providers={"p": stub},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            stage_configs=stage_configs,
+        )
+
+        output_dir = tmp_path / "output"
+        result = await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        models = [s.model for s in result.stages]
+        assert models == [
+            "model-a",
+            "model-b",
+            "model-a",
+            "model-c",
+            "model-b",
+        ]
+
+    async def test_missing_provider_raises_pipeline_stage_error(
+        self,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Missing provider in providers dict raises PipelineStageError."""
+        from mkcv.core.models.stage_config import StageConfig
+
+        stage_configs = {
+            1: StageConfig(provider="nonexistent", model="m", temperature=0.2),
+            2: StageConfig(provider="x", model="m", temperature=0.3),
+            3: StageConfig(provider="x", model="m", temperature=0.5),
+            4: StageConfig(provider="x", model="m", temperature=0.1),
+            5: StageConfig(provider="x", model="m", temperature=0.3),
+        }
+
+        pipeline = PipelineService(
+            providers={},  # No providers at all
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            stage_configs=stage_configs,
+        )
+
+        output_dir = tmp_path / "output"
+        with pytest.raises(PipelineStageError, match="nonexistent"):
+            await pipeline.generate(jd_file, kb_file, output_dir=output_dir)

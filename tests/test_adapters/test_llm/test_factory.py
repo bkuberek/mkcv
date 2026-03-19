@@ -11,17 +11,14 @@ from mkcv.adapters.llm.stub import StubLLMAdapter
 
 
 def _make_config(
-    provider: str = "stub",
     api_key: str | None = None,
+    provider: str = "stub",
 ) -> MagicMock:
-    """Build a mock Configuration with the given provider and optional API key.
+    """Build a mock Configuration with optional API key.
 
     Simulates Dynaconf's attribute access pattern.
     """
     config = MagicMock()
-
-    # config.pipeline.stages.analyze.provider
-    config.pipeline.stages.analyze.provider = provider
 
     # config.providers.<provider>.api_key — only set when api_key is given
     if api_key is not None:
@@ -40,36 +37,36 @@ def _make_config(
 class TestCreateLLMAdapter:
     """Tests for _create_llm_adapter factory function."""
 
-    def test_creates_stub_adapter_by_default(self) -> None:
-        config = _make_config(provider="stub")
-        adapter = _create_llm_adapter(config)
+    def test_creates_stub_adapter(self) -> None:
+        config = _make_config()
+        adapter = _create_llm_adapter("stub", config)
         assert isinstance(adapter, StubLLMAdapter)
 
     def test_creates_anthropic_adapter_with_key(self) -> None:
         config = _make_config(provider="anthropic", api_key="sk-ant-test123")
-        adapter = _create_llm_adapter(config)
+        adapter = _create_llm_adapter("anthropic", config)
         assert isinstance(adapter, AnthropicAdapter)
 
     def test_creates_openai_adapter_with_key(self) -> None:
         config = _make_config(provider="openai", api_key="sk-openai-test123")
-        adapter = _create_llm_adapter(config)
+        adapter = _create_llm_adapter("openai", config)
         assert isinstance(adapter, OpenAIAdapter)
 
     def test_falls_back_to_stub_when_no_api_key(self) -> None:
         config = _make_config(provider="anthropic")
-        adapter = _create_llm_adapter(config)
+        adapter = _create_llm_adapter("anthropic", config)
         assert isinstance(adapter, StubLLMAdapter)
 
     def test_uses_env_var_for_anthropic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-key")
         config = _make_config(provider="anthropic")
-        adapter = _create_llm_adapter(config)
+        adapter = _create_llm_adapter("anthropic", config)
         assert isinstance(adapter, AnthropicAdapter)
 
     def test_uses_env_var_for_openai(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-env-key")
         config = _make_config(provider="openai")
-        adapter = _create_llm_adapter(config)
+        adapter = _create_llm_adapter("openai", config)
         assert isinstance(adapter, OpenAIAdapter)
 
     def test_config_key_takes_precedence_over_env_var(
@@ -77,5 +74,5 @@ class TestCreateLLMAdapter:
     ) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
         config = _make_config(provider="anthropic", api_key="sk-from-config")
-        adapter = _create_llm_adapter(config)
+        adapter = _create_llm_adapter("anthropic", config)
         assert isinstance(adapter, AnthropicAdapter)

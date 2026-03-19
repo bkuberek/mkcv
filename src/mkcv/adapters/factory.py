@@ -21,6 +21,7 @@ from mkcv.adapters.filesystem.prompt_loader import FileSystemPromptLoader
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
+from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
 from mkcv.core.services.validation import ValidationService
@@ -31,6 +32,14 @@ logger = logging.getLogger(__name__)
 _PROVIDER_ENV_KEYS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
+}
+
+_STAGE_CONFIG_KEYS: dict[int, str] = {
+    1: "analyze",
+    2: "select",
+    3: "tailor",
+    4: "structure",
+    5: "review",
 }
 
 
@@ -64,45 +73,52 @@ def _resolve_api_key(provider: str, config: Configuration) -> str | None:
     return None
 
 
-def _resolve_provider_name(config: Configuration) -> str:
-    """Read the default provider name from config.
-
-    Reads from ``config.pipeline.stages.analyze.provider`` as the
-    default provider for all LLM calls.
+def _resolve_stage_configs(
+    config: Configuration,
+) -> dict[int, StageConfig]:
+    """Read per-stage LLM configuration from settings.
 
     Args:
         config: Application configuration.
 
     Returns:
-        Provider name string (e.g. "anthropic", "openai", "stub").
+        Dict mapping stage number (1-5) to StageConfig.
     """
-    try:
-        return str(config.pipeline.stages.analyze.provider)
-    except AttributeError:
-        return "stub"
+    stage_configs: dict[int, StageConfig] = {}
+
+    for stage_num, key in _STAGE_CONFIG_KEYS.items():
+        try:
+            stage_section = getattr(config.pipeline.stages, key)
+            provider = str(getattr(stage_section, "provider", "anthropic"))
+            model = str(getattr(stage_section, "model", "claude-sonnet-4-20250514"))
+            temperature = float(getattr(stage_section, "temperature", 0.3))
+        except AttributeError:
+            provider = "anthropic"
+            model = "claude-sonnet-4-20250514"
+            temperature = 0.3
+
+        stage_configs[stage_num] = StageConfig(
+            provider=provider,
+            model=model,
+            temperature=temperature,
+        )
+
+    return stage_configs
 
 
-def _create_llm_adapter(config: Configuration) -> LLMPort:
-    """Create the appropriate LLM adapter based on configuration.
-
-    Provider selection logic:
-        1. Read provider name from config (default: analyze stage provider).
-        2. Resolve API key from config or environment.
-        3. Instantiate the matching adapter.
-        4. Fall back to StubLLMAdapter if no key is available for dev/test.
+def _create_llm_adapter(
+    provider: str,
+    config: Configuration,
+) -> LLMPort:
+    """Create an LLM adapter for a specific provider.
 
     Args:
+        provider: Provider name ("anthropic", "openai", "stub").
         config: Application configuration.
 
     Returns:
         An object implementing LLMPort.
-
-    Raises:
-        AuthenticationError: If a real provider is selected but no API key
-            is found and the provider is not "stub".
     """
-    provider = _resolve_provider_name(config)
-
     if provider == "stub":
         from mkcv.adapters.llm.stub import StubLLMAdapter
 
@@ -112,7 +128,7 @@ def _create_llm_adapter(config: Configuration) -> LLMPort:
 
     if not api_key:
         logger.warning(
-            "No API key found for provider '%s'; falling back to stub adapter.",
+            "No API key for provider '%s'; falling back to stub.",
             provider,
         )
         from mkcv.adapters.llm.stub import StubLLMAdapter
@@ -135,19 +151,51 @@ def _create_llm_adapter(config: Configuration) -> LLMPort:
     )
 
 
+def _create_providers(
+    config: Configuration,
+    stage_configs: dict[int, StageConfig],
+) -> dict[str, LLMPort]:
+    """Create one LLM adapter per unique provider in the stage configs.
+
+    Args:
+        config: Application configuration.
+        stage_configs: Per-stage LLM configuration.
+
+    Returns:
+        Dict mapping provider name to LLMPort adapter.
+    """
+    unique_providers = {sc.provider for sc in stage_configs.values()}
+    providers: dict[str, LLMPort] = {}
+
+    for provider_name in unique_providers:
+        providers[provider_name] = _create_llm_adapter(provider_name, config)
+
+    return providers
+
+
 def create_pipeline_service(config: Configuration) -> PipelineService:
     """Create a fully-wired PipelineService.
+
+    Reads per-stage provider/model/temperature from config and
+    creates one LLM adapter per unique provider.
 
     Args:
         config: Application configuration.
 
     Returns:
-        PipelineService with all adapters connected.
+        PipelineService with per-stage LLM adapters.
     """
     prompt_loader = _create_prompt_loader(config)
     artifact_store = FileSystemArtifactStore()
-    llm = _create_llm_adapter(config)
-    return PipelineService(llm=llm, prompts=prompt_loader, artifacts=artifact_store)
+    stage_configs = _resolve_stage_configs(config)
+    providers = _create_providers(config, stage_configs)
+
+    return PipelineService(
+        providers=providers,
+        prompts=prompt_loader,
+        artifacts=artifact_store,
+        stage_configs=stage_configs,
+    )
 
 
 def create_render_service(config: Configuration) -> RenderService:
@@ -173,7 +221,13 @@ def create_validation_service(config: Configuration) -> ValidationService:
         ValidationService with LLM and prompt adapters connected.
     """
     prompt_loader = _create_prompt_loader(config)
-    llm = _create_llm_adapter(config)
+
+    # Validation uses the analyze stage provider for JD analysis
+    # and the review stage provider for resume review
+    stage_configs = _resolve_stage_configs(config)
+    analyze_provider = stage_configs[1].provider
+    llm = _create_llm_adapter(analyze_provider, config)
+
     return ValidationService(llm=llm, prompts=prompt_loader)
 
 

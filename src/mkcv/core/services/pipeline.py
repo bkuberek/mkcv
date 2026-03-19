@@ -14,6 +14,7 @@ from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.review_report import ReviewReport
+from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.ports.artifacts import ArtifactStorePort
@@ -28,14 +29,6 @@ STAGE_MAX_TOKENS_YAML = 8192
 
 _T = TypeVar("_T", bound=BaseModel)
 
-STAGE_TEMPERATURES: dict[int, float] = {
-    1: 0.2,
-    2: 0.3,
-    3: 0.5,
-    4: 0.1,
-    5: 0.3,
-}
-
 STAGE_NAMES: dict[int, str] = {
     1: "analyze_jd",
     2: "select_experience",
@@ -44,9 +37,21 @@ STAGE_NAMES: dict[int, str] = {
     5: "review",
 }
 
+DEFAULT_STAGE_CONFIGS: dict[int, StageConfig] = {
+    1: StageConfig(provider="default", model=DEFAULT_MODEL, temperature=0.2),
+    2: StageConfig(provider="default", model=DEFAULT_MODEL, temperature=0.3),
+    3: StageConfig(provider="default", model=DEFAULT_MODEL, temperature=0.5),
+    4: StageConfig(provider="default", model=DEFAULT_MODEL, temperature=0.1),
+    5: StageConfig(provider="default", model=DEFAULT_MODEL, temperature=0.3),
+}
+
 
 class PipelineService:
     """Orchestrates the 5-stage resume generation pipeline.
+
+    Each stage can use a different LLM provider and model, configured
+    via stage_configs. Providers are resolved by name from the
+    providers dict.
 
     Stages:
         1. Analyze JD -> JDAnalysis
@@ -58,13 +63,45 @@ class PipelineService:
 
     def __init__(
         self,
-        llm: LLMPort,
+        providers: dict[str, LLMPort],
         prompts: PromptLoaderPort,
         artifacts: ArtifactStorePort,
+        stage_configs: dict[int, StageConfig] | None = None,
     ) -> None:
-        self._llm = llm
+        self._providers = providers
         self._prompts = prompts
         self._artifacts = artifacts
+        self._stage_configs = stage_configs or DEFAULT_STAGE_CONFIGS
+
+    def _resolve_llm(self, stage_number: int) -> LLMPort:
+        """Resolve the LLM adapter for a given stage.
+
+        Args:
+            stage_number: The pipeline stage number (1-5).
+
+        Returns:
+            The LLMPort for this stage.
+
+        Raises:
+            PipelineStageError: If the provider is not configured.
+        """
+        config = self._stage_configs[stage_number]
+        provider = config.provider
+
+        if provider in self._providers:
+            return self._providers[provider]
+
+        # Fall back to "default" if a named provider isn't found
+        if "default" in self._providers:
+            return self._providers["default"]
+
+        raise PipelineStageError(
+            f"No LLM provider '{provider}' configured for "
+            f"stage {stage_number} ({STAGE_NAMES[stage_number]}). "
+            f"Available: {list(self._providers.keys())}",
+            stage=STAGE_NAMES[stage_number],
+            stage_number=stage_number,
+        )
 
     async def generate(
         self,
@@ -72,7 +109,6 @@ class PipelineService:
         kb_path: Path,
         *,
         output_dir: Path,
-        model: str = DEFAULT_MODEL,
         from_stage: int = 1,
     ) -> PipelineResult:
         """Run the full pipeline from JD + KB to structured resume.
@@ -81,7 +117,6 @@ class PipelineService:
             jd_path: Path to job description file.
             kb_path: Path to knowledge base file.
             output_dir: Directory for pipeline artifacts.
-            model: LLM model identifier to use for all stages.
             from_stage: Resume from this stage number (1-5).
 
         Returns:
@@ -95,13 +130,15 @@ class PipelineService:
         jd_text = jd_path.read_text(encoding="utf-8")
         kb_text = kb_path.read_text(encoding="utf-8")
 
-        logger.info("Pipeline run %s started (from_stage=%d)", run_id, from_stage)
+        logger.info(
+            "Pipeline run %s started (from_stage=%d)",
+            run_id,
+            from_stage,
+        )
 
         # Stage 1: Analyze JD
         if from_stage <= 1:
-            jd_analysis, meta = await self._analyze_jd(
-                jd_text, model=model, run_dir=output_dir
-            )
+            jd_analysis, meta = await self._analyze_jd(jd_text, run_dir=output_dir)
             stages.append(meta)
         else:
             jd_analysis = self._load_stage_artifact(
@@ -111,18 +148,20 @@ class PipelineService:
         # Stage 2: Select experience
         if from_stage <= 2:
             selection, meta = await self._select_experience(
-                jd_analysis, kb_text, model=model, run_dir=output_dir
+                jd_analysis, kb_text, run_dir=output_dir
             )
             stages.append(meta)
         else:
             selection = self._load_stage_artifact(
-                "stage2_selection", ExperienceSelection, run_dir=output_dir
+                "stage2_selection",
+                ExperienceSelection,
+                run_dir=output_dir,
             )
 
         # Stage 3: Tailor content
         if from_stage <= 3:
             content, meta = await self._tailor_content(
-                jd_analysis, selection, kb_text, model=model, run_dir=output_dir
+                jd_analysis, selection, kb_text, run_dir=output_dir
             )
             stages.append(meta)
         else:
@@ -133,7 +172,7 @@ class PipelineService:
         # Stage 4: Structure YAML
         if from_stage <= 4:
             resume_yaml, meta = await self._structure_yaml(
-                content, kb_text, model=model, run_dir=output_dir
+                content, kb_text, run_dir=output_dir
             )
             stages.append(meta)
             yaml_path = self._artifacts.save_final_output(
@@ -146,7 +185,7 @@ class PipelineService:
 
         # Stage 5: Review
         review, meta = await self._review(
-            resume_yaml, jd_analysis, kb_text, model=model, run_dir=output_dir
+            resume_yaml, jd_analysis, kb_text, run_dir=output_dir
         )
         stages.append(meta)
 
@@ -184,14 +223,14 @@ class PipelineService:
         self,
         jd_text: str,
         *,
-        model: str,
         run_dir: Path,
     ) -> tuple[JDAnalysis, StageMetadata]:
         """Stage 1: Analyze the job description."""
         stage_number = 1
+        config = self._stage_configs[stage_number]
+        llm = self._resolve_llm(stage_number)
         logger.info("Stage %d: Analyzing job description", stage_number)
         start = time.monotonic()
-        temperature = STAGE_TEMPERATURES[stage_number]
 
         prompt = self._prompts.render(
             "analyze_jd.j2",
@@ -200,9 +239,10 @@ class PipelineService:
 
         result = await self._call_structured(
             prompt,
+            llm=llm,
             response_model=JDAnalysis,
-            model=model,
-            temperature=temperature,
+            model=config.model,
+            temperature=config.temperature,
             stage_number=stage_number,
         )
 
@@ -210,8 +250,9 @@ class PipelineService:
 
         meta = self._build_stage_metadata(
             stage_number=stage_number,
-            model=model,
-            temperature=temperature,
+            provider=config.provider,
+            model=config.model,
+            temperature=config.temperature,
             duration=time.monotonic() - start,
         )
 
@@ -228,14 +269,14 @@ class PipelineService:
         jd_analysis: JDAnalysis,
         kb_text: str,
         *,
-        model: str,
         run_dir: Path,
     ) -> tuple[ExperienceSelection, StageMetadata]:
         """Stage 2: Select relevant experience from the knowledge base."""
         stage_number = 2
+        config = self._stage_configs[stage_number]
+        llm = self._resolve_llm(stage_number)
         logger.info("Stage %d: Selecting experience", stage_number)
         start = time.monotonic()
-        temperature = STAGE_TEMPERATURES[stage_number]
 
         prompt = self._prompts.render(
             "select_experience.j2",
@@ -247,9 +288,10 @@ class PipelineService:
 
         result = await self._call_structured(
             prompt,
+            llm=llm,
             response_model=ExperienceSelection,
-            model=model,
-            temperature=temperature,
+            model=config.model,
+            temperature=config.temperature,
             stage_number=stage_number,
         )
 
@@ -257,8 +299,9 @@ class PipelineService:
 
         meta = self._build_stage_metadata(
             stage_number=stage_number,
-            model=model,
-            temperature=temperature,
+            provider=config.provider,
+            model=config.model,
+            temperature=config.temperature,
             duration=time.monotonic() - start,
         )
 
@@ -275,18 +318,14 @@ class PipelineService:
         selection: ExperienceSelection,
         kb_text: str,
         *,
-        model: str,
         run_dir: Path,
     ) -> tuple[TailoredContent, StageMetadata]:
-        """Stage 3: Tailor content for the target role.
-
-        Makes a single LLM call for the full tailored content rather than
-        per-role calls. This simplification can be refined later.
-        """
+        """Stage 3: Tailor content for the target role."""
         stage_number = 3
+        config = self._stage_configs[stage_number]
+        llm = self._resolve_llm(stage_number)
         logger.info("Stage %d: Tailoring content", stage_number)
         start = time.monotonic()
-        temperature = STAGE_TEMPERATURES[stage_number]
 
         prompt = self._prompts.render(
             "tailor_bullets.j2",
@@ -300,9 +339,10 @@ class PipelineService:
 
         result = await self._call_structured(
             prompt,
+            llm=llm,
             response_model=TailoredContent,
-            model=model,
-            temperature=temperature,
+            model=config.model,
+            temperature=config.temperature,
             stage_number=stage_number,
             max_tokens=STAGE_MAX_TOKENS_YAML,
         )
@@ -311,8 +351,9 @@ class PipelineService:
 
         meta = self._build_stage_metadata(
             stage_number=stage_number,
-            model=model,
-            temperature=temperature,
+            provider=config.provider,
+            model=config.model,
+            temperature=config.temperature,
             duration=time.monotonic() - start,
         )
 
@@ -329,7 +370,6 @@ class PipelineService:
         content: TailoredContent,
         kb_text: str,
         *,
-        model: str,
         run_dir: Path,
     ) -> tuple[str, StageMetadata]:
         """Stage 4: Structure tailored content into RenderCV YAML.
@@ -337,9 +377,10 @@ class PipelineService:
         Uses plain text completion since the output is YAML, not JSON.
         """
         stage_number = 4
+        config = self._stage_configs[stage_number]
+        llm = self._resolve_llm(stage_number)
         logger.info("Stage %d: Structuring YAML", stage_number)
         start = time.monotonic()
-        temperature = STAGE_TEMPERATURES[stage_number]
 
         prompt = self._prompts.render(
             "structure_yaml.j2",
@@ -354,10 +395,10 @@ class PipelineService:
         ]
 
         try:
-            resume_yaml = await self._llm.complete(
+            resume_yaml = await llm.complete(
                 messages,
-                model=model,
-                temperature=temperature,
+                model=config.model,
+                temperature=config.temperature,
                 max_tokens=STAGE_MAX_TOKENS_YAML,
             )
         except Exception as exc:
@@ -379,8 +420,9 @@ class PipelineService:
 
         meta = self._build_stage_metadata(
             stage_number=stage_number,
-            model=model,
-            temperature=temperature,
+            provider=config.provider,
+            model=config.model,
+            temperature=config.temperature,
             duration=time.monotonic() - start,
         )
 
@@ -397,14 +439,14 @@ class PipelineService:
         jd_analysis: JDAnalysis,
         kb_text: str,
         *,
-        model: str,
         run_dir: Path,
     ) -> tuple[ReviewReport, StageMetadata]:
         """Stage 5: Review the generated resume."""
         stage_number = 5
+        config = self._stage_configs[stage_number]
+        llm = self._resolve_llm(stage_number)
         logger.info("Stage %d: Reviewing resume", stage_number)
         start = time.monotonic()
-        temperature = STAGE_TEMPERATURES[stage_number]
 
         prompt = self._prompts.render(
             "review.j2",
@@ -417,9 +459,10 @@ class PipelineService:
 
         result = await self._call_structured(
             prompt,
+            llm=llm,
             response_model=ReviewReport,
-            model=model,
-            temperature=temperature,
+            model=config.model,
+            temperature=config.temperature,
             stage_number=stage_number,
             max_tokens=STAGE_MAX_TOKENS_YAML,
         )
@@ -428,12 +471,17 @@ class PipelineService:
 
         meta = self._build_stage_metadata(
             stage_number=stage_number,
-            model=model,
-            temperature=temperature,
+            provider=config.provider,
+            model=config.model,
+            temperature=config.temperature,
             duration=time.monotonic() - start,
         )
 
-        logger.info("Stage %d complete: score=%d", stage_number, result.overall_score)
+        logger.info(
+            "Stage %d complete: score=%d",
+            stage_number,
+            result.overall_score,
+        )
         return result, meta
 
     # ------------------------------------------------------------------
@@ -444,6 +492,7 @@ class PipelineService:
         self,
         prompt: str,
         *,
+        llm: LLMPort,
         response_model: type[_T],
         model: str,
         temperature: float,
@@ -456,7 +505,7 @@ class PipelineService:
         ]
 
         try:
-            result = await self._llm.complete_structured(
+            result = await llm.complete_structured(
                 messages,
                 model=model,
                 response_model=response_model,
@@ -481,7 +530,7 @@ class PipelineService:
         *,
         run_dir: Path,
     ) -> _T:
-        """Load a previously saved stage artifact and parse into a model."""
+        """Load a previously saved stage artifact and parse into model."""
         data = self._artifacts.load(artifact_name, run_dir=run_dir)
         return model_class.model_validate(data)
 
@@ -489,6 +538,7 @@ class PipelineService:
     def _build_stage_metadata(
         *,
         stage_number: int,
+        provider: str,
         model: str,
         temperature: float,
         duration: float,
@@ -501,7 +551,7 @@ class PipelineService:
         return StageMetadata(
             stage_number=stage_number,
             stage_name=STAGE_NAMES[stage_number],
-            provider="unknown",
+            provider=provider,
             model=model,
             temperature=temperature,
             input_tokens=0,
