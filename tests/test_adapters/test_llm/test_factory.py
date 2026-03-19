@@ -6,6 +6,7 @@ import pytest
 
 from mkcv.adapters.factory import (
     _create_llm_adapter,
+    _resolve_preset,
     _resolve_stage_configs,
     create_pipeline_service,
     create_workspace_service,
@@ -14,6 +15,7 @@ from mkcv.adapters.llm.anthropic import AnthropicAdapter
 from mkcv.adapters.llm.openai import OpenAIAdapter
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.llm.stub import StubLLMAdapter
+from mkcv.core.models.profile_preset import ContentDensity
 from mkcv.core.services.workspace import WorkspaceService
 
 
@@ -104,10 +106,53 @@ class TestCreateLLMAdapter:
         assert isinstance(adapter, AnthropicAdapter)
 
 
-class TestResolveStageConfigs:
-    """Tests for _resolve_stage_configs with profile presets."""
+class TestResolvePreset:
+    """Tests for _resolve_preset factory helper."""
 
-    def test_default_profile_reads_from_config(self) -> None:
+    def test_returns_none_for_default(self) -> None:
+        config = MagicMock()
+        assert _resolve_preset("default", config) is None
+
+    def test_returns_none_for_unknown(self) -> None:
+        config = MagicMock()
+        assert _resolve_preset("nonexistent", config) is None
+
+    def test_resolves_concise(self) -> None:
+        config = MagicMock()
+        preset = _resolve_preset("concise", config)
+        assert preset is not None
+        assert preset.density == ContentDensity.CONCISE
+
+    def test_resolves_standard(self) -> None:
+        config = MagicMock()
+        preset = _resolve_preset("standard", config)
+        assert preset is not None
+        assert preset.density == ContentDensity.STANDARD
+
+    def test_resolves_comprehensive(self) -> None:
+        config = MagicMock()
+        preset = _resolve_preset("comprehensive", config)
+        assert preset is not None
+        assert preset.density == ContentDensity.COMPREHENSIVE
+
+    def test_resolves_budget_legacy(self) -> None:
+        config = MagicMock()
+        preset = _resolve_preset("budget", config)
+        assert preset is not None
+        for sc in preset.stage_configs.values():
+            assert sc.provider == "ollama"
+
+    def test_resolves_premium_legacy(self) -> None:
+        config = MagicMock()
+        preset = _resolve_preset("premium", config)
+        assert preset is not None
+        assert preset.density == ContentDensity.STANDARD
+
+
+class TestResolveStageConfigs:
+    """Tests for _resolve_stage_configs with preset names."""
+
+    def test_default_preset_reads_from_config(self) -> None:
         config = MagicMock()
         analyze = MagicMock()
         analyze.provider = "anthropic"
@@ -119,25 +164,25 @@ class TestResolveStageConfigs:
         config.pipeline.stages.structure = analyze
         config.pipeline.stages.review = analyze
 
-        configs = _resolve_stage_configs(config, profile="default")
+        configs = _resolve_stage_configs(config, preset_name="default")
         assert configs[1].provider == "anthropic"
         assert configs[1].model == "claude-sonnet-4-20250514"
 
-    def test_budget_profile_uses_ollama(self) -> None:
+    def test_budget_preset_uses_ollama(self) -> None:
         config = MagicMock()
-        configs = _resolve_stage_configs(config, profile="budget")
+        configs = _resolve_stage_configs(config, preset_name="budget")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "ollama"
             assert configs[stage_num].model == "llama3.1:8b"
 
-    def test_premium_profile_uses_anthropic(self) -> None:
+    def test_premium_preset_uses_anthropic(self) -> None:
         config = MagicMock()
-        configs = _resolve_stage_configs(config, profile="premium")
+        configs = _resolve_stage_configs(config, preset_name="premium")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
             assert configs[stage_num].model == "claude-sonnet-4-20250514"
 
-    def test_budget_profile_ignores_config_settings(self) -> None:
+    def test_budget_preset_ignores_config_settings(self) -> None:
         config = MagicMock()
         analyze = MagicMock()
         analyze.provider = "openai"
@@ -145,29 +190,50 @@ class TestResolveStageConfigs:
         analyze.temperature = 0.9
         config.pipeline.stages.analyze = analyze
 
-        configs = _resolve_stage_configs(config, profile="budget")
+        configs = _resolve_stage_configs(config, preset_name="budget")
         assert configs[1].provider == "ollama"
 
-    def test_premium_profile_preserves_per_stage_temperatures(self) -> None:
+    def test_premium_preset_preserves_per_stage_temperatures(self) -> None:
         config = MagicMock()
-        configs = _resolve_stage_configs(config, profile="premium")
+        configs = _resolve_stage_configs(config, preset_name="premium")
         assert configs[1].temperature == 0.2
         assert configs[3].temperature == 0.5
         assert configs[4].temperature == 0.1
 
+    def test_concise_preset_uses_sonnet(self) -> None:
+        config = MagicMock()
+        configs = _resolve_stage_configs(config, preset_name="concise")
+        for stage_num in range(1, 6):
+            assert configs[stage_num].provider == "anthropic"
+            assert "sonnet" in configs[stage_num].model
 
-class TestCreatePipelineServiceWithProfile:
-    """Tests for create_pipeline_service profile parameter."""
+    def test_standard_preset_uses_sonnet(self) -> None:
+        config = MagicMock()
+        configs = _resolve_stage_configs(config, preset_name="standard")
+        for stage_num in range(1, 6):
+            assert configs[stage_num].provider == "anthropic"
+            assert "sonnet" in configs[stage_num].model
 
-    def test_budget_profile_creates_ollama_provider(self) -> None:
+    def test_comprehensive_preset_uses_opus(self) -> None:
+        config = MagicMock()
+        configs = _resolve_stage_configs(config, preset_name="comprehensive")
+        for stage_num in range(1, 6):
+            assert configs[stage_num].provider == "anthropic"
+            assert "opus" in configs[stage_num].model
+
+
+class TestCreatePipelineServiceWithPreset:
+    """Tests for create_pipeline_service preset_name parameter."""
+
+    def test_budget_preset_creates_ollama_provider(self) -> None:
         config = MagicMock()
         config.providers = None
         config.in_workspace = False
         config.workspace_root = None
-        service = create_pipeline_service(config, profile="budget")
+        service = create_pipeline_service(config, preset_name="budget")
         assert "ollama" in service._providers
 
-    def test_default_profile_uses_config_providers(self) -> None:
+    def test_default_preset_uses_config_providers(self) -> None:
         config = MagicMock()
         config.providers = None
         config.in_workspace = False
@@ -182,8 +248,64 @@ class TestCreatePipelineServiceWithProfile:
         config.pipeline.stages.structure = analyze
         config.pipeline.stages.review = analyze
 
-        service = create_pipeline_service(config, profile="default")
+        service = create_pipeline_service(config, preset_name="default")
         assert "stub" in service._providers
+
+    def test_concise_preset_sets_preset_on_service(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        service = create_pipeline_service(config, preset_name="concise")
+        assert service._preset is not None
+        assert service._preset.density == ContentDensity.CONCISE
+
+    def test_standard_preset_sets_preset_on_service(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        service = create_pipeline_service(config, preset_name="standard")
+        assert service._preset is not None
+        assert service._preset.density == ContentDensity.STANDARD
+
+    def test_comprehensive_preset_sets_preset_on_service(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        service = create_pipeline_service(config, preset_name="comprehensive")
+        assert service._preset is not None
+        assert service._preset.density == ContentDensity.COMPREHENSIVE
+
+    def test_default_preset_has_no_preset(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        analyze = MagicMock()
+        analyze.provider = "stub"
+        analyze.model = "stub-model"
+        analyze.temperature = 0.3
+        config.pipeline.stages.analyze = analyze
+        config.pipeline.stages.select = analyze
+        config.pipeline.stages.tailor = analyze
+        config.pipeline.stages.structure = analyze
+        config.pipeline.stages.review = analyze
+
+        service = create_pipeline_service(config, preset_name="default")
+        assert service._preset is None
+
+    def test_provider_override_changes_all_stages(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        service = create_pipeline_service(
+            config, preset_name="standard", provider_override="openrouter"
+        )
+        for sc in service._stage_configs.values():
+            assert sc.provider == "openrouter"
 
 
 class TestCreateWorkspaceService:

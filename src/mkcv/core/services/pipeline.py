@@ -14,6 +14,7 @@ from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.pricing import calculate_cost
+from mkcv.core.models.profile_preset import Preset
 from mkcv.core.models.review_report import ReviewReport
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_metadata import StageMetadata
@@ -70,11 +71,30 @@ class PipelineService:
         prompts: PromptLoaderPort,
         artifacts: ArtifactStorePort,
         stage_configs: dict[int, StageConfig] | None = None,
+        preset: Preset | None = None,
     ) -> None:
         self._providers = providers
         self._prompts = prompts
         self._artifacts = artifacts
         self._stage_configs = stage_configs or DEFAULT_STAGE_CONFIGS
+        self._preset = preset
+
+    def _density_context(self) -> dict[str, object]:
+        """Build density template variables from the preset.
+
+        Returns an empty dict when no preset is set, so templates
+        can safely use ``{{ variable | default(...) }}`` fallbacks.
+        """
+        if self._preset is None:
+            return {}
+        return {
+            "max_roles": self._preset.max_roles,
+            "max_bullets_primary": self._preset.max_bullets_primary,
+            "max_bullets_secondary": self._preset.max_bullets_secondary,
+            "page_budget": self._preset.page_budget,
+            "density": self._preset.density.value,
+            "include_earlier_experience": self._preset.include_earlier_experience,
+        }
 
     def _resolve_llm(self, stage_number: int) -> LLMPort:
         """Resolve the LLM adapter for a given stage.
@@ -136,6 +156,10 @@ class PipelineService:
         jd_text = jd_path.read_text(encoding="utf-8")
         kb_text = kb_path.read_text(encoding="utf-8")
 
+        # Intermediate stage artifacts go into a .mkcv/ subdirectory
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+
         logger.info(
             "Pipeline run %s started (from_stage=%d)",
             run_id,
@@ -148,20 +172,23 @@ class PipelineService:
         # Stage 1: Analyze JD
         if from_stage <= 1:
             self._notify_stage_start(stage_callback, 1)
-            jd_analysis, meta = await self._analyze_jd(jd_text, run_dir=output_dir)
+            jd_analysis, meta = await self._analyze_jd(jd_text, run_dir=artifact_dir)
             stages.append(meta)
             if not self._should_continue(stage_callback, meta):
                 stopped_early = True
         else:
             jd_analysis = self._load_stage_artifact(
-                "stage1_analysis", JDAnalysis, run_dir=output_dir
+                "stage1_analysis",
+                JDAnalysis,
+                artifact_dir=artifact_dir,
+                output_dir=output_dir,
             )
 
         # Stage 2: Select experience
         if not stopped_early and from_stage <= 2:
             self._notify_stage_start(stage_callback, 2)
             selection, meta = await self._select_experience(
-                jd_analysis, kb_text, run_dir=output_dir
+                jd_analysis, kb_text, run_dir=artifact_dir
             )
             stages.append(meta)
             if not self._should_continue(stage_callback, meta):
@@ -170,28 +197,32 @@ class PipelineService:
             selection = self._load_stage_artifact(
                 "stage2_selection",
                 ExperienceSelection,
-                run_dir=output_dir,
+                artifact_dir=artifact_dir,
+                output_dir=output_dir,
             )
 
         # Stage 3: Tailor content
         if not stopped_early and from_stage <= 3:
             self._notify_stage_start(stage_callback, 3)
             content, meta = await self._tailor_content(
-                jd_analysis, selection, kb_text, run_dir=output_dir
+                jd_analysis, selection, kb_text, run_dir=artifact_dir
             )
             stages.append(meta)
             if not self._should_continue(stage_callback, meta):
                 stopped_early = True
         elif not stopped_early:
             content = self._load_stage_artifact(
-                "stage3_content", TailoredContent, run_dir=output_dir
+                "stage3_content",
+                TailoredContent,
+                artifact_dir=artifact_dir,
+                output_dir=output_dir,
             )
 
         # Stage 4: Structure YAML
         if not stopped_early and from_stage <= 4:
             self._notify_stage_start(stage_callback, 4)
             resume_yaml, meta = await self._structure_yaml(
-                content, kb_text, run_dir=output_dir
+                content, kb_text, run_dir=artifact_dir
             )
             stages.append(meta)
             yaml_path = self._artifacts.save_final_output(
@@ -208,7 +239,7 @@ class PipelineService:
         if not stopped_early:
             self._notify_stage_start(stage_callback, 5)
             review, meta = await self._review(
-                resume_yaml, jd_analysis, kb_text, run_dir=output_dir
+                resume_yaml, jd_analysis, kb_text, run_dir=artifact_dir
             )
             stages.append(meta)
             # Notify callback (return value ignored — no next stage)
@@ -319,6 +350,7 @@ class PipelineService:
             {
                 "jd_analysis": jd_analysis.model_dump(),
                 "kb_text": kb_text,
+                **self._density_context(),
             },
         )
 
@@ -372,6 +404,7 @@ class PipelineService:
                 "selection": selection.model_dump(),
                 "ats_keywords": jd_analysis.ats_keywords,
                 "kb_text": kb_text,
+                **self._density_context(),
             },
         )
 
@@ -427,6 +460,7 @@ class PipelineService:
             {
                 "tailored_content": content.model_dump(),
                 "kb_text": kb_text,
+                **self._density_context(),
             },
         )
 
@@ -496,6 +530,7 @@ class PipelineService:
                 "resume_yaml": resume_yaml,
                 "jd_analysis": jd_analysis.model_dump(),
                 "kb_text": kb_text,
+                **self._density_context(),
             },
         )
 
@@ -604,10 +639,19 @@ class PipelineService:
         artifact_name: str,
         model_class: type[_T],
         *,
-        run_dir: Path,
+        artifact_dir: Path,
+        output_dir: Path,
     ) -> _T:
-        """Load a previously saved stage artifact and parse into model."""
-        data = self._artifacts.load(artifact_name, run_dir=run_dir)
+        """Load a previously saved stage artifact and parse into model.
+
+        Tries the .mkcv/ artifact directory first, then falls back to
+        the output directory root for backward compatibility with runs
+        created before artifacts were moved to .mkcv/.
+        """
+        try:
+            data = self._artifacts.load(artifact_name, run_dir=artifact_dir)
+        except FileNotFoundError:
+            data = self._artifacts.load(artifact_name, run_dir=output_dir)
         return model_class.model_validate(data)
 
     @staticmethod

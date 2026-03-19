@@ -5,6 +5,10 @@ Context variables:
   - selection: dict — experience selection from Stage 2
   - ats_keywords: list[str] — keywords to incorporate
   - kb_text: str — the full knowledge base for reference
+  - max_bullets_primary: int — bullets for most-relevant roles (default 5)
+  - max_bullets_secondary: int — bullets for less-relevant roles (default 3)
+  - density: str — "concise", "standard", or "comprehensive" (default "standard")
+  - include_earlier_experience: bool — whether to include older roles (default true)
 
 Output: JSON matching TailoredContent model schema.
 #}
@@ -89,9 +93,19 @@ Omit skills irrelevant to the target role.
 
 ### roles
 For each selected experience, produce a tailored role entry. Apply graduated depth:
-- Most recent / most relevant: 4-6 bullets
-- Mid-relevance: 3-4 bullets
-- Oldest / least relevant: 2-3 bullets
+- Most recent / most relevant: up to {{ max_bullets_primary | default(5) }} bullets
+- Mid-relevance / less relevant: up to {{ max_bullets_secondary | default(3) }} bullets
+{% if density | default("standard") == "concise" %}
+
+**Concise mode**: Focus only on the strongest-impact bullets. Every bullet must
+directly demonstrate a JD requirement. Omit context-setting bullets — lead with
+results and metrics.
+{% elif density | default("standard") == "comprehensive" %}
+
+**Comprehensive mode**: Include more detail per role — metrics, tech stack depth,
+scope of impact. Keep bullets that show breadth of contribution even if they are
+not the #1 match for the JD. Preserve technical specificity.
+{% endif %}
 
 Each role entry contains:
 - `company`: Company name.
@@ -121,8 +135,12 @@ Each role entry contains:
 Recruiters often only read the first 2 bullets.
 
 ### earlier_experience
+{% if include_earlier_experience | default(true) %}
 If there are older roles worth a brief mention (to show career breadth or fill a
 gap), provide a 1-2 sentence summary. Otherwise null.
+{% else %}
+Set to null — only include the selected roles above.
+{% endif %}
 
 ### languages
 List of spoken/written languages from the KB if relevant to the role (international

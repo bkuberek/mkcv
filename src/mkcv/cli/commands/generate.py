@@ -42,6 +42,19 @@ _STAGE_LABELS: dict[int, str] = {
 }
 
 
+_PROFILE_TO_PRESET: dict[str, str] = {
+    "budget": "concise",
+    "premium": "standard",
+    "default": "standard",
+}
+
+_PROFILE_PROVIDER_OVERRIDES: dict[str, str] = {
+    "budget": "ollama",
+}
+
+_PRESET_SENTINEL = "__unset__"
+
+
 def generate_command(
     *,
     jd: Annotated[
@@ -96,12 +109,28 @@ def generate_command(
             help="RenderCV theme name.",
         ),
     ] = "sb2nov",
-    profile: Annotated[
+    preset: Annotated[
         str,
         cyclopts.Parameter(
-            help="Provider profile (budget/premium).",
+            help="Resume preset (concise/standard/comprehensive).",
         ),
-    ] = "premium",
+    ] = _PRESET_SENTINEL,
+    profile: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help="Deprecated: use --preset instead.",
+            show=False,
+        ),
+    ] = None,
+    provider: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help=(
+                "Override AI provider for all stages "
+                "(anthropic/openai/openrouter/ollama)."
+            ),
+        ),
+    ] = None,
     from_stage: Annotated[
         int,
         cyclopts.Parameter(
@@ -132,6 +161,11 @@ def generate_command(
     read from stdin. Omit --jd to generate a generic resume (optionally
     with --target to specify the role).
     """
+    # ---- Resolve preset from --preset / --profile ----
+    resolved_preset, resolved_provider = _resolve_preset_and_provider(
+        preset_raw=preset, profile=profile, provider=provider
+    )
+
     # ---- Resolve JD source ----
     if jd is not None:
         jd_text, jd_display = _resolve_jd(jd)
@@ -156,7 +190,8 @@ def generate_command(
             position=position,
             output_dir=output_dir,
             theme=theme,
-            profile=profile,
+            preset=resolved_preset,
+            provider=resolved_provider,
             from_stage=from_stage,
             render_pdf=render,
             interactive=interactive,
@@ -182,26 +217,58 @@ def generate_command(
             kb=kb,
             output_dir=output_dir,
             theme=theme,
-            profile=profile,
+            preset=resolved_preset,
+            provider=resolved_provider,
             from_stage=from_stage,
             render_pdf=render,
             interactive=interactive,
         )
 
 
-def _default_output_dir(jd_display: str) -> Path:
-    """Build a dated output directory for resume generation.
+def _resolve_preset_and_provider(
+    *,
+    preset_raw: str,
+    profile: str | None,
+    provider: str | None,
+) -> tuple[str, str | None]:
+    """Resolve the effective preset name and optional provider override.
+
+    Handles backward-compatible mapping from legacy ``--profile`` values
+    and prints a deprecation warning when ``--profile`` is used.
+
+    Args:
+        preset_raw: Raw ``--preset`` value (may be the sentinel).
+        profile: Legacy ``--profile`` value, or None if not provided.
+        provider: Explicit ``--provider`` override, or None.
+
+    Returns:
+        Tuple of (preset_name, provider_override).
+    """
+    preset_explicitly_set = preset_raw != _PRESET_SENTINEL
+
+    if profile is not None and not preset_explicitly_set:
+        console.print(
+            "[yellow]Warning:[/yellow] --profile is deprecated, use --preset instead."
+        )
+        resolved_preset = _PROFILE_TO_PRESET.get(profile, "standard")
+        if provider is None:
+            provider = _PROFILE_PROVIDER_OVERRIDES.get(profile)
+        return resolved_preset, provider
+
+    resolved_preset = preset_raw if preset_explicitly_set else "standard"
+    return resolved_preset, provider
+
+
+def _default_output_dir(jd_display: str, preset_name: str) -> Path:
+    """Build a dated, versioned output directory for resume generation.
 
     In a workspace:
-        Generic:  resumes/{YYYY-MM}-{slug}/
+        Generic:  resumes/{YYYY-MM}-{slug}-{preset}-v{N}/
         Targeted: handled by workspace mode, not this function.
     Outside a workspace:
-        output/{YYYY-MM}-{slug}/
+        output/{YYYY-MM}-{slug}-{preset}-v{N}/
 
-    All output goes under a parent directory (resumes/ or output/) to
-    avoid scattering date-named directories into the user's CWD.
-
-    Handles collisions by appending -2, -3, etc.
+    Version numbering increments automatically: v1, v2, v3, etc.
     """
     date_prefix = date.today().strftime("%Y-%m")
 
@@ -220,23 +287,39 @@ def _default_output_dir(jd_display: str) -> Path:
         raw = raw[:40]
 
     slug = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")[:40] or "resume"
-    dir_name = f"{date_prefix}-{slug}"
+    base_name = f"{date_prefix}-{slug}-{preset_name}"
 
     if settings.in_workspace and settings.workspace_root:
         base = settings.workspace_root / "resumes"
     else:
         base = Path.cwd() / "output"
 
-    output = base / dir_name
+    version = _find_next_version(base, base_name)
+    return base / f"{base_name}-v{version}"
 
-    # Handle collisions (same target generated multiple times in one month)
-    if output.exists():
-        for i in range(2, 100):
-            candidate = base / f"{dir_name}-{i}"
-            if not candidate.exists():
-                return candidate
 
-    return output
+def _find_next_version(parent: Path, base_name: str) -> int:
+    """Scan a directory for existing versioned dirs and return the next number.
+
+    Args:
+        parent: Directory to scan.
+        base_name: The prefix before ``-v{N}``.
+
+    Returns:
+        The next version number (>= 1).
+    """
+    if not parent.is_dir():
+        return 1
+
+    pattern = re.compile(re.escape(base_name) + r"-v(\d+)$")
+    max_version = 0
+    for entry in parent.iterdir():
+        if entry.is_dir():
+            match = pattern.match(entry.name)
+            if match:
+                max_version = max(max_version, int(match.group(1)))
+
+    return max_version + 1
 
 
 def _build_generic_jd(target: str | None) -> str:
@@ -317,7 +400,8 @@ def _generate_workspace_mode(
     position: str | None,
     output_dir: Path | None,
     theme: str,
-    profile: str,
+    preset: str,
+    provider: str | None,
     from_stage: int,
     render_pdf: bool,
     interactive: bool,
@@ -345,7 +429,7 @@ def _generate_workspace_mode(
     console.print(f"  Company:   {company}")
     console.print(f"  Position:  {position}")
     console.print(f"  Theme:     {theme}")
-    console.print(f"  Profile:   {profile}")
+    console.print(f"  Preset:    {preset}")
     console.print()
 
     # Write JD to a temp file for the workspace service
@@ -359,6 +443,7 @@ def _generate_workspace_mode(
                 company=company,
                 position=position,
                 jd_source=jd_file,
+                preset_name=preset,
             )
         except MkcvError as exc:
             console.print(f"[red]Error:[/red] {exc}")
@@ -383,7 +468,8 @@ def _generate_workspace_mode(
         jd=jd_path,
         kb=kb,
         output_dir=run_dir,
-        profile=profile,
+        preset_name=preset,
+        provider_override=provider,
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
@@ -398,7 +484,8 @@ def _generate_standalone_mode(
     kb: Path | None,
     output_dir: Path | None,
     theme: str,
-    profile: str,
+    preset: str,
+    provider: str | None,
     from_stage: int,
     render_pdf: bool,
     interactive: bool,
@@ -417,7 +504,7 @@ def _generate_standalone_mode(
         sys.exit(2)
 
     # Output directory: explicit flag, or auto-generated with date + slug
-    run_dir = output_dir or _default_output_dir(jd_display)
+    run_dir = output_dir or _default_output_dir(jd_display, preset)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     console.print("\n  [bold]mkcv generate[/bold] — standalone mode")
@@ -425,7 +512,7 @@ def _generate_standalone_mode(
     console.print(f"  KB:        {kb}")
     console.print(f"  Output:    {run_dir}")
     console.print(f"  Theme:     {theme}")
-    console.print(f"  Profile:   {profile}")
+    console.print(f"  Preset:    {preset}")
     console.print()
 
     # Write JD to the run directory for the pipeline
@@ -436,7 +523,8 @@ def _generate_standalone_mode(
         jd=jd_path,
         kb=kb,
         output_dir=run_dir,
-        profile=profile,
+        preset_name=preset,
+        provider_override=provider,
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
@@ -449,7 +537,8 @@ def _run_pipeline(
     jd: Path,
     kb: Path,
     output_dir: Path,
-    profile: str,
+    preset_name: str,
+    provider_override: str | None = None,
     from_stage: int,
     render_pdf: bool = True,
     theme: str = "sb2nov",
@@ -463,7 +552,9 @@ def _run_pipeline(
     if not kb_result.is_valid:
         sys.exit(5)
 
-    pipeline = create_pipeline_service(settings, profile=profile)
+    pipeline = create_pipeline_service(
+        settings, preset_name=preset_name, provider_override=provider_override
+    )
 
     if interactive:
         callback: _ProgressCallback | _InteractiveProgressCallback = (

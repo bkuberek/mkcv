@@ -4,6 +4,8 @@ Context variables:
   - resume_yaml: str — the generated resume YAML
   - jd_analysis: dict — original JD analysis
   - kb_text: str — original knowledge base for accuracy checking
+  - density: str — "concise", "standard", or "comprehensive" (default "standard")
+  - page_budget: str — target page count ("1", "1-2", "2+") (default "1-2")
 
 Output: JSON matching ReviewReport model schema.
 #}
@@ -104,10 +106,19 @@ content-level ATS factors:
   Flag if a low-relevance role has more bullets than a high-relevance one.
 
 - **length_assessment**: Is this the right length?
+  For {{ density | default("standard") }} density, target {{ page_budget | default("1-2") }} page(s).
+{% if density | default("standard") == "concise" %}
+  This is a concise resume — penalize if it exceeds 1 page. Every line must earn its place.
+{% elif density | default("standard") == "comprehensive" %}
+  This is a comprehensive resume — do NOT penalize for being 2+ pages. Depth and
+  coverage are intentional. Only penalize if content is repetitive or low-value.
+{% else %}
+  General guidelines by seniority:
   - Junior/mid: 1 page
   - Senior: 1 page (tight) to 1.5 pages
   - Staff+: 1.5 to 2 pages max
-  Flag if over/under for the seniority level.
+{% endif %}
+  Flag if over/under for the target density and seniority level.
 
 - **top_suggestions**: The 3-5 highest-impact changes to make before submitting.
   Be specific and actionable ("Add Kubernetes to the bullet about container

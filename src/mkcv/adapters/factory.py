@@ -23,7 +23,7 @@ from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
-from mkcv.core.models.profile_preset import PROFILE_PRESETS
+from mkcv.core.models.profile_preset import Preset, resolve_preset
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
@@ -78,25 +78,45 @@ def _resolve_api_key(provider: str, config: Configuration) -> str | None:
     return None
 
 
+def _resolve_preset(
+    name: str,
+    config: Configuration,
+) -> Preset | None:
+    """Resolve a preset by name, applying provider overrides from config.
+
+    Args:
+        name: Preset or legacy profile name.
+        config: Application configuration (for potential overrides).
+
+    Returns:
+        The resolved Preset, or None if name is "default" or unknown.
+    """
+    preset = resolve_preset(name)
+    if preset is not None:
+        logger.info("Using '%s' preset for all stages", preset.name)
+    return preset
+
+
 def _resolve_stage_configs(
     config: Configuration,
-    profile: str = "default",
+    preset_name: str = "default",
 ) -> dict[int, StageConfig]:
-    """Read per-stage LLM configuration from settings or profile preset.
+    """Read per-stage LLM configuration from settings or preset.
 
-    When profile is "budget" or "premium", the preset overrides config.
-    When profile is "default", per-stage settings from config are used.
+    When preset_name matches a built-in or legacy preset, the preset
+    overrides config. When preset_name is "default", per-stage settings
+    from config are used.
 
     Args:
         config: Application configuration.
-        profile: Profile name ("default", "budget", or "premium").
+        preset_name: Preset or legacy profile name.
 
     Returns:
         Dict mapping stage number (1-5) to StageConfig.
     """
-    if profile in PROFILE_PRESETS:
-        logger.info("Using '%s' profile preset for all stages", profile)
-        return dict(PROFILE_PRESETS[profile])
+    preset = _resolve_preset(preset_name, config)
+    if preset is not None:
+        return dict(preset.stage_configs)
 
     stage_configs: dict[int, StageConfig] = {}
 
@@ -216,23 +236,42 @@ def _create_providers(
 
 def create_pipeline_service(
     config: Configuration,
-    profile: str = "default",
+    preset_name: str = "default",
+    *,
+    provider_override: str | None = None,
 ) -> PipelineService:
     """Create a fully-wired PipelineService.
 
-    Reads per-stage provider/model/temperature from config (or profile
-    preset) and creates one LLM adapter per unique provider.
+    Reads per-stage provider/model/temperature from config (or preset)
+    and creates one LLM adapter per unique provider.
 
     Args:
         config: Application configuration.
-        profile: Profile name ("default", "budget", or "premium").
+        preset_name: Preset or legacy profile name.
+        provider_override: When set, override the provider for all stages.
 
     Returns:
         PipelineService with per-stage LLM adapters.
     """
     prompt_loader = _create_prompt_loader(config)
     artifact_store = FileSystemArtifactStore()
-    stage_configs = _resolve_stage_configs(config, profile=profile)
+    preset = _resolve_preset(preset_name, config)
+    stage_configs = (
+        dict(preset.stage_configs)
+        if preset is not None
+        else _resolve_stage_configs(config, preset_name=preset_name)
+    )
+
+    if provider_override is not None:
+        stage_configs = {
+            num: StageConfig(
+                provider=provider_override,
+                model=sc.model,
+                temperature=sc.temperature,
+            )
+            for num, sc in stage_configs.items()
+        }
+
     providers = _create_providers(config, stage_configs)
 
     return PipelineService(
@@ -240,6 +279,7 @@ def create_pipeline_service(
         prompts=prompt_loader,
         artifacts=artifact_store,
         stage_configs=stage_configs,
+        preset=preset,
     )
 
 

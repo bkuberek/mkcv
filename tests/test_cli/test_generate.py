@@ -92,7 +92,11 @@ class TestGenerateStandaloneMode:
             from mkcv.cli.commands.generate import generate_command
 
             generate_command(jd=str(jd), kb=kb)
-        mock_create.assert_called_once_with(mock_settings, profile="premium")
+        mock_create.assert_called_once_with(
+            mock_settings,
+            preset_name="standard",
+            provider_override=None,
+        )
 
     def test_standalone_missing_kb_exits_with_error(self, tmp_path: Path) -> None:
         jd = _jd_path(tmp_path)
@@ -149,7 +153,7 @@ class TestGenerateStandaloneMode:
         call_args = mock_pipeline.generate.call_args
         assert call_args.kwargs["from_stage"] == 3
 
-    def test_profile_passed_to_factory(self, tmp_path: Path) -> None:
+    def test_preset_passed_to_factory(self, tmp_path: Path) -> None:
         jd = _jd_path(tmp_path)
         kb = tmp_path / "kb.md"
         kb.write_text("Knowledge base content")
@@ -168,8 +172,12 @@ class TestGenerateStandaloneMode:
             mock_settings.in_workspace = False
             from mkcv.cli.commands.generate import generate_command
 
-            generate_command(jd=str(jd), kb=kb, profile="budget")
-        mock_create.assert_called_once_with(mock_settings, profile="budget")
+            generate_command(jd=str(jd), kb=kb, preset="comprehensive")
+        mock_create.assert_called_once_with(
+            mock_settings,
+            preset_name="comprehensive",
+            provider_override=None,
+        )
 
     def test_no_render_skips_auto_render(self, tmp_path: Path) -> None:
         jd = _jd_path(tmp_path)
@@ -553,3 +561,217 @@ class TestGenerateOutput:
         captured = capsys.readouterr()
         assert "85" in captured.out
         assert "100" in captured.out
+
+
+class TestPresetAndProfileFlags:
+    """Tests for --preset, --profile deprecation, and --provider override."""
+
+    def test_preset_flag_is_accepted(self, tmp_path: Path) -> None:
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(
+                f"{_CMD}.create_pipeline_service", return_value=mock_pipeline
+            ) as mock_create,
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+        ):
+            mock_settings.in_workspace = False
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(jd=str(jd), kb=kb, preset="concise")
+        mock_create.assert_called_once_with(
+            mock_settings,
+            preset_name="concise",
+            provider_override=None,
+        )
+
+    def test_profile_budget_maps_to_concise_with_ollama(self, tmp_path: Path) -> None:
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(
+                f"{_CMD}.create_pipeline_service", return_value=mock_pipeline
+            ) as mock_create,
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+        ):
+            mock_settings.in_workspace = False
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(jd=str(jd), kb=kb, profile="budget")
+        mock_create.assert_called_once_with(
+            mock_settings,
+            preset_name="concise",
+            provider_override="ollama",
+        )
+
+    def test_profile_premium_maps_to_standard(self, tmp_path: Path) -> None:
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(
+                f"{_CMD}.create_pipeline_service", return_value=mock_pipeline
+            ) as mock_create,
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+        ):
+            mock_settings.in_workspace = False
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(jd=str(jd), kb=kb, profile="premium")
+        mock_create.assert_called_once_with(
+            mock_settings,
+            preset_name="standard",
+            provider_override=None,
+        )
+
+    def test_profile_triggers_deprecation_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+        ):
+            mock_settings.in_workspace = False
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(jd=str(jd), kb=kb, profile="budget")
+        captured = capsys.readouterr()
+        assert "deprecated" in captured.out.lower()
+
+    def test_provider_override_passed_to_factory(self, tmp_path: Path) -> None:
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(
+                f"{_CMD}.create_pipeline_service", return_value=mock_pipeline
+            ) as mock_create,
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+        ):
+            mock_settings.in_workspace = False
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(
+                jd=str(jd), kb=kb, preset="comprehensive", provider="openrouter"
+            )
+        mock_create.assert_called_once_with(
+            mock_settings,
+            preset_name="comprehensive",
+            provider_override="openrouter",
+        )
+
+    def test_preset_label_in_standalone_output(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        result = _make_pipeline_result(tmp_path)
+        mock_pipeline = MagicMock()
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.asyncio.run", return_value=result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=jd),
+        ):
+            mock_settings.in_workspace = False
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(jd=str(jd), kb=kb, preset="concise", render=False)
+        captured = capsys.readouterr()
+        assert "Preset:" in captured.out
+        assert "concise" in captured.out
+
+
+class TestVersionBasedOutputDir:
+    """Tests for version-based output directory naming."""
+
+    def test_first_run_creates_v1(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _find_next_version
+
+        version = _find_next_version(tmp_path, "2026-03-senior-swe-standard")
+        assert version == 1
+
+    def test_second_run_creates_v2(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _find_next_version
+
+        (tmp_path / "2026-03-senior-swe-standard-v1").mkdir()
+        version = _find_next_version(tmp_path, "2026-03-senior-swe-standard")
+        assert version == 2
+
+    def test_finds_highest_version(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _find_next_version
+
+        (tmp_path / "2026-03-senior-swe-standard-v1").mkdir()
+        (tmp_path / "2026-03-senior-swe-standard-v2").mkdir()
+        (tmp_path / "2026-03-senior-swe-standard-v3").mkdir()
+        version = _find_next_version(tmp_path, "2026-03-senior-swe-standard")
+        assert version == 4
+
+    def test_different_preset_starts_at_v1(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _find_next_version
+
+        (tmp_path / "2026-03-senior-swe-standard-v1").mkdir()
+        (tmp_path / "2026-03-senior-swe-standard-v2").mkdir()
+        version = _find_next_version(tmp_path, "2026-03-senior-swe-comprehensive")
+        assert version == 1
+
+    def test_nonexistent_parent_returns_v1(self) -> None:
+        from mkcv.cli.commands.generate import _find_next_version
+
+        version = _find_next_version(Path("/nonexistent"), "base")
+        assert version == 1
+
+    def test_preset_name_in_output_dir(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _default_output_dir
+
+        with patch(f"{_CMD}.settings") as mock_settings:
+            mock_settings.in_workspace = False
+            result = _default_output_dir("<generic resume>", "standard")
+        assert "standard" in result.name
+        assert result.name.endswith("-v1")
+
+    def test_output_dir_includes_version(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _default_output_dir
+
+        with patch(f"{_CMD}.settings") as mock_settings:
+            mock_settings.in_workspace = False
+            result = _default_output_dir("<generic resume>", "concise")
+        assert "-v1" in result.name

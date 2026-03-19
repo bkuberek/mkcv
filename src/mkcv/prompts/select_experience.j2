@@ -3,6 +3,9 @@
 Context variables:
   - jd_analysis: dict — structured JD analysis from Stage 1
   - kb_text: str — the full knowledge base text
+  - max_roles: int — maximum roles to select (from preset, default 4)
+  - density: str — "concise", "standard", or "comprehensive" (default "standard")
+  - include_earlier_experience: bool — whether to include older roles (default true)
 
 Output: JSON matching ExperienceSelection model schema.
 #}
@@ -50,15 +53,28 @@ Apply these principles when selecting experiences:
 3. **Cover the must-haves** — Every "must_have" requirement should be evidenced
    by at least one selected role. Flag gaps explicitly.
 
-4. **Depth over breadth** — 3-4 deeply relevant roles beat 6 shallow ones.
+4. **Role count** — Select up to {{ max_roles | default(4) }} roles.
+{% if density | default("standard") == "concise" %}
+   Be ruthless about relevance. Select only {{ max_roles | default(3) }} roles —
+   every role must directly address a core requirement. Drop anything tangential.
+{% elif density | default("standard") == "comprehensive" %}
+   Include up to {{ max_roles | default(6) }} roles to show the full career arc.
+   Aim for breadth AND depth — show both technical range and sustained impact.
+{% else %}
    Target:
    - Junior/mid roles: 2-4 experiences
    - Senior roles: 3-4 experiences
    - Staff+ roles: 3-5 experiences (showing breadth of impact)
+{% endif %}
 
 5. **Bullet selection** — For each role, pick bullets that demonstrate skills from
    the JD. Drop bullets about technologies or achievements irrelevant to this
    application, even if impressive in general.
+
+{% if not (include_earlier_experience | default(true)) %}
+6. **No earlier experience** — Do not include older or tangential roles as brief
+   mentions. Focus entirely on the most relevant positions.
+{% endif %}
 
 ## Output
 

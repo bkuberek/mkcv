@@ -3,6 +3,8 @@
 Context variables:
   - tailored_content: dict — complete tailored content from Stage 3
   - kb_text: str — knowledge base for extracting personal information
+  - page_budget: str — target page count ("1", "1-2", "2+") (default "1-2")
+  - density: str — "concise", "standard", or "comprehensive" (default "standard")
 
 Output: Valid YAML matching RenderCV schema.
 #}
@@ -19,6 +21,15 @@ a valid, well-structured YAML document that RenderCV can render to PDF.
 {{ kb_text }}
 
 ## Instructions
+
+Target approximately {{ page_budget | default("1-2") }} page(s) for this resume.
+{% if density | default("standard") == "concise" %}
+Be selective — prioritize impact over completeness. Keep the resume tight and
+focused. Omit sections that don't directly strengthen the application.
+{% elif density | default("standard") == "comprehensive" %}
+Include all experience entries and full skill detail. Show the complete career
+picture. It is acceptable for this resume to run to 2+ pages.
+{% endif %}
 
 Convert the tailored content into a valid RenderCV YAML document.
 

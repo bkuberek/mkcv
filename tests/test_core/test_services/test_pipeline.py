@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,10 +17,12 @@ from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.keyword_coverage import KeywordCoverage
 from mkcv.core.models.mission_statement import MissionStatement
 from mkcv.core.models.pipeline_result import PipelineResult
+from mkcv.core.models.profile_preset import BUILT_IN_PRESETS
 from mkcv.core.models.requirement import Requirement
 from mkcv.core.models.review_report import ReviewReport
 from mkcv.core.models.selected_experience import SelectedExperience
 from mkcv.core.models.skill_group import SkillGroup
+from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.models.tailored_bullet import TailoredBullet
 from mkcv.core.models.tailored_content import TailoredContent
@@ -337,7 +340,7 @@ class TestPipelineArtifacts:
         output_dir = tmp_path / "output"
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
 
-        artifact = output_dir / "stage1_analysis.json"
+        artifact = output_dir / ".mkcv" / "stage1_analysis.json"
         assert artifact.is_file()
 
     async def test_stage2_artifact_saved(
@@ -350,7 +353,7 @@ class TestPipelineArtifacts:
         output_dir = tmp_path / "output"
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
 
-        artifact = output_dir / "stage2_selection.json"
+        artifact = output_dir / ".mkcv" / "stage2_selection.json"
         assert artifact.is_file()
 
     async def test_stage3_artifact_saved(
@@ -363,7 +366,7 @@ class TestPipelineArtifacts:
         output_dir = tmp_path / "output"
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
 
-        artifact = output_dir / "stage3_content.json"
+        artifact = output_dir / ".mkcv" / "stage3_content.json"
         assert artifact.is_file()
 
     async def test_stage4_artifact_saved(
@@ -376,7 +379,7 @@ class TestPipelineArtifacts:
         output_dir = tmp_path / "output"
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
 
-        artifact = output_dir / "stage4_structure.json"
+        artifact = output_dir / ".mkcv" / "stage4_structure.json"
         assert artifact.is_file()
 
     async def test_stage5_artifact_saved(
@@ -389,7 +392,7 @@ class TestPipelineArtifacts:
         output_dir = tmp_path / "output"
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
 
-        artifact = output_dir / "stage5_review.json"
+        artifact = output_dir / ".mkcv" / "stage5_review.json"
         assert artifact.is_file()
 
     async def test_resume_yaml_saved(
@@ -416,7 +419,7 @@ class TestPipelineArtifacts:
         output_dir = tmp_path / "output"
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
 
-        artifact = output_dir / "stage1_analysis.json"
+        artifact = output_dir / ".mkcv" / "stage1_analysis.json"
         data = json.loads(artifact.read_text(encoding="utf-8"))
         assert data["company"] == "TestCorp"
 
@@ -430,9 +433,23 @@ class TestPipelineArtifacts:
         output_dir = tmp_path / "output"
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
 
-        artifact = output_dir / "stage5_review.json"
+        artifact = output_dir / ".mkcv" / "stage5_review.json"
         data = json.loads(artifact.read_text(encoding="utf-8"))
         assert data["overall_score"] == 82
+
+    async def test_resume_yaml_not_in_mkcv_subdir(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """resume.yaml should be at output_dir root, not inside .mkcv/."""
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        assert (output_dir / "resume.yaml").is_file()
+        assert not (output_dir / ".mkcv" / "resume.yaml").is_file()
 
 
 # ------------------------------------------------------------------
@@ -507,14 +524,15 @@ class TestPipelineFromStage:
     ) -> None:
         """When from_stage=2, stage 1 artifact must already exist."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir(parents=True)
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True)
 
-        # Pre-save stage 1 artifact
+        # Pre-save stage 1 artifact into .mkcv/
         artifacts = FileSystemArtifactStore()
         artifacts.save(
             "stage1_analysis",
             sample_jd_analysis.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
 
         result = await pipeline.generate(
@@ -535,13 +553,14 @@ class TestPipelineFromStage:
     ) -> None:
         """Stage 1 should not appear in stages when from_stage=2."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir(parents=True)
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True)
 
         artifacts = FileSystemArtifactStore()
         artifacts.save(
             "stage1_analysis",
             sample_jd_analysis.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
 
         result = await pipeline.generate(
@@ -578,18 +597,19 @@ class TestPipelineFromStage:
     ) -> None:
         """from_stage=3 loads stages 1-2, runs 3-5."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir(parents=True)
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True)
 
         artifacts = FileSystemArtifactStore()
         artifacts.save(
             "stage1_analysis",
             sample_jd_analysis.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
         artifacts.save(
             "stage2_selection",
             sample_selection.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
 
         result = await pipeline.generate(
@@ -612,23 +632,24 @@ class TestPipelineFromStage:
     ) -> None:
         """from_stage=4 loads stages 1-3, runs 4-5."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir(parents=True)
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True)
 
         artifacts = FileSystemArtifactStore()
         artifacts.save(
             "stage1_analysis",
             sample_jd_analysis.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
         artifacts.save(
             "stage2_selection",
             sample_selection.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
         artifacts.save(
             "stage3_content",
             sample_tailored_content.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
 
         result = await pipeline.generate(
@@ -651,25 +672,26 @@ class TestPipelineFromStage:
     ) -> None:
         """from_stage=5 loads everything, runs review only."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir(parents=True)
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True)
 
         artifacts = FileSystemArtifactStore()
         artifacts.save(
             "stage1_analysis",
             sample_jd_analysis.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
         artifacts.save(
             "stage2_selection",
             sample_selection.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
         artifacts.save(
             "stage3_content",
             sample_tailored_content.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
-        # Stage 4 saves resume.yaml as a file (not JSON artifact)
+        # Stage 4 saves resume.yaml at the output root (not inside .mkcv/)
         resume_yaml = "cv:\n  name: Test\n  summary: Test resume\n"
         (output_dir / "resume.yaml").write_text(resume_yaml, encoding="utf-8")
 
@@ -692,18 +714,19 @@ class TestPipelineFromStage:
     ) -> None:
         """from_stage=3 should make 3 LLM calls (stages 3, 4, 5)."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir(parents=True)
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True)
 
         artifacts = FileSystemArtifactStore()
         artifacts.save(
             "stage1_analysis",
             sample_jd_analysis.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
         artifacts.save(
             "stage2_selection",
             sample_selection.model_dump(),
-            run_dir=output_dir,
+            run_dir=artifact_dir,
         )
 
         await pipeline.generate(jd_file, kb_file, output_dir=output_dir, from_stage=3)
@@ -720,6 +743,68 @@ class TestPipelineFromStage:
     ) -> None:
         """from_stage=3 without stage 2 artifact should fail."""
         output_dir = tmp_path / "output"
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True)
+
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=artifact_dir,
+        )
+        # Stage 2 artifact intentionally missing
+
+        with pytest.raises(FileNotFoundError):
+            await pipeline.generate(
+                jd_file, kb_file, output_dir=output_dir, from_stage=3
+            )
+
+
+# ------------------------------------------------------------------
+# Test: Backward compatibility (old layout with artifacts at root)
+# ------------------------------------------------------------------
+
+
+class TestPipelineBackwardCompatibility:
+    """Tests that --from-stage works with artifacts saved in the old layout."""
+
+    async def test_from_stage_2_loads_artifact_from_root_dir(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+    ) -> None:
+        """Artifacts in output_dir root (old layout) are found by fallback."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir(parents=True)
+
+        # Save artifact at the old location (output_dir root, not .mkcv/)
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=output_dir,
+        )
+
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, from_stage=2
+        )
+
+        assert len(result.stages) == 4
+
+    async def test_from_stage_3_loads_artifacts_from_root_dir(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+    ) -> None:
+        """Multiple artifacts in root dir (old layout) all load correctly."""
+        output_dir = tmp_path / "output"
         output_dir.mkdir(parents=True)
 
         artifacts = FileSystemArtifactStore()
@@ -728,12 +813,47 @@ class TestPipelineFromStage:
             sample_jd_analysis.model_dump(),
             run_dir=output_dir,
         )
-        # Stage 2 artifact intentionally missing
+        artifacts.save(
+            "stage2_selection",
+            sample_selection.model_dump(),
+            run_dir=output_dir,
+        )
 
-        with pytest.raises(FileNotFoundError):
-            await pipeline.generate(
-                jd_file, kb_file, output_dir=output_dir, from_stage=3
-            )
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, from_stage=3
+        )
+
+        assert len(result.stages) == 3
+        stage_numbers = [s.stage_number for s in result.stages]
+        assert stage_numbers == [3, 4, 5]
+
+    async def test_new_artifacts_saved_to_mkcv_even_when_loading_from_root(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+        sample_jd_analysis: JDAnalysis,
+    ) -> None:
+        """New stage artifacts go to .mkcv/ even when old ones loaded from root."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir(parents=True)
+
+        # Save stage 1 in old layout (root)
+        artifacts = FileSystemArtifactStore()
+        artifacts.save(
+            "stage1_analysis",
+            sample_jd_analysis.model_dump(),
+            run_dir=output_dir,
+        )
+
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir, from_stage=2)
+
+        # New artifacts (stages 2-5) should be in .mkcv/
+        assert (output_dir / ".mkcv" / "stage2_selection.json").is_file()
+        assert (output_dir / ".mkcv" / "stage3_content.json").is_file()
+        assert (output_dir / ".mkcv" / "stage4_structure.json").is_file()
+        assert (output_dir / ".mkcv" / "stage5_review.json").is_file()
 
 
 # ------------------------------------------------------------------
@@ -885,8 +1005,6 @@ class TestPerStageProviders:
         tmp_path: Path,
     ) -> None:
         """Different named providers get different call logs."""
-        from mkcv.core.models.stage_config import StageConfig
-
         # Create two stub adapters to track which stages use which
         provider_a = StubLLMAdapter(
             default_response="cv:\n  name: Test",
@@ -949,8 +1067,6 @@ class TestPerStageProviders:
         tmp_path: Path,
     ) -> None:
         """Stage metadata should reflect the model from stage config."""
-        from mkcv.core.models.stage_config import StageConfig
-
         stub = StubLLMAdapter(
             default_response="cv:\n  name: Test",
             responses={
@@ -995,8 +1111,6 @@ class TestPerStageProviders:
         tmp_path: Path,
     ) -> None:
         """Missing provider in providers dict raises PipelineStageError."""
-        from mkcv.core.models.stage_config import StageConfig
-
         stage_configs = {
             1: StageConfig(provider="nonexistent", model="m", temperature=0.2),
             2: StageConfig(provider="x", model="m", temperature=0.3),
@@ -1121,3 +1235,247 @@ class TestInteractiveMode:
             jd_file, kb_file, output_dir=output_dir, stage_callback=None
         )
         assert len(result.stages) == 5
+
+
+# ------------------------------------------------------------------
+# Test: Density context
+# ------------------------------------------------------------------
+
+
+class TestDensityContext:
+    """Tests for density parameters being passed to prompts."""
+
+    def test_density_context_returns_empty_when_no_preset(self) -> None:
+        pipeline = PipelineService(
+            providers={"default": StubLLMAdapter()},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+        )
+        assert pipeline._density_context() == {}
+
+    def test_density_context_returns_params_from_preset(self) -> None:
+        preset = BUILT_IN_PRESETS["concise"]
+        pipeline = PipelineService(
+            providers={"default": StubLLMAdapter()},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        ctx = pipeline._density_context()
+        assert ctx["max_roles"] == 3
+        assert ctx["max_bullets_primary"] == 4
+        assert ctx["max_bullets_secondary"] == 2
+        assert ctx["page_budget"] == "1"
+        assert ctx["density"] == "concise"
+        assert ctx["include_earlier_experience"] is False
+
+    def test_density_context_for_standard_preset(self) -> None:
+        preset = BUILT_IN_PRESETS["standard"]
+        pipeline = PipelineService(
+            providers={"default": StubLLMAdapter()},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        ctx = pipeline._density_context()
+        assert ctx["density"] == "standard"
+        assert ctx["max_roles"] == 4
+        assert ctx["page_budget"] == "1-2"
+        assert ctx["include_earlier_experience"] is True
+
+    def test_density_context_for_comprehensive_preset(self) -> None:
+        preset = BUILT_IN_PRESETS["comprehensive"]
+        pipeline = PipelineService(
+            providers={"default": StubLLMAdapter()},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        ctx = pipeline._density_context()
+        assert ctx["density"] == "comprehensive"
+        assert ctx["max_roles"] == 6
+        assert ctx["max_bullets_primary"] == 7
+        assert ctx["page_budget"] == "2+"
+
+
+class _PromptCapture:
+    """Mock prompt loader that captures render context."""
+
+    def __init__(self) -> None:
+        self.render_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def load(self, template_name: str) -> str:
+        return ""
+
+    def render(self, template_name: str, context: dict[str, Any]) -> str:
+        self.render_calls.append((template_name, dict(context)))
+        return "mock prompt"
+
+    def list_templates(self) -> list[str]:
+        return []
+
+
+class TestDensityPassedToPrompts:
+    """Tests that density params are forwarded to prompt rendering."""
+
+    async def test_stage2_prompt_receives_density_params(
+        self,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        prompt_capture = _PromptCapture()
+        preset = BUILT_IN_PRESETS["concise"]
+        pipeline = PipelineService(
+            providers={"default": stub_llm},
+            prompts=prompt_capture,
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        # Find the select_experience.j2 call
+        select_calls = [
+            (name, ctx)
+            for name, ctx in prompt_capture.render_calls
+            if name == "select_experience.j2"
+        ]
+        assert len(select_calls) == 1
+        ctx = select_calls[0][1]
+        assert ctx["max_roles"] == 3
+        assert ctx["density"] == "concise"
+
+    async def test_stage3_prompt_receives_bullet_params(
+        self,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        prompt_capture = _PromptCapture()
+        preset = BUILT_IN_PRESETS["standard"]
+        pipeline = PipelineService(
+            providers={"default": stub_llm},
+            prompts=prompt_capture,
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        tailor_calls = [
+            (name, ctx)
+            for name, ctx in prompt_capture.render_calls
+            if name == "tailor_bullets.j2"
+        ]
+        assert len(tailor_calls) == 1
+        ctx = tailor_calls[0][1]
+        assert ctx["max_bullets_primary"] == 5
+        assert ctx["max_bullets_secondary"] == 3
+
+    async def test_stage4_prompt_receives_page_budget(
+        self,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        prompt_capture = _PromptCapture()
+        preset = BUILT_IN_PRESETS["comprehensive"]
+        pipeline = PipelineService(
+            providers={"default": stub_llm},
+            prompts=prompt_capture,
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        structure_calls = [
+            (name, ctx)
+            for name, ctx in prompt_capture.render_calls
+            if name == "structure_yaml.j2"
+        ]
+        assert len(structure_calls) == 1
+        ctx = structure_calls[0][1]
+        assert ctx["page_budget"] == "2+"
+        assert ctx["density"] == "comprehensive"
+
+    async def test_stage5_prompt_receives_density(
+        self,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        prompt_capture = _PromptCapture()
+        preset = BUILT_IN_PRESETS["concise"]
+        pipeline = PipelineService(
+            providers={"default": stub_llm},
+            prompts=prompt_capture,
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        review_calls = [
+            (name, ctx)
+            for name, ctx in prompt_capture.render_calls
+            if name == "review.j2"
+        ]
+        assert len(review_calls) == 1
+        ctx = review_calls[0][1]
+        assert ctx["density"] == "concise"
+        assert ctx["page_budget"] == "1"
+
+    async def test_no_preset_omits_density_from_prompts(
+        self,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        prompt_capture = _PromptCapture()
+        pipeline = PipelineService(
+            providers={"default": stub_llm},
+            prompts=prompt_capture,
+            artifacts=FileSystemArtifactStore(),
+        )
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        # When no preset, density keys should not be in context
+        for _name, ctx in prompt_capture.render_calls:
+            assert "density" not in ctx
+            assert "max_roles" not in ctx
+
+    async def test_stage1_does_not_receive_density(
+        self,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Stage 1 (analyze_jd) should not include density params."""
+        prompt_capture = _PromptCapture()
+        preset = BUILT_IN_PRESETS["concise"]
+        pipeline = PipelineService(
+            providers={"default": stub_llm},
+            prompts=prompt_capture,
+            artifacts=FileSystemArtifactStore(),
+            preset=preset,
+        )
+        output_dir = tmp_path / "output"
+        await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+        analyze_calls = [
+            (name, ctx)
+            for name, ctx in prompt_capture.render_calls
+            if name == "analyze_jd.j2"
+        ]
+        assert len(analyze_calls) == 1
+        ctx = analyze_calls[0][1]
+        assert "density" not in ctx

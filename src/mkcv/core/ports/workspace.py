@@ -32,6 +32,7 @@ class WorkspacePort(Protocol):
         position: str,
         jd_source: Path,
         *,
+        preset_name: str = "standard",
         url: str | None = None,
     ) -> Path:
         """Create an application directory within the workspace.
@@ -41,6 +42,7 @@ class WorkspacePort(Protocol):
             company: Company name (will be slugified).
             position: Position title (will be slugified).
             jd_source: Path to the JD file (will be copied in).
+            preset_name: Preset name included in directory naming.
             url: Optional job posting URL.
 
         Returns:

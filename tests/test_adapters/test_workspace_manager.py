@@ -125,7 +125,7 @@ class TestCreateApplication:
         )
         assert "deepl" in str(app_dir)
 
-    def test_handles_name_collisions(
+    def test_handles_name_collisions_with_versioning(
         self, workspace_dir: Path, sample_jd_file: Path
     ) -> None:
         mgr = WorkspaceManager()
@@ -137,6 +137,56 @@ class TestCreateApplication:
         )
         assert app_dir_1 != app_dir_2
         assert app_dir_2.is_dir()
+        assert "-v1" in app_dir_1.name
+        assert "-v2" in app_dir_2.name
+
+    def test_preset_name_in_directory_name(
+        self, workspace_dir: Path, sample_jd_file: Path
+    ) -> None:
+        mgr = WorkspaceManager()
+        app_dir = mgr.create_application(
+            workspace_dir,
+            "DeepL",
+            "Staff Engineer",
+            sample_jd_file,
+            preset_name="comprehensive",
+        )
+        assert "comprehensive" in app_dir.name
+
+    def test_different_presets_get_separate_versioning(
+        self, workspace_dir: Path, sample_jd_file: Path
+    ) -> None:
+        mgr = WorkspaceManager()
+        app_dir_1 = mgr.create_application(
+            workspace_dir,
+            "DeepL",
+            "Staff Engineer",
+            sample_jd_file,
+            preset_name="standard",
+        )
+        app_dir_2 = mgr.create_application(
+            workspace_dir,
+            "DeepL",
+            "Staff Engineer",
+            sample_jd_file,
+            preset_name="comprehensive",
+        )
+        assert "-standard-v1" in app_dir_1.name
+        assert "-comprehensive-v1" in app_dir_2.name
+
+    def test_version_increments_correctly(
+        self, workspace_dir: Path, sample_jd_file: Path
+    ) -> None:
+        mgr = WorkspaceManager()
+        dirs = []
+        for _ in range(3):
+            d = mgr.create_application(
+                workspace_dir, "DeepL", "Staff Engineer", sample_jd_file
+            )
+            dirs.append(d)
+        assert "-v1" in dirs[0].name
+        assert "-v2" in dirs[1].name
+        assert "-v3" in dirs[2].name
 
 
 class TestSlugify:

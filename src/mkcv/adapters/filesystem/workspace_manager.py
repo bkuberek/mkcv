@@ -322,7 +322,34 @@ def _write_if_missing(path: Path, content: str) -> None:
 
 
 _MAX_SLUG_LENGTH = 64
-_MAX_COLLISION_ATTEMPTS = 99
+
+
+def _next_version(parent: Path, base_name: str) -> int:
+    """Find the next version number for a directory with the given base name.
+
+    Scans ``parent`` for directories matching ``{base_name}-v*`` and returns
+    one higher than the highest existing version.  Returns 1 when no match
+    is found.
+
+    Args:
+        parent: Directory to scan for existing versioned dirs.
+        base_name: The prefix before ``-v{N}``.
+
+    Returns:
+        The next version number (>= 1).
+    """
+    if not parent.is_dir():
+        return 1
+
+    pattern = re.compile(re.escape(base_name) + r"-v(\d+)$")
+    max_version = 0
+    for entry in parent.iterdir():
+        if entry.is_dir():
+            match = pattern.match(entry.name)
+            if match:
+                max_version = max(max_version, int(match.group(1)))
+
+    return max_version + 1
 
 
 class WorkspaceManager:
@@ -427,18 +454,22 @@ class WorkspaceManager:
         position: str,
         jd_source: Path,
         *,
+        preset_name: str = "standard",
         url: str | None = None,
     ) -> Path:
         """Create an application directory within the workspace.
 
-        Creates: applications/{company_slug}/{YYYY-MM}-{position_slug}/
+        Creates: applications/{company_slug}/{YYYY-MM}-{position}-{preset}-v{N}/
         With: application.toml, jd.txt (copied), .mkcv/
+
+        Version numbering increments automatically: v1, v2, v3, etc.
 
         Args:
             workspace_root: Workspace root path.
             company: Company name (will be slugified).
             position: Position title (will be slugified).
             jd_source: Path to the JD file (will be copied in).
+            preset_name: Preset name included in directory naming.
             url: Optional job posting URL.
 
         Returns:
@@ -450,14 +481,13 @@ class WorkspaceManager:
         company_slug = self.slugify(company)
         position_slug = self.slugify(position)
 
-        dir_name = f"{date_str}-{position_slug}"
+        base_name = f"{date_str}-{position_slug}-{preset_name}"
 
-        # Build full path: applications/{company_slug}/{date}-{position_slug}/
+        # Build full path: applications/{company_slug}/{base}-v{N}/
         apps_base = self.get_applications_dir(workspace_root)
-        app_dir = apps_base / company_slug / dir_name
-
-        # Handle collisions by appending -2, -3, etc.
-        app_dir = self._resolve_collision(app_dir)
+        parent_dir = apps_base / company_slug
+        version = _next_version(parent_dir, base_name)
+        app_dir = parent_dir / f"{base_name}-v{version}"
 
         # Create directories
         app_dir.mkdir(parents=True, exist_ok=True)
@@ -544,26 +574,6 @@ class WorkspaceManager:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _resolve_collision(self, path: Path) -> Path:
-        """If path exists, append -2, -3, etc. until a free name is found."""
-        if not path.exists():
-            return path
-
-        base = path
-        for i in range(2, _MAX_COLLISION_ATTEMPTS + 1):
-            candidate = base.parent / f"{base.name}-{i}"
-            if not candidate.exists():
-                logger.warning(
-                    "Directory collision: %s exists. Using %s",
-                    base.name,
-                    candidate.name,
-                )
-                return candidate
-
-        raise WorkspaceError(
-            f"Too many collisions for directory: {base}. Clean up old applications."
-        )
 
     def _write_application_toml(
         self,

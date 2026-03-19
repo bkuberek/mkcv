@@ -41,11 +41,12 @@ class WorkspaceService:
         position: str,
         jd_source: Path,
         *,
+        preset_name: str = "standard",
         url: str | None = None,
     ) -> Path:
         """Create an application directory within the workspace.
 
-        Creates: applications/{company}/{YYYY-MM-position}/
+        Creates: applications/{company}/{YYYY-MM-position-preset-vN}/
         With: application.toml, jd.txt (copied), .mkcv/
 
         Args:
@@ -53,6 +54,7 @@ class WorkspaceService:
             company: Company name (will be slugified).
             position: Position title (will be slugified).
             jd_source: Path to job description file (will be copied).
+            preset_name: Preset name included in directory naming.
             url: Optional job posting URL.
 
         Returns:
@@ -63,6 +65,7 @@ class WorkspaceService:
             company=company,
             position=position,
             jd_source=jd_source,
+            preset_name=preset_name,
             url=url,
         )
 
