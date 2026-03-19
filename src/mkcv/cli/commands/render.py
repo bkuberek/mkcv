@@ -11,7 +11,7 @@ from rich.console import Console
 
 from mkcv.adapters.factory import create_render_service
 from mkcv.config import settings
-from mkcv.core.services.theme import resolve_theme
+from mkcv.core.services.theme import parse_theme_argument, resolve_theme
 
 console = Console()
 
@@ -36,6 +36,8 @@ def render_command(
         cyclopts.Parameter(
             help=(
                 "Visual theme override (fonts, colors, layout). "
+                "Comma-separated for multi-theme: 'sb2nov,classic'. "
+                "Use 'all' to render every theme. "
                 "Default: from YAML design section. "
                 "Run 'mkcv themes' to list options."
             ),
@@ -69,8 +71,19 @@ def render_command(
     effective_output_dir = (
         output_dir if output_dir is not None else resolved_yaml.parent
     )
-    effective_theme = resolve_theme(theme, settings.rendering.theme)
     requested_formats = [f.strip() for f in format.split(",") if f.strip()]
+
+    # Multi-theme path: comma-separated themes or "all" keyword
+    if theme is not None and ("," in theme or theme.strip().lower() == "all"):
+        workspace_root = settings.workspace_root if settings.in_workspace else None
+        themes = parse_theme_argument(theme, workspace_root)
+        _render_multi_theme(
+            resolved_yaml, effective_output_dir, themes, requested_formats, open
+        )
+        return
+
+    # Single-theme path (existing behavior, unchanged)
+    effective_theme = resolve_theme(theme, settings.rendering.theme)
 
     service = create_render_service(settings)
 
@@ -94,6 +107,81 @@ def render_command(
 
     if open and result.pdf_path.exists():
         _open_file(result.pdf_path)
+
+
+def _render_multi_theme(
+    yaml_path: Path,
+    output_dir: Path,
+    themes: list[str],
+    formats: list[str],
+    open_pdf: bool,
+) -> None:
+    """Render across multiple themes and print summary table."""
+    from rich.table import Table
+
+    from mkcv.adapters.factory import create_batch_render_service
+
+    console.print()
+    total = len(themes)
+    for n, theme_name in enumerate(themes, 1):
+        console.print(
+            f"  Rendering theme {n}/{total}: {theme_name}...",
+        )
+
+    service = create_batch_render_service(settings)
+    batch_result = service.render_multi_theme(
+        yaml_path,
+        output_dir,
+        themes,
+        formats=formats,
+    )
+
+    # Print Rich summary table
+    table = Table(title="Multi-Theme Render Results")
+    table.add_column("Theme", style="cyan")
+    table.add_column("Status")
+    table.add_column("PDF Path")
+
+    for r in batch_result.results:
+        if r.status == "success" and r.output and r.output.pdf_path:
+            table.add_row(
+                r.theme,
+                "[green]OK[/green]",
+                str(r.output.pdf_path),
+            )
+        else:
+            table.add_row(
+                r.theme,
+                "[red]FAIL[/red]",
+                r.error_message or "Unknown error",
+            )
+
+    console.print()
+    console.print(table)
+    console.print(
+        f"\n  [bold]{batch_result.succeeded}/{batch_result.total}[/bold] "
+        f"themes rendered successfully."
+    )
+
+    if batch_result.failed > 0:
+        console.print(f"  [yellow]{batch_result.failed} theme(s) failed.[/yellow]")
+        console.print()
+        sys.exit(6)
+
+    console.print()
+
+    # Open first successful PDF if --open was requested
+    if open_pdf:
+        first_success = next(
+            (
+                r
+                for r in batch_result.results
+                if r.status == "success" and r.output and r.output.pdf_path.exists()
+            ),
+            None,
+        )
+        if first_success and first_success.output:
+            _open_file(first_success.output.pdf_path)
 
 
 def _open_file(path: Path) -> None:

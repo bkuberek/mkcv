@@ -1,14 +1,18 @@
-"""Tests for ThemeService: resolve_theme and custom theme discovery."""
+"""Tests for ThemeService: resolve_theme, parse_theme_argument, and discovery."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from mkcv.core.exceptions.render import RenderError
+from mkcv.core.models.theme_info import ThemeInfo
 from mkcv.core.services.theme import (
     discover_custom_themes,
     discover_themes,
     get_theme,
     load_custom_theme,
+    parse_theme_argument,
     resolve_theme,
 )
 
@@ -167,3 +171,103 @@ class TestLoadCustomTheme:
     def test_load_nonexistent_file_raises(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             load_custom_theme(tmp_path / "nonexistent.yaml")
+
+
+def _make_theme_info(name: str) -> ThemeInfo:
+    """Create a ThemeInfo with all required fields for testing."""
+    return ThemeInfo(
+        name=name,
+        description=f"{name} theme",
+        font_family="SourceSansPro",
+        primary_color="#003366",
+        accent_color="#003366",
+        page_size="letterpaper",
+        source="built-in",
+    )
+
+
+def _mock_themes() -> list[ThemeInfo]:
+    """Return a fixed list of ThemeInfo for testing parse_theme_argument."""
+    return [
+        _make_theme_info("classic"),
+        _make_theme_info("engineeringclassic"),
+        _make_theme_info("engineeringresumes"),
+        _make_theme_info("moderncv"),
+        _make_theme_info("sb2nov"),
+    ]
+
+
+_DISCOVER_PATCH = "mkcv.core.services.theme.discover_themes"
+
+
+class TestParseThemeArgument:
+    """Tests for parse_theme_argument function."""
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_single_theme(self, _mock: object) -> None:
+        result = parse_theme_argument("classic")
+        assert result == ["classic"]
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_multiple_themes(self, _mock: object) -> None:
+        result = parse_theme_argument("sb2nov,classic")
+        assert result == ["sb2nov", "classic"]
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_all_keyword_expands(self, _mock: object) -> None:
+        result = parse_theme_argument("all")
+        assert len(result) == 5
+        assert set(result) == {
+            "classic",
+            "engineeringclassic",
+            "engineeringresumes",
+            "moderncv",
+            "sb2nov",
+        }
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_all_case_insensitive(self, _mock: object) -> None:
+        result = parse_theme_argument("ALL")
+        assert len(result) == 5
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_whitespace_trimmed(self, _mock: object) -> None:
+        result = parse_theme_argument(" sb2nov , classic ")
+        assert result == ["sb2nov", "classic"]
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_empty_segments_ignored(self, _mock: object) -> None:
+        result = parse_theme_argument("sb2nov,,classic,")
+        assert result == ["sb2nov", "classic"]
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_deduplication_preserves_order(self, _mock: object) -> None:
+        result = parse_theme_argument("classic,sb2nov,classic")
+        assert result == ["classic", "sb2nov"]
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_case_insensitive_resolution(self, _mock: object) -> None:
+        result = parse_theme_argument("SB2NOV")
+        assert result == ["sb2nov"]
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_unknown_theme_raises_render_error(self, _mock: object) -> None:
+        with pytest.raises(RenderError, match="nonexistent"):
+            parse_theme_argument("nonexistent")
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_partial_unknown_raises_with_all_bad_names(self, _mock: object) -> None:
+        with pytest.raises(RenderError) as exc_info:
+            parse_theme_argument("sb2nov,bad1,classic,bad2")
+        assert "bad1" in str(exc_info.value)
+        assert "bad2" in str(exc_info.value)
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_empty_string_raises(self, _mock: object) -> None:
+        with pytest.raises(RenderError):
+            parse_theme_argument("")
+
+    @patch(_DISCOVER_PATCH, return_value=_mock_themes())
+    def test_all_mixed_with_names_raises(self, _mock: object) -> None:
+        with pytest.raises(RenderError, match="cannot be combined"):
+            parse_theme_argument("all,classic")

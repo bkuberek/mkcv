@@ -208,6 +208,77 @@ def discover_themes(
     return sorted(themes, key=lambda t: t.name)
 
 
+def parse_theme_argument(
+    raw: str,
+    workspace_root: Path | None = None,
+) -> list[str]:
+    """Parse a CLI --theme value into a validated list of theme names.
+
+    Handles:
+    - Single theme name: "classic" -> ["classic"]
+    - Comma-separated: "sb2nov,classic" -> ["sb2nov", "classic"]
+    - The keyword "all": expands to every discovered theme name.
+
+    All theme names are validated against discovered themes.
+
+    Args:
+        raw: Raw --theme argument string.
+        workspace_root: Optional workspace root for custom theme discovery.
+
+    Returns:
+        List of validated theme name strings.
+
+    Raises:
+        RenderError: If any theme name is not recognized, if the input
+            is empty, or if "all" is combined with other names.
+    """
+    from mkcv.core.exceptions.render import RenderError
+
+    stripped = raw.strip()
+
+    if not stripped:
+        raise RenderError("No theme names provided in --theme argument.")
+
+    available = discover_themes(workspace_root)
+    available_names = {t.name.lower(): t.name for t in available}
+
+    # Split on commas, trim whitespace, ignore empty segments
+    raw_names = [name.strip() for name in stripped.split(",") if name.strip()]
+
+    if not raw_names:
+        raise RenderError("No theme names provided in --theme argument.")
+
+    # Check if "all" is present
+    has_all = any(name.lower() == "all" for name in raw_names)
+
+    if has_all:
+        if len(raw_names) > 1:
+            raise RenderError(
+                "The 'all' keyword cannot be combined with other theme names."
+            )
+        return [t.name for t in available]
+
+    # Deduplicate while preserving first-occurrence order
+    seen: set[str] = set()
+    unique_names: list[str] = []
+    for name in raw_names:
+        lower = name.lower()
+        if lower not in seen:
+            seen.add(lower)
+            unique_names.append(name)
+
+    # Validate all names exist
+    unknown = [name for name in unique_names if name.lower() not in available_names]
+    if unknown:
+        available_list = ", ".join(sorted(available_names.values()))
+        raise RenderError(
+            f"Unknown theme(s): {', '.join(unknown)}. Available: {available_list}"
+        )
+
+    # Return canonical names (from ThemeInfo, not user input casing)
+    return [available_names[name.lower()] for name in unique_names]
+
+
 def get_theme(
     name: str,
     workspace_root: Path | None = None,

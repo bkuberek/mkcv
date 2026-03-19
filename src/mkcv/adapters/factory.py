@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from mkcv.config.configuration import Configuration
     from mkcv.core.ports.llm import LLMPort
+    from mkcv.core.services.batch_render import BatchRenderService
 
 from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
 from mkcv.adapters.filesystem.pdf_reader import PyPdfReader
@@ -492,6 +493,28 @@ def create_cover_letter_service(
         artifacts=artifact_store,
         renderer=renderer,
         stage_configs=stage_configs,
+    )
+
+
+def create_batch_render_service(
+    config: Configuration,
+) -> BatchRenderService:
+    """Create a fully-wired BatchRenderService.
+
+    Args:
+        config: Application configuration.
+
+    Returns:
+        BatchRenderService with RenderService and YamlPostProcessor.
+    """
+    from mkcv.core.services.batch_render import BatchRenderService
+    from mkcv.core.services.yaml_postprocessor import YamlPostProcessor
+
+    render_service = create_render_service(config)
+    postprocessor = YamlPostProcessor()
+    return BatchRenderService(
+        render_service=render_service,
+        postprocessor=postprocessor,
     )
 
 

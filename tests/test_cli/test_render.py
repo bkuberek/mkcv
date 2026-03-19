@@ -6,6 +6,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mkcv.core.exceptions.render import RenderError
+from mkcv.core.models.batch_render_result import (
+    BatchRenderResult,
+    ThemeRenderResult,
+)
 from mkcv.core.ports.renderer import RenderedOutput
 
 
@@ -366,3 +370,134 @@ class TestRenderThemeAndOutputDir:
 
         call_args = mock_service.render_resume.call_args
         assert call_args.args[1] == sub
+
+
+class TestRenderMultiTheme:
+    """Tests for multi-theme rendering dispatch in the render command."""
+
+    def test_comma_separated_theme_dispatches_to_batch_service(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        yaml_file = tmp_path / "resume.yaml"
+        yaml_file.write_text("cv:\n  name: Test\n", encoding="utf-8")
+
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        batch_result = BatchRenderResult(
+            results=[
+                ThemeRenderResult(
+                    theme="sb2nov",
+                    status="success",
+                    output=RenderedOutput(pdf_path=pdf),
+                ),
+                ThemeRenderResult(
+                    theme="classic",
+                    status="success",
+                    output=RenderedOutput(pdf_path=pdf),
+                ),
+            ]
+        )
+
+        mock_batch_service = MagicMock()
+        mock_batch_service.render_multi_theme.return_value = batch_result
+
+        with (
+            patch(
+                f"{_FACTORY}.parse_theme_argument",
+                return_value=["sb2nov", "classic"],
+            ),
+            patch(
+                "mkcv.adapters.factory.create_batch_render_service",
+                return_value=mock_batch_service,
+            ),
+        ):
+            from mkcv.cli.commands.render import render_command
+
+            render_command(yaml_file, theme="sb2nov,classic")
+
+        mock_batch_service.render_multi_theme.assert_called_once()
+
+    def test_all_keyword_dispatches_to_batch_service(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        yaml_file = tmp_path / "resume.yaml"
+        yaml_file.write_text("cv:\n  name: Test\n", encoding="utf-8")
+
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        batch_result = BatchRenderResult(
+            results=[
+                ThemeRenderResult(
+                    theme="sb2nov",
+                    status="success",
+                    output=RenderedOutput(pdf_path=pdf),
+                ),
+            ]
+        )
+
+        mock_batch_service = MagicMock()
+        mock_batch_service.render_multi_theme.return_value = batch_result
+
+        with (
+            patch(
+                f"{_FACTORY}.parse_theme_argument",
+                return_value=["sb2nov"],
+            ),
+            patch(
+                "mkcv.adapters.factory.create_batch_render_service",
+                return_value=mock_batch_service,
+            ),
+        ):
+            from mkcv.cli.commands.render import render_command
+
+            render_command(yaml_file, theme="all")
+
+        mock_batch_service.render_multi_theme.assert_called_once()
+
+    def test_single_theme_unchanged(
+        self,
+        tmp_path: Path,
+        mock_rendered_output: RenderedOutput,
+    ) -> None:
+        yaml_file = tmp_path / "resume.yaml"
+        yaml_file.write_text("cv:\n  name: Test\n", encoding="utf-8")
+
+        mock_service = MagicMock()
+        mock_service.render_resume.return_value = mock_rendered_output
+
+        with patch(
+            f"{_FACTORY}.create_render_service",
+            return_value=mock_service,
+        ):
+            from mkcv.cli.commands.render import render_command
+
+            render_command(yaml_file, theme="classic")
+
+        # Should use single-theme path, not batch
+        mock_service.render_resume.assert_called_once()
+        call_kwargs = mock_service.render_resume.call_args
+        assert call_kwargs.kwargs["theme"] == "classic"
+
+    def test_no_theme_flag_unchanged(
+        self,
+        tmp_path: Path,
+        mock_rendered_output: RenderedOutput,
+    ) -> None:
+        yaml_file = tmp_path / "resume.yaml"
+        yaml_file.write_text("cv:\n  name: Test\n", encoding="utf-8")
+
+        mock_service = MagicMock()
+        mock_service.render_resume.return_value = mock_rendered_output
+
+        with patch(
+            f"{_FACTORY}.create_render_service",
+            return_value=mock_service,
+        ):
+            from mkcv.cli.commands.render import render_command
+
+            render_command(yaml_file)
+
+        # Should use single-theme path with resolve_theme default
+        mock_service.render_resume.assert_called_once()
