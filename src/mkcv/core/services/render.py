@@ -17,15 +17,20 @@ class RenderService:
         output_dir: Path,
         *,
         theme: str = "sb2nov",
+        formats: list[str] | None = None,
     ) -> RenderedOutput:
-        """Render a resume YAML file to PDF.
+        """Render a resume YAML file to the requested formats.
 
         Args:
             yaml_path: Path to the RenderCV YAML file.
             output_dir: Directory for rendered output files.
             theme: RenderCV theme name.
+            formats: Output formats to generate (e.g. ["pdf", "png"]).
+                When None, all supported formats are generated.
 
         Returns:
             RenderedOutput with paths to generated files.
         """
-        return self._renderer.render(yaml_path, output_dir, theme=theme)
+        return self._renderer.render(
+            yaml_path, output_dir, theme=theme, formats=formats
+        )

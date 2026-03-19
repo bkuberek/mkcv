@@ -14,7 +14,9 @@ from rich.table import Table
 from mkcv.adapters.factory import create_validation_service
 from mkcv.config import settings
 from mkcv.core.exceptions import MkcvError
+from mkcv.core.models.kb_validation import KBValidationResult
 from mkcv.core.models.review_report import ReviewReport
+from mkcv.core.services.kb_validator import validate_kb
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +25,18 @@ console = Console()
 
 def validate_command(
     file: Annotated[
-        Path,
+        Path | None,
         cyclopts.Parameter(
-            help="Resume file to validate (YAML).",
+            help="Resume file to validate (YAML or PDF).",
         ),
-    ],
+    ] = None,
     *,
+    kb: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            help="Knowledge base file to validate (Markdown).",
+        ),
+    ] = None,
     jd: Annotated[
         Path | None,
         cyclopts.Parameter(
@@ -36,12 +44,26 @@ def validate_command(
         ),
     ] = None,
 ) -> None:
-    """Check a resume for ATS compliance, quality, and keyword coverage.
+    """Check a resume or knowledge base for quality issues.
 
     Validates resume content for ATS readiness, bullet quality, and
-    overall presentation. Optionally checks keyword coverage against
-    a specific job description.
+    overall presentation. Accepts YAML resume files or rendered PDFs.
+    Optionally checks keyword coverage against a specific job description.
+
+    Use --kb to validate a knowledge base Markdown file for structure
+    and completeness before running the generate pipeline.
     """
+    if kb is not None:
+        _validate_kb(kb)
+        return
+
+    if file is None:
+        console.print(
+            "[red]Error:[/red] Provide a resume file or use --kb "
+            "to validate a knowledge base."
+        )
+        sys.exit(2)
+
     if not file.is_file():
         console.print(f"[red]Error:[/red] Resume file not found: {file}")
         sys.exit(2)
@@ -65,6 +87,57 @@ def validate_command(
         sys.exit(exc.exit_code)
 
     _display_report(report)
+
+
+def _validate_kb(kb_path: Path) -> None:
+    """Validate a knowledge base file and display results."""
+    if not kb_path.is_file():
+        console.print(f"[red]Error:[/red] Knowledge base file not found: {kb_path}")
+        sys.exit(2)
+
+    content = kb_path.read_text(encoding="utf-8")
+    result = validate_kb(content)
+
+    console.print("\n  [bold]mkcv validate --kb[/bold]")
+    console.print(f"  KB: {kb_path}")
+    console.print()
+
+    _display_kb_report(result)
+
+    if not result.is_valid:
+        sys.exit(5)
+
+
+def _display_kb_report(result: KBValidationResult) -> None:
+    """Display KB validation results with Rich formatting."""
+    if result.is_valid and not result.warnings:
+        console.print("  [green]Knowledge base looks good![/green]")
+        if result.sections_found:
+            console.print(f"  Sections found: {', '.join(result.sections_found)}")
+        console.print()
+        return
+
+    for error in result.errors:
+        console.print(f"  [red]Error:[/red] {error}")
+
+    for warning in result.warnings:
+        console.print(f"  [yellow]Warning:[/yellow] {warning}")
+
+    if result.sections_found:
+        console.print(
+            f"\n  [dim]Sections found:[/dim] {', '.join(result.sections_found)}"
+        )
+    if result.sections_missing:
+        console.print(
+            f"  [dim]Sections missing:[/dim] {', '.join(result.sections_missing)}"
+        )
+
+    if not result.is_valid:
+        console.print(
+            "\n  [red]Knowledge base validation failed. Fix errors above.[/red]"
+        )
+
+    console.print()
 
 
 def _display_report(report: ReviewReport) -> None:

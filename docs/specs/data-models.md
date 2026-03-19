@@ -1,6 +1,6 @@
 # mkcv — Data Models Specification
 
-**Version:** 0.1.0
+**Version:** 0.3.0
 **Date:** 2026-03-18
 
 ---
@@ -260,9 +260,13 @@ class ReviewReport(BaseModel):
 ## Pipeline Metadata
 
 ```python
-from datetime import datetime
+class TokenUsage(BaseModel):
+    """Token counts from a single LLM call."""
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 class StageMetadata(BaseModel):
+    """Metadata about a single pipeline stage execution."""
     stage_number: int
     stage_name: str
     provider: str
@@ -275,6 +279,7 @@ class StageMetadata(BaseModel):
     retries: int = 0
 
 class PipelineResult(BaseModel):
+    """Complete result of a pipeline execution."""
     run_id: str
     timestamp: datetime
     jd_source: str
@@ -285,7 +290,66 @@ class PipelineResult(BaseModel):
     total_cost_usd: float
     total_duration_seconds: float
     review_score: int
-    output_paths: dict[str, str]  # {"pdf": "path", "yaml": "path", ...}
+    output_paths: dict[str, str]  # {"resume_yaml": "path", ...}
+```
+
+---
+
+## Stage Configuration
+
+```python
+class StageConfig(BaseModel):
+    """Configuration for a single pipeline stage's LLM call."""
+    provider: str    # e.g. "anthropic", "ollama"
+    model: str       # e.g. "claude-sonnet-4-20250514"
+    temperature: float  # 0.0–2.0
+
+# Profile presets define per-stage configs for budget/premium modes
+PROFILE_PRESETS: dict[str, dict[int, StageConfig]] = {
+    "budget": {1: StageConfig(provider="ollama", ...), ...},
+    "premium": {1: StageConfig(provider="anthropic", ...), ...},
+}
+```
+
+---
+
+## Pricing
+
+```python
+# MODEL_PRICING: dict of model → (input_cost_per_1k, output_cost_per_1k)
+# Covers Claude, GPT-4o, GPT-4.1 variants. Returns 0.0 for unknown models.
+
+def calculate_cost(model: str, usage: TokenUsage) -> float:
+    """Calculate USD cost for a single LLM call."""
+```
+
+---
+
+## Theme Info
+
+```python
+class ThemeInfo(BaseModel):
+    """Metadata about an available resume theme."""
+    name: str
+    description: str
+    font_family: str
+    primary_color: str
+    accent_color: str
+    page_size: str
+```
+
+---
+
+## KB Validation
+
+```python
+class KBValidationResult(BaseModel):
+    """Result of validating a knowledge base Markdown file."""
+    is_valid: bool
+    warnings: list[str]
+    errors: list[str]
+    sections_found: list[str]
+    sections_missing: list[str]
 ```
 
 ---

@@ -1,6 +1,6 @@
 # mkcv — Product Requirements Document
 
-**Version:** 0.2.0<br>
+**Version:** 0.3.0<br>
 **Date:** 2026-03-18<br>
 **Status:** Active<br>
 
@@ -48,73 +48,73 @@ Creating a tailored resume for each job application is time-consuming and error-
 
 ### FR-1: Knowledge Base Management
 
-| ID | Requirement | Priority |
-|----|------------|----------|
-| FR-1.1 | Accept a Markdown file as the career knowledge base | Must |
-| FR-1.2 | Validate KB structure (warn on missing sections, dates, etc.) | Should |
-| FR-1.3 | Support multiple KB files (personal info separate from experience) | Could |
+| ID | Requirement | Priority | Status |
+|----|------------|----------|--------|
+| FR-1.1 | Accept a Markdown file as the career knowledge base | Must | Done |
+| FR-1.2 | Validate KB structure (warn on missing sections, dates, etc.) | Should | Done |
+| FR-1.3 | Support multiple KB files (personal info separate from experience) | Could | — |
 
 ### FR-2: Job Description Analysis
 
-| ID | Requirement | Priority |
-|----|------------|----------|
-| FR-2.1 | Accept JD as plain text file, URL, or stdin | Must |
-| FR-2.2 | Extract structured requirements: skills, seniority, keywords, culture signals | Must |
-| FR-2.3 | Identify hidden/implicit requirements | Should |
-| FR-2.4 | Produce a reusable `jd_analysis.json` artifact | Must |
+| ID | Requirement | Priority | Status |
+|----|------------|----------|--------|
+| FR-2.1 | Accept JD as plain text file, URL, or stdin | Must | Done |
+| FR-2.2 | Extract structured requirements: skills, seniority, keywords, culture signals | Must | Done |
+| FR-2.3 | Identify hidden/implicit requirements | Should | Done |
+| FR-2.4 | Produce a reusable `jd_analysis.json` artifact | Must | Done |
 
 ### FR-3: AI Pipeline
 
-| ID | Requirement | Priority |
-|----|------------|----------|
-| FR-3.1 | Run 5-stage pipeline (analyze → select → tailor → structure → review) | Must |
-| FR-3.2 | Each stage produces a persisted intermediate artifact (JSON/YAML) | Must |
-| FR-3.3 | Support resuming from any stage (skip already-completed stages) | Should |
-| FR-3.4 | Support configurable AI provider per stage | Must |
-| FR-3.5 | Anti-embellishment: confidence scoring on every generated bullet | Must |
-| FR-3.6 | Voice consistency across all generated content | Must |
-| FR-3.7 | ATS keyword coverage scoring (target ≥75% match) | Must |
+| ID | Requirement | Priority | Status |
+|----|------------|----------|--------|
+| FR-3.1 | Run 5-stage pipeline (analyze → select → tailor → structure → review) | Must | Done |
+| FR-3.2 | Each stage produces a persisted intermediate artifact (JSON/YAML) | Must | Done |
+| FR-3.3 | Support resuming from any stage (skip already-completed stages) | Should | Done |
+| FR-3.4 | Support configurable AI provider per stage | Must | Done |
+| FR-3.5 | Anti-embellishment: confidence scoring on every generated bullet | Must | Done |
+| FR-3.6 | Voice consistency across all generated content | Must | Done |
+| FR-3.7 | ATS keyword coverage scoring (target ≥75% match) | Must | Done |
 
 ### FR-4: Content Generation
 
-| ID | Requirement | Priority |
-|----|------------|----------|
-| FR-4.1 | Generate a tailored mission statement (15-30 words) | Must |
-| FR-4.2 | Generate impact-driven bullets using XYZ formula | Must |
-| FR-4.3 | Never fabricate metrics — only use data from KB | Must |
-| FR-4.4 | Weave ATS keywords naturally into bullets | Must |
-| FR-4.5 | Select and order skills by relevance to JD | Must |
-| FR-4.6 | Condense old/irrelevant roles appropriately | Should |
+| ID | Requirement | Priority | Status |
+|----|------------|----------|--------|
+| FR-4.1 | Generate a tailored mission statement (15-30 words) | Must | Done |
+| FR-4.2 | Generate impact-driven bullets using XYZ formula | Must | Done |
+| FR-4.3 | Never fabricate metrics — only use data from KB | Must | Done |
+| FR-4.4 | Weave ATS keywords naturally into bullets | Must | Done |
+| FR-4.5 | Select and order skills by relevance to JD | Must | Done |
+| FR-4.6 | Condense old/irrelevant roles appropriately | Should | Done |
 
 ### FR-5: Rendering
 
-| ID | Requirement | Priority |
-|----|------------|----------|
-| FR-5.1 | Render to PDF via RenderCV (Typst engine) | Must |
-| FR-5.2 | Render to PNG (for LinkedIn/social preview) | Should |
-| FR-5.3 | Render to Markdown (for text-based review) | Should |
-| FR-5.4 | Support multiple themes (sb2nov, classic, moderncv, custom) | Must |
-| FR-5.5 | Support custom colors, fonts, margins via config | Should |
-| FR-5.6 | WeasyPrint as secondary renderer for custom HTML/CSS designs | Could |
+| ID | Requirement | Priority | Status |
+|----|------------|----------|--------|
+| FR-5.1 | Render to PDF via RenderCV (Typst engine) | Must | Done |
+| FR-5.2 | Render to PNG (for LinkedIn/social preview) | Should | Done |
+| FR-5.3 | Render to Markdown (for text-based review) | Should | Done |
+| FR-5.4 | Support multiple themes (sb2nov, classic, moderncv, custom) | Must | Done |
+| FR-5.5 | Support custom colors, fonts, margins via config | Should | — |
+| FR-5.6 | WeasyPrint as secondary renderer for custom HTML/CSS designs | Could | — |
 
 ### FR-6: Quality Assurance
 
-| ID | Requirement | Priority |
-|----|------------|----------|
-| FR-6.1 | Generate a review report with scores and actionable suggestions | Must |
-| FR-6.2 | ATS compliance checklist (auto-verified) | Must |
-| FR-6.3 | Copy-paste test: verify all text is extractable from PDF | Should |
-| FR-6.4 | Flag low-confidence bullets for human review | Must |
-| FR-6.5 | Compare generated resume against source KB for accuracy | Should |
+| ID | Requirement | Priority | Status |
+|----|------------|----------|--------|
+| FR-6.1 | Generate a review report with scores and actionable suggestions | Must | Done |
+| FR-6.2 | ATS compliance checklist (auto-verified) | Must | Done |
+| FR-6.3 | Copy-paste test: verify all text is extractable from PDF | Should | — |
+| FR-6.4 | Flag low-confidence bullets for human review | Must | Done |
+| FR-6.5 | Compare generated resume against source KB for accuracy | Should | Done |
 
 ### FR-7: Configuration
 
-| ID | Requirement | Priority |
-|----|------------|----------|
-| FR-7.1 | TOML config file for defaults (models, theme, voice guidelines) via Dynaconf | Must |
-| FR-7.2 | Environment variables for API keys | Must |
-| FR-7.3 | CLI flags override config file | Must |
-| FR-7.4 | Support provider profiles (e.g., "budget" uses Ollama, "premium" uses Claude) | Should |
+| ID | Requirement | Priority | Status |
+|----|------------|----------|--------|
+| FR-7.1 | TOML config file for defaults (models, theme, voice guidelines) via Dynaconf | Must | Done |
+| FR-7.2 | Environment variables for API keys | Must | Done |
+| FR-7.3 | CLI flags override config file | Must | Done |
+| FR-7.4 | Support provider profiles (e.g., "budget" uses Ollama, "premium" uses Claude) | Should | Done |
 
 ## Non-Functional Requirements
 

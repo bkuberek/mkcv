@@ -11,6 +11,7 @@ from mkcv.core.ports.artifacts import ArtifactStorePort
 from mkcv.core.ports.llm import LLMPort
 from mkcv.core.ports.prompts import PromptLoaderPort
 from mkcv.core.ports.renderer import RenderedOutput, RendererPort
+from mkcv.core.ports.workspace import WorkspacePort
 
 __all__ = [
     "ArtifactStorePort",
@@ -18,4 +19,5 @@ __all__ = [
     "PromptLoaderPort",
     "RenderedOutput",
     "RendererPort",
+    "WorkspacePort",
 ]

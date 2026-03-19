@@ -2,19 +2,19 @@
 
 from pathlib import Path
 
-from mkcv.core.models.application_metadata import ApplicationMetadata
-from mkcv.core.models.workspace_config import WorkspaceConfig
+from mkcv.core.ports.workspace import WorkspacePort
 
 
 class WorkspaceService:
     """Manages workspace initialization and application directory creation.
 
-    This service encapsulates workspace business logic. It delegates
-    filesystem operations to the WorkspaceManager adapter (injected
-    via the constructor in a future task).
+    Delegates filesystem operations to a WorkspacePort adapter.
     """
 
-    def init_workspace(self, path: Path) -> WorkspaceConfig:
+    def __init__(self, workspace: WorkspacePort) -> None:
+        self._workspace = workspace
+
+    def init_workspace(self, path: Path) -> Path:
         """Initialize a new mkcv workspace at the given path.
 
         Creates the workspace directory structure:
@@ -27,20 +27,22 @@ class WorkspaceService:
             path: Directory to initialize as a workspace.
 
         Returns:
-            The generated WorkspaceConfig.
+            Path to the workspace root.
 
         Raises:
             WorkspaceExistsError: If path already contains mkcv.toml.
         """
-        raise NotImplementedError("Workspace initialization not yet implemented")
+        return self._workspace.create_workspace(path)
 
     def setup_application(
         self,
         workspace_root: Path,
         company: str,
         position: str,
-        jd_path: Path,
-    ) -> ApplicationMetadata:
+        jd_source: Path,
+        *,
+        url: str | None = None,
+    ) -> Path:
         """Create an application directory within the workspace.
 
         Creates: applications/{company}/{YYYY-MM-position}/
@@ -50,9 +52,27 @@ class WorkspaceService:
             workspace_root: Path to workspace root.
             company: Company name (will be slugified).
             position: Position title (will be slugified).
-            jd_path: Path to job description file (will be copied).
+            jd_source: Path to job description file (will be copied).
+            url: Optional job posting URL.
 
         Returns:
-            ApplicationMetadata for the new application.
+            Path to the created application directory.
         """
-        raise NotImplementedError("Application setup not yet implemented")
+        return self._workspace.create_application(
+            workspace_root=workspace_root,
+            company=company,
+            position=position,
+            jd_source=jd_source,
+            url=url,
+        )
+
+    def list_applications(self, workspace_root: Path) -> list[Path]:
+        """List all application directories in the workspace.
+
+        Args:
+            workspace_root: Workspace root path.
+
+        Returns:
+            Sorted list of application directory paths.
+        """
+        return self._workspace.list_applications(workspace_root)

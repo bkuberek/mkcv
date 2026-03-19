@@ -28,6 +28,15 @@ class RendererPort(Protocol):
         output_dir: Path,
         *,
         theme: str = "sb2nov",
+        formats: list[str] | None = None,
     ) -> RenderedOutput:
-        """Render a resume YAML file to PDF and other formats."""
+        """Render a resume YAML file to PDF and other formats.
+
+        Args:
+            yaml_path: Path to the RenderCV-compatible YAML file.
+            output_dir: Directory for rendered output files.
+            theme: RenderCV theme name.
+            formats: Output formats to generate (e.g. ["pdf", "png"]).
+                When None, all supported formats are generated.
+        """
         ...

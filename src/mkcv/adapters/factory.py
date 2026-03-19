@@ -17,11 +17,13 @@ if TYPE_CHECKING:
     from mkcv.core.ports.llm import LLMPort
 
 from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
+from mkcv.adapters.filesystem.pdf_reader import PyPdfReader
 from mkcv.adapters.filesystem.prompt_loader import FileSystemPromptLoader
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
 from mkcv.core.exceptions.authentication import AuthenticationError
+from mkcv.core.models.profile_preset import PROFILE_PRESETS
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
@@ -77,15 +79,24 @@ def _resolve_api_key(provider: str, config: Configuration) -> str | None:
 
 def _resolve_stage_configs(
     config: Configuration,
+    profile: str = "default",
 ) -> dict[int, StageConfig]:
-    """Read per-stage LLM configuration from settings.
+    """Read per-stage LLM configuration from settings or profile preset.
+
+    When profile is "budget" or "premium", the preset overrides config.
+    When profile is "default", per-stage settings from config are used.
 
     Args:
         config: Application configuration.
+        profile: Profile name ("default", "budget", or "premium").
 
     Returns:
         Dict mapping stage number (1-5) to StageConfig.
     """
+    if profile in PROFILE_PRESETS:
+        logger.info("Using '%s' profile preset for all stages", profile)
+        return dict(PROFILE_PRESETS[profile])
+
     stage_configs: dict[int, StageConfig] = {}
 
     for stage_num, key in _STAGE_CONFIG_KEYS.items():
@@ -194,21 +205,25 @@ def _create_providers(
     return providers
 
 
-def create_pipeline_service(config: Configuration) -> PipelineService:
+def create_pipeline_service(
+    config: Configuration,
+    profile: str = "default",
+) -> PipelineService:
     """Create a fully-wired PipelineService.
 
-    Reads per-stage provider/model/temperature from config and
-    creates one LLM adapter per unique provider.
+    Reads per-stage provider/model/temperature from config (or profile
+    preset) and creates one LLM adapter per unique provider.
 
     Args:
         config: Application configuration.
+        profile: Profile name ("default", "budget", or "premium").
 
     Returns:
         PipelineService with per-stage LLM adapters.
     """
     prompt_loader = _create_prompt_loader(config)
     artifact_store = FileSystemArtifactStore()
-    stage_configs = _resolve_stage_configs(config)
+    stage_configs = _resolve_stage_configs(config, profile=profile)
     providers = _create_providers(config, stage_configs)
 
     return PipelineService(
@@ -249,28 +264,18 @@ def create_validation_service(config: Configuration) -> ValidationService:
     analyze_provider = stage_configs[1].provider
     llm = _create_llm_adapter(analyze_provider, config)
 
-    return ValidationService(llm=llm, prompts=prompt_loader)
-
-
-def create_workspace_manager() -> WorkspaceManager:
-    """Create a WorkspaceManager instance.
-
-    Returns:
-        WorkspaceManager for filesystem operations.
-    """
-    return WorkspaceManager()
+    pdf_reader = PyPdfReader()
+    return ValidationService(llm=llm, prompts=prompt_loader, pdf_reader=pdf_reader)
 
 
 def create_workspace_service() -> WorkspaceService:
-    """Create a WorkspaceService.
-
-    Note: WorkspaceService currently has no dependencies.
-    When it gains a WorkspaceManager dependency, wire it here.
+    """Create a fully-wired WorkspaceService.
 
     Returns:
-        WorkspaceService instance.
+        WorkspaceService with WorkspaceManager adapter connected.
     """
-    return WorkspaceService()
+    manager = WorkspaceManager()
+    return WorkspaceService(workspace=manager)
 
 
 def _create_prompt_loader(config: Configuration) -> FileSystemPromptLoader:

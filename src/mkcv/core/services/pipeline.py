@@ -13,6 +13,7 @@ from mkcv.core.exceptions.pipeline_stage import PipelineStageError
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.pipeline_result import PipelineResult
+from mkcv.core.models.pricing import calculate_cost
 from mkcv.core.models.review_report import ReviewReport
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_metadata import StageMetadata
@@ -146,6 +147,7 @@ class PipelineService:
 
         # Stage 1: Analyze JD
         if from_stage <= 1:
+            self._notify_stage_start(stage_callback, 1)
             jd_analysis, meta = await self._analyze_jd(jd_text, run_dir=output_dir)
             stages.append(meta)
             if not self._should_continue(stage_callback, meta):
@@ -157,6 +159,7 @@ class PipelineService:
 
         # Stage 2: Select experience
         if not stopped_early and from_stage <= 2:
+            self._notify_stage_start(stage_callback, 2)
             selection, meta = await self._select_experience(
                 jd_analysis, kb_text, run_dir=output_dir
             )
@@ -172,6 +175,7 @@ class PipelineService:
 
         # Stage 3: Tailor content
         if not stopped_early and from_stage <= 3:
+            self._notify_stage_start(stage_callback, 3)
             content, meta = await self._tailor_content(
                 jd_analysis, selection, kb_text, run_dir=output_dir
             )
@@ -185,6 +189,7 @@ class PipelineService:
 
         # Stage 4: Structure YAML
         if not stopped_early and from_stage <= 4:
+            self._notify_stage_start(stage_callback, 4)
             resume_yaml, meta = await self._structure_yaml(
                 content, kb_text, run_dir=output_dir
             )
@@ -201,6 +206,7 @@ class PipelineService:
 
         # Stage 5: Review (skipped if stopped early)
         if not stopped_early:
+            self._notify_stage_start(stage_callback, 5)
             review, meta = await self._review(
                 resume_yaml, jd_analysis, kb_text, run_dir=output_dir
             )
@@ -527,6 +533,20 @@ class PipelineService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _notify_stage_start(
+        callback: StageCallbackPort | None,
+        stage_number: int,
+    ) -> None:
+        """Notify the callback that a stage is about to begin.
+
+        Args:
+            callback: Optional stage callback.
+            stage_number: The stage number (1-5).
+        """
+        if callback is not None:
+            callback.on_stage_start(stage_number)
+
+    @staticmethod
     def _should_continue(
         callback: StageCallbackPort | None,
         meta: StageMetadata,
@@ -604,6 +624,9 @@ class PipelineService:
         input_tokens = usage.input_tokens if usage else 0
         output_tokens = usage.output_tokens if usage else 0
 
+        resolved_usage = usage or TokenUsage()
+        cost = calculate_cost(model, resolved_usage)
+
         return StageMetadata(
             stage_number=stage_number,
             stage_name=STAGE_NAMES[stage_number],
@@ -612,7 +635,7 @@ class PipelineService:
             temperature=temperature,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost_usd=0.0,
+            cost_usd=cost,
             duration_seconds=round(duration, 3),
         )
 

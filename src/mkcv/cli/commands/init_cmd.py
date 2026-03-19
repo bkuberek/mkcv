@@ -7,7 +7,7 @@ from typing import Annotated
 import cyclopts
 from rich.console import Console
 
-from mkcv.adapters.factory import create_workspace_manager
+from mkcv.adapters.factory import create_workspace_service
 from mkcv.core.exceptions import WorkspaceExistsError
 
 logger = logging.getLogger(__name__)
@@ -33,10 +33,10 @@ def init_command(
     target = path.resolve()
     console.print(f"\n  Initializing mkcv workspace at [bold]{target}/[/bold]\n")
 
-    manager = create_workspace_manager()
+    workspace_service = create_workspace_service()
 
     try:
-        workspace_root = manager.create_workspace(target)
+        workspace_root = workspace_service.init_workspace(target)
     except WorkspaceExistsError:
         console.print(
             f"  [yellow]Workspace already exists at {target}/[/yellow]\n"

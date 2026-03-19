@@ -6,6 +6,7 @@ interfaces, never on concrete adapter implementations.
     from mkcv.core.services import PipelineService, RenderService, ...
 """
 
+from mkcv.core.services.kb_validator import validate_kb
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
 from mkcv.core.services.validation import ValidationService
@@ -16,4 +17,5 @@ __all__ = [
     "RenderService",
     "ValidationService",
     "WorkspaceService",
+    "validate_kb",
 ]

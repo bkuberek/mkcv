@@ -1,6 +1,10 @@
-"""Tests for OllamaAdapter."""
+"""Tests for OllamaAdapter with mocked SDK."""
 
-from unittest.mock import MagicMock
+import json
+from unittest.mock import AsyncMock, MagicMock
+
+import openai
+import pytest
 
 from mkcv.adapters.factory import _create_llm_adapter
 from mkcv.adapters.llm.ollama import (
@@ -10,6 +14,16 @@ from mkcv.adapters.llm.ollama import (
     _augment_with_schema,
 )
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
+from mkcv.core.exceptions.provider import ProviderError
+from mkcv.core.exceptions.validation import ValidationError
+from mkcv.core.models.jd_analysis import JDAnalysis
+from mkcv.core.models.requirement import Requirement
+from mkcv.core.models.token_usage import TokenUsage
+
+
+@pytest.fixture
+def ollama_adapter() -> OllamaAdapter:
+    return OllamaAdapter()
 
 
 class TestOllamaAdapter:
@@ -84,3 +98,206 @@ class TestAugmentWithSchema:
         result = _augment_with_schema(messages, "\nS")
         assert result[1]["content"] == "Hello"
         assert result[2]["content"] == "Hi"
+
+
+def _mock_chat_response(
+    content: str,
+    *,
+    prompt_tokens: int = 10,
+    completion_tokens: int = 20,
+) -> MagicMock:
+    """Build a mock OpenAI-style chat completion response."""
+    mock_message = MagicMock()
+    mock_message.content = content
+
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+
+    mock_usage = MagicMock()
+    mock_usage.prompt_tokens = prompt_tokens
+    mock_usage.completion_tokens = completion_tokens
+
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    mock_response.usage = mock_usage
+    return mock_response
+
+
+JD_DATA = {
+    "company": "TestCo",
+    "role_title": "Engineer",
+    "seniority_level": "Senior",
+    "core_requirements": [
+        {
+            "skill": "Python",
+            "importance": "must_have",
+            "context": "Backend development",
+        }
+    ],
+    "technical_stack": ["Python"],
+    "soft_skills": ["Communication"],
+    "leadership_signals": [],
+    "culture_keywords": [],
+    "ats_keywords": ["Python"],
+    "hidden_requirements": [],
+    "role_summary": "A senior engineer role.",
+}
+
+
+class TestOllamaComplete:
+    """Tests for OllamaAdapter.complete."""
+
+    async def test_complete_returns_text(self, ollama_adapter: OllamaAdapter) -> None:
+        mock_response = _mock_chat_response("Hello from Llama")
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            return_value=mock_response
+        )
+
+        result = await ollama_adapter.complete(
+            [{"role": "user", "content": "hi"}],
+            model="llama3.1",
+        )
+        assert result == "Hello from Llama"
+
+    async def test_complete_tracks_token_usage(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        mock_response = _mock_chat_response(
+            "response", prompt_tokens=15, completion_tokens=25
+        )
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            return_value=mock_response
+        )
+
+        await ollama_adapter.complete(
+            [{"role": "user", "content": "hi"}],
+            model="llama3.1",
+        )
+
+        usage = ollama_adapter.get_last_usage()
+        assert isinstance(usage, TokenUsage)
+        assert usage.input_tokens == 15
+        assert usage.output_tokens == 25
+
+    async def test_complete_handles_connection_error(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            side_effect=openai.APIConnectionError(request=MagicMock())
+        )
+
+        with pytest.raises(ProviderError, match="Cannot connect to Ollama"):
+            await ollama_adapter.complete(
+                [{"role": "user", "content": "hi"}],
+                model="llama3.1",
+            )
+
+    async def test_complete_handles_api_error(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.headers = {}
+
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            side_effect=openai.APIStatusError(
+                message="internal server error",
+                response=mock_response,
+                body=None,
+            )
+        )
+
+        with pytest.raises(ProviderError):
+            await ollama_adapter.complete(
+                [{"role": "user", "content": "hi"}],
+                model="llama3.1",
+            )
+
+
+class TestOllamaCompleteStructured:
+    """Tests for OllamaAdapter.complete_structured."""
+
+    async def test_complete_structured_returns_model(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        mock_response = _mock_chat_response(json.dumps(JD_DATA))
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            return_value=mock_response
+        )
+
+        result = await ollama_adapter.complete_structured(
+            [{"role": "user", "content": "analyze this JD"}],
+            model="llama3.1",
+            response_model=JDAnalysis,
+        )
+
+        assert isinstance(result, JDAnalysis)
+        assert result.company == "TestCo"
+        assert result.role_title == "Engineer"
+        assert len(result.core_requirements) == 1
+        assert isinstance(result.core_requirements[0], Requirement)
+
+    async def test_complete_structured_tracks_token_usage(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        mock_response = _mock_chat_response(
+            json.dumps(JD_DATA), prompt_tokens=50, completion_tokens=100
+        )
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            return_value=mock_response
+        )
+
+        await ollama_adapter.complete_structured(
+            [{"role": "user", "content": "analyze this JD"}],
+            model="llama3.1",
+            response_model=JDAnalysis,
+        )
+
+        usage = ollama_adapter.get_last_usage()
+        assert usage.input_tokens == 50
+        assert usage.output_tokens == 100
+
+    async def test_complete_structured_handles_parse_error(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        mock_response = _mock_chat_response("not valid json at all {{{")
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            return_value=mock_response
+        )
+
+        with pytest.raises((ProviderError, ValidationError, ValueError)):
+            await ollama_adapter.complete_structured(
+                [{"role": "user", "content": "analyze this JD"}],
+                model="llama3.1",
+                response_model=JDAnalysis,
+            )
+
+    async def test_complete_structured_handles_connection_error(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            side_effect=openai.APIConnectionError(request=MagicMock())
+        )
+
+        with pytest.raises(ProviderError, match="Cannot connect to Ollama"):
+            await ollama_adapter.complete_structured(
+                [{"role": "user", "content": "analyze"}],
+                model="llama3.1",
+                response_model=JDAnalysis,
+            )
+
+    async def test_complete_structured_handles_validation_error(
+        self, ollama_adapter: OllamaAdapter
+    ) -> None:
+        incomplete_data = {"company": "TestCo"}
+        mock_response = _mock_chat_response(json.dumps(incomplete_data))
+        ollama_adapter._client.chat.completions.create = AsyncMock(
+            return_value=mock_response
+        )
+
+        with pytest.raises(ValidationError):
+            await ollama_adapter.complete_structured(
+                [{"role": "user", "content": "analyze this JD"}],
+                model="llama3.1",
+                response_model=JDAnalysis,
+            )

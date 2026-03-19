@@ -11,7 +11,6 @@ from rich.console import Console
 
 from mkcv.adapters.factory import create_render_service
 from mkcv.config import settings
-from mkcv.core.exceptions.render import RenderError
 
 console = Console()
 
@@ -66,19 +65,20 @@ def render_command(
         output_dir if output_dir is not None else resolved_yaml.parent
     )
     effective_theme = theme if theme is not None else "sb2nov"
+    requested_formats = [f.strip() for f in format.split(",") if f.strip()]
 
     service = create_render_service(settings)
 
-    try:
-        result = service.render_resume(
-            resolved_yaml,
-            effective_output_dir,
-            theme=effective_theme,
-        )
-    except RenderError as exc:
-        raise exc
+    result = service.render_resume(
+        resolved_yaml,
+        effective_output_dir,
+        theme=effective_theme,
+        formats=requested_formats,
+    )
 
-    console.print(f"\n  [green]PDF:[/green]  {result.pdf_path}")
+    console.print()
+    if result.pdf_path and result.pdf_path.exists():
+        console.print(f"  [green]PDF:[/green]  {result.pdf_path}")
     if result.png_path:
         console.print(f"  [green]PNG:[/green]  {result.png_path}")
     if result.md_path:
@@ -87,7 +87,7 @@ def render_command(
         console.print(f"  [green]HTML:[/green] {result.html_path}")
     console.print()
 
-    if open:
+    if open and result.pdf_path.exists():
         _open_file(result.pdf_path)
 
 

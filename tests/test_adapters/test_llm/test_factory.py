@@ -4,11 +4,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mkcv.adapters.factory import _create_llm_adapter
+from mkcv.adapters.factory import (
+    _create_llm_adapter,
+    _resolve_stage_configs,
+    create_pipeline_service,
+    create_workspace_service,
+)
 from mkcv.adapters.llm.anthropic import AnthropicAdapter
 from mkcv.adapters.llm.openai import OpenAIAdapter
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.llm.stub import StubLLMAdapter
+from mkcv.core.services.workspace import WorkspaceService
 
 
 def _make_config(
@@ -96,3 +102,99 @@ class TestCreateLLMAdapter:
         config = _make_config(provider="anthropic", api_key="sk-test")
         adapter = _create_llm_adapter("anthropic", config, with_retry=False)
         assert isinstance(adapter, AnthropicAdapter)
+
+
+class TestResolveStageConfigs:
+    """Tests for _resolve_stage_configs with profile presets."""
+
+    def test_default_profile_reads_from_config(self) -> None:
+        config = MagicMock()
+        analyze = MagicMock()
+        analyze.provider = "anthropic"
+        analyze.model = "claude-sonnet-4-20250514"
+        analyze.temperature = 0.2
+        config.pipeline.stages.analyze = analyze
+        config.pipeline.stages.select = analyze
+        config.pipeline.stages.tailor = analyze
+        config.pipeline.stages.structure = analyze
+        config.pipeline.stages.review = analyze
+
+        configs = _resolve_stage_configs(config, profile="default")
+        assert configs[1].provider == "anthropic"
+        assert configs[1].model == "claude-sonnet-4-20250514"
+
+    def test_budget_profile_uses_ollama(self) -> None:
+        config = MagicMock()
+        configs = _resolve_stage_configs(config, profile="budget")
+        for stage_num in range(1, 6):
+            assert configs[stage_num].provider == "ollama"
+            assert configs[stage_num].model == "llama3.1:8b"
+
+    def test_premium_profile_uses_anthropic(self) -> None:
+        config = MagicMock()
+        configs = _resolve_stage_configs(config, profile="premium")
+        for stage_num in range(1, 6):
+            assert configs[stage_num].provider == "anthropic"
+            assert configs[stage_num].model == "claude-sonnet-4-20250514"
+
+    def test_budget_profile_ignores_config_settings(self) -> None:
+        config = MagicMock()
+        analyze = MagicMock()
+        analyze.provider = "openai"
+        analyze.model = "gpt-4o"
+        analyze.temperature = 0.9
+        config.pipeline.stages.analyze = analyze
+
+        configs = _resolve_stage_configs(config, profile="budget")
+        assert configs[1].provider == "ollama"
+
+    def test_premium_profile_preserves_per_stage_temperatures(self) -> None:
+        config = MagicMock()
+        configs = _resolve_stage_configs(config, profile="premium")
+        assert configs[1].temperature == 0.2
+        assert configs[3].temperature == 0.5
+        assert configs[4].temperature == 0.1
+
+
+class TestCreatePipelineServiceWithProfile:
+    """Tests for create_pipeline_service profile parameter."""
+
+    def test_budget_profile_creates_ollama_provider(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        service = create_pipeline_service(config, profile="budget")
+        assert "ollama" in service._providers
+
+    def test_default_profile_uses_config_providers(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        analyze = MagicMock()
+        analyze.provider = "stub"
+        analyze.model = "stub-model"
+        analyze.temperature = 0.3
+        config.pipeline.stages.analyze = analyze
+        config.pipeline.stages.select = analyze
+        config.pipeline.stages.tailor = analyze
+        config.pipeline.stages.structure = analyze
+        config.pipeline.stages.review = analyze
+
+        service = create_pipeline_service(config, profile="default")
+        assert "stub" in service._providers
+
+
+class TestCreateWorkspaceService:
+    """Tests for create_workspace_service factory function."""
+
+    def test_returns_workspace_service(self) -> None:
+        svc = create_workspace_service()
+        assert isinstance(svc, WorkspaceService)
+
+    def test_workspace_service_can_init(self, tmp_path: MagicMock) -> None:
+        svc = create_workspace_service()
+        assert hasattr(svc, "init_workspace")
+        assert hasattr(svc, "setup_application")
+        assert hasattr(svc, "list_applications")

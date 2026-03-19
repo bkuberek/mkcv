@@ -1,6 +1,7 @@
 """Tests for ValidationService."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,6 +14,7 @@ from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.keyword_coverage import KeywordCoverage
 from mkcv.core.models.requirement import Requirement
 from mkcv.core.models.review_report import ReviewReport
+from mkcv.core.ports.pdf_reader import PdfReaderPort
 from mkcv.core.services.validation import ValidationService
 
 # ------------------------------------------------------------------
@@ -287,14 +289,14 @@ class TestValidateFileHandling:
         with pytest.raises(FileNotFoundError, match="not found"):
             await service_no_jd.validate(missing)
 
-    async def test_pdf_file_raises_validation_error(
+    async def test_pdf_without_reader_raises_validation_error(
         self,
         service_no_jd: ValidationService,
         tmp_path: Path,
     ) -> None:
         pdf_file = tmp_path / "resume.pdf"
         pdf_file.write_bytes(b"%PDF-1.4")
-        with pytest.raises(ValidationError, match="Unsupported file type"):
+        with pytest.raises(ValidationError, match=r"PDF.*reader"):
             await service_no_jd.validate(pdf_file)
 
     async def test_unsupported_extension_raises_validation_error(
@@ -324,3 +326,93 @@ class TestValidateFileHandling:
     ) -> None:
         report = await service_no_jd.validate(resume_yaml_file)
         assert isinstance(report, ReviewReport)
+
+    async def test_docx_extension_raises_validation_error(
+        self,
+        service_no_jd: ValidationService,
+        tmp_path: Path,
+    ) -> None:
+        docx_file = tmp_path / "resume.docx"
+        docx_file.write_bytes(b"PK\x03\x04")
+        with pytest.raises(ValidationError, match="Unsupported file type"):
+            await service_no_jd.validate(docx_file)
+
+
+# ------------------------------------------------------------------
+# Test: PDF validation
+# ------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_pdf_reader() -> MagicMock:
+    """Create a mock PDF reader that returns sample text."""
+    reader = MagicMock(spec=PdfReaderPort)
+    reader.extract_text.return_value = (
+        "John Doe\nSoftware Engineer\nBuilt microservices processing 10K requests/sec\n"
+    )
+    return reader
+
+
+@pytest.fixture
+def service_with_pdf(
+    stub_llm_no_jd: StubLLMAdapter,
+    mock_pdf_reader: MagicMock,
+) -> ValidationService:
+    """ValidationService with a mock PDF reader."""
+    prompts = FileSystemPromptLoader()
+    return ValidationService(
+        llm=stub_llm_no_jd,
+        prompts=prompts,
+        pdf_reader=mock_pdf_reader,
+    )
+
+
+class TestValidatePdf:
+    """Tests for PDF file validation."""
+
+    async def test_pdf_file_is_accepted(
+        self,
+        service_with_pdf: ValidationService,
+        mock_pdf_reader: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "resume.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+        report = await service_with_pdf.validate(pdf_file)
+        assert isinstance(report, ReviewReport)
+
+    async def test_pdf_calls_extract_text(
+        self,
+        service_with_pdf: ValidationService,
+        mock_pdf_reader: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "resume.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+        await service_with_pdf.validate(pdf_file)
+        mock_pdf_reader.extract_text.assert_called_once_with(pdf_file)
+
+    async def test_pdf_validation_makes_one_llm_call(
+        self,
+        service_with_pdf: ValidationService,
+        stub_llm_no_jd: StubLLMAdapter,
+        tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "resume.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+        await service_with_pdf.validate(pdf_file)
+        assert len(stub_llm_no_jd.call_log) == 1
+
+    async def test_pdf_reader_error_propagates(
+        self,
+        service_with_pdf: ValidationService,
+        mock_pdf_reader: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "resume.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+        mock_pdf_reader.extract_text.side_effect = ValidationError(
+            "Cannot read PDF 'resume.pdf': file is corrupted or not a valid PDF."
+        )
+        with pytest.raises(ValidationError, match="corrupted"):
+            await service_with_pdf.validate(pdf_file)

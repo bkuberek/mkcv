@@ -7,13 +7,24 @@ from mkcv.core.models.stage_metadata import StageMetadata
 
 @runtime_checkable
 class StageCallbackPort(Protocol):
-    """Callback invoked after each pipeline stage completes.
+    """Callback invoked before and after each pipeline stage.
 
-    Used by interactive mode to display stage results and let the
-    user decide whether to continue.
+    Used to show progress (spinners) and let interactive mode
+    pause between stages.
 
-    Return True to proceed to the next stage, False to stop.
+    Return True from on_stage_complete to proceed, False to stop.
     """
+
+    def on_stage_start(
+        self,
+        stage_number: int,
+    ) -> None:
+        """Called just before a pipeline stage begins.
+
+        Args:
+            stage_number: Stage number (1-5).
+        """
+        ...
 
     def on_stage_complete(
         self,

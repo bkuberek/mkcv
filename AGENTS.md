@@ -19,8 +19,9 @@ a knowledge base, config, and `applications/{company}/{YYYY-MM-position}/` dirs.
 | `init`     | Implemented   | Creates workspace with config, KB templates   |
 | `generate` | Implemented   | Full 5-stage LLM pipeline + auto-render PDF   |
 | `render`   | Implemented   | RenderCV Python API (Typst → PDF/PNG/MD/HTML) |
-| `validate` | Stubbed       | ATS compliance check — ports wired, no logic  |
-| `themes`   | Stubbed       | Lists built-in theme names only               |
+| `validate` | Implemented   | LLM-powered ATS check, PDF + YAML, KB validation |
+| `themes`   | Implemented   | Lists themes with metadata, --preview support |
+| `status`   | Implemented   | Workspace overview and application listing    |
 
 ## Tech Stack
 
@@ -32,7 +33,7 @@ a knowledge base, config, and `applications/{company}/{YYYY-MM-position}/` dirs.
 - **Jinja2** for prompt templates (`.j2` files in `src/mkcv/prompts/`)
 - **RenderCV** (Typst) for PDF rendering via Python API
 - **pytest + pytest-asyncio** for tests, **ruff** for lint/format, **mypy --strict** for types
-- AI providers: Anthropic, OpenAI, Stub (provider-agnostic via `LLMPort`)
+- AI providers: Anthropic, OpenAI, Ollama, Stub (provider-agnostic via `LLMPort`)
 
 ## Build / Run / Test
 
@@ -57,21 +58,21 @@ uv run mypy src/                                 # Type check
 src/mkcv/
 ├── cli/                  # Cyclopts commands — no business logic
 │   ├── app.py            # App entry point, global options, meta handler
-│   └── commands/         # generate, render, validate, init_cmd, themes
+│   └── commands/         # generate, render, validate, init_cmd, themes, status
 ├── core/                 # Pure business logic — never imports from adapters
 │   ├── exceptions/       # MkcvError hierarchy (one class per file)
 │   ├── models/           # Pydantic data models (one class per file)
 │   ├── ports/            # Protocol interfaces: LLMPort, RendererPort, etc.
-│   └── services/         # Pipeline, Render, Validation, Workspace services
+│   └── services/         # Pipeline, Render, Validation, Workspace, Theme, etc.
 ├── config/               # Dynaconf configuration + workspace discovery
 │   ├── configuration.py  # 5-layer Configuration class
 │   ├── workspace.py      # find_workspace_root(), is_workspace()
 │   └── settings.toml     # Built-in defaults
 └── adapters/             # Implementations of core ports
     ├── factory.py        # DI wiring — creates fully-assembled services
-    ├── filesystem/       # ArtifactStore, PromptLoader, WorkspaceManager
-    ├── llm/              # Anthropic, OpenAI, Stub adapters + utils
-    └── renderers/        # RenderCV (Typst → PDF), Stub renderer
+    ├── filesystem/       # ArtifactStore, PromptLoader, WorkspaceManager, PyPdfReader
+    ├── llm/              # Anthropic, OpenAI, Ollama, Stub adapters + retry
+    └── renderers/        # RenderCV (Typst → PDF)
 ```
 
 ## Code Style
@@ -128,6 +129,7 @@ Custom hierarchy rooted at `MkcvError` (each with `exit_code`):
 - `PipelineStageError` (5), `ValidationError` (5)
 - `RenderError` (6), `TemplateError` (6)
 - `WorkspaceError` (7) → `WorkspaceNotFoundError`, `WorkspaceExistsError`
+- `JDReadError` (2)
 
 Never catch bare `Exception` — always catch specific types.
 

@@ -51,13 +51,23 @@ Phase 4: Mobile App
 - [x] Interactive mode (`--interactive` — pause after each stage for review)
 - [x] Prompt tuning — XYZ bullet formula, voice guidelines, ATS keyword strategy
 - [x] `mkcv validate` command — LLM-powered resume quality review
-- [x] Test suite: 284 tests with mocked API calls, ruff + mypy --strict clean
+- [x] Test suite: 676 tests with mocked API calls, ruff + mypy --strict clean
 
-#### M1.5: Remaining Work (Next)
-- [ ] Ollama adapter — local model support for offline/budget usage
-- [ ] Cost tracking — token counts from adapters, cost calculation in pipeline
+#### M1.5: Polish & Local Support ✅
+- [x] Ollama adapter — local model support for offline/budget usage
+- [x] Cost tracking — token counts from adapters, cost calculation in pipeline
+- [x] Profile presets (budget/premium) for per-stage provider/model selection
+- [x] `mkcv themes` — full theme discovery with metadata and --preview
+- [x] `mkcv status` — workspace overview and application listing
+- [x] `mkcv validate --kb` — knowledge base structure validation
+- [x] JD reader — accept file, URL, or stdin as JD source
+- [x] PDF reader — extract text from PDF for validation
+- [x] RetryingLLMAdapter — exponential backoff wrapper for rate limits
+- [x] StageCallbackPort — progress spinners and interactive mode callbacks
+- [x] Update outdated docs to match implementation
+
+#### M1.6: Remaining Work (Next)
 - [ ] Prompt iteration with real JDs (ongoing quality improvement)
-- [ ] Update outdated docs (research.md references old architecture)
 
 ### Deliverables
 - `mkcv generate --jd <file> --kb <file>` → `resume.yaml` + `review_report.json` + auto-rendered PDF

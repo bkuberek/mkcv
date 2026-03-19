@@ -1,6 +1,6 @@
 # mkcv — CLI Interface Specification
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Date:** 2026-03-18
 
 ---
@@ -15,9 +15,10 @@ automatically (walk up from CWD looking for `mkcv.toml`) or via `--workspace`.
 mkcv
 ├── generate    # Run AI pipeline: JD + KB → resume.yaml + review
 ├── render      # Render resume.yaml → PDF/PNG/MD
-├── validate    # ATS compliance check on existing resume
+├── validate    # ATS compliance check on existing resume or KB
 ├── init        # Initialize a new mkcv workspace
-└── themes      # List available themes
+├── themes      # List and preview available themes
+└── status      # Show workspace overview and application listing
 ```
 
 ---
@@ -42,10 +43,11 @@ These apply to all commands via the Cyclopts meta handler:
 Run the AI pipeline to generate a tailored resume.
 
 ```
-Usage: mkcv generate --jd PATH [OPTIONS]
+Usage: mkcv generate --jd SOURCE [OPTIONS]
 
 Required:
-  --jd PATH              Path to job description file (text/markdown).
+  --jd SOURCE            Job description source: file path, URL (http/https),
+                         or "-" for stdin.
 
 Options:
   --kb PATH              Path to knowledge base file.
@@ -60,6 +62,19 @@ Options:
   --interactive          Pause after each stage for review. [default: False]
 ```
 
+**JD sources:** `--jd` accepts a local file path, an HTTP/HTTPS URL (fetched
+via httpx), or `"-"` to read from stdin. URL content is fetched
+automatically. KB validation runs before the pipeline starts and blocks
+generation if errors are found.
+
+**Profile presets:** `--profile budget` uses Ollama (local models, free);
+`--profile premium` uses Anthropic Claude. Each profile sets per-stage
+provider, model, and temperature.
+
+**Progress:** A Rich spinner shows progress during each pipeline stage.
+In `--interactive` mode, the pipeline pauses after each stage and prompts
+the user to continue or stop.
+
 **Workspace mode** (when `mkcv.toml` is found): creates
 `applications/{company}/{YYYY-MM-position}/` with `application.toml`,
 `jd.txt`, and `.mkcv/` for artifacts. `--company` and `--position` are
@@ -73,6 +88,12 @@ required.
 # Standalone — explicit KB
 mkcv generate --jd jobs/deepl.txt --kb career.md
 
+# From a URL
+mkcv generate --jd https://example.com/job-posting.txt --kb career.md
+
+# From stdin
+cat jobs/deepl.txt | mkcv generate --jd - --kb career.md
+
 # Workspace mode — KB from config, app dir created
 mkcv generate --jd jobs/deepl.txt --company DeepL --position "Senior Engineer"
 
@@ -81,6 +102,12 @@ mkcv generate --jd jobs/deepl.txt --from-stage 3
 
 # Generate YAML only, skip rendering
 mkcv generate --jd jobs/deepl.txt --kb career.md --no-render
+
+# Use budget profile (local Ollama models)
+mkcv generate --jd jobs/deepl.txt --kb career.md --profile budget
+
+# Interactive mode — review after each stage
+mkcv generate --jd jobs/deepl.txt --kb career.md --interactive
 ```
 
 ---
@@ -115,23 +142,35 @@ mkcv render resume.yaml --format pdf,png,md,html
 
 ### `mkcv validate`
 
-Check a resume for ATS compliance.
+Check a resume or knowledge base for quality issues.
 
 ```
-Usage: mkcv validate FILE [OPTIONS]
+Usage: mkcv validate [FILE] [OPTIONS]
 
-Required:
-  FILE                   Resume file to validate (PDF or YAML).
+Arguments:
+  FILE                   Resume file to validate (YAML or PDF). Optional if
+                         using --kb.
 
 Options:
+  --kb PATH              Knowledge base file to validate (Markdown).
   --jd PATH              Job description to check keyword coverage against.
 ```
+
+**Resume validation** uses an LLM to review the resume for ATS compliance,
+bullet quality, keyword coverage, and overall presentation. Accepts both
+YAML resume files and rendered PDFs (text is extracted via pypdf).
+
+**KB validation** (`--kb`) checks a knowledge base Markdown file for
+expected sections (contact info, summary, experience, education, skills),
+date patterns, bullet points, and reasonable length. Runs without an LLM.
 
 **Examples:**
 
 ```bash
+mkcv validate resume.yaml
 mkcv validate resume.pdf
 mkcv validate resume.pdf --jd jobs/deepl.txt
+mkcv validate --kb knowledge-base/career.md
 ```
 
 ---
@@ -172,14 +211,43 @@ List and preview available resume themes.
 Usage: mkcv themes [OPTIONS]
 
 Options:
-  --preview TEXT          Generate a preview PDF for a specific theme.
+  --preview TEXT          Show a styled preview for a specific theme.
 ```
+
+Lists all available RenderCV themes with name, description, and font family.
+Uses `--preview` to display a detailed Rich panel with colors, font info,
+page size, and a sample layout rendering in the terminal.
+
+Theme metadata is extracted from the RenderCV built-in theme classes at
+runtime (font family, primary/accent colors, page size).
 
 **Examples:**
 
 ```bash
-mkcv themes                        # List all themes
-mkcv themes --preview sb2nov       # Preview a specific theme
+mkcv themes                        # List all themes in a table
+mkcv themes --preview sb2nov       # Show detailed preview panel
+```
+
+---
+
+### `mkcv status`
+
+Show workspace overview and application listing.
+
+```
+Usage: mkcv status
+```
+
+Displays the current workspace root, config path, knowledge base status,
+and a table of all applications with company, position, date, status,
+and whether resume YAML and PDF files exist.
+
+If no workspace is found, suggests running `mkcv init`.
+
+**Examples:**
+
+```bash
+mkcv status                        # Show workspace overview
 ```
 
 ---

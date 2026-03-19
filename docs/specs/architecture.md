@@ -1,6 +1,6 @@
 # mkcv — Architecture Specification
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Date:** 2026-03-18
 
 ---
@@ -24,6 +24,7 @@ dependency rules:
 │  │   validate      │  └────────────────┘  └──────────┬─────────────┘  │
 │  │   init          │                                  │               │
 │  │   themes        │                                  │ implements    │
+│  │   status        │                                  │               │
 │  └───────┬────────┘                                  ▼               │
 │          │ delegates    ┌──────────────────────────────────────────┐  │
 │          └─────────────▶│            core/                         │  │
@@ -51,7 +52,7 @@ Responsibilities:
 - Delegate to services created by `adapters/factory.py`
 - Handle `MkcvError` with exit codes and user-friendly messages
 
-Commands: `generate`, `render`, `validate`, `init`, `themes`
+Commands: `generate`, `render`, `validate`, `init`, `themes`, `status`
 
 The CLI contains **no business logic** — it validates inputs and calls services.
 
@@ -61,24 +62,33 @@ Four sub-packages, all framework-free:
 
 **`core/ports/`** — Protocol interfaces that define how services talk to the
 outside world:
-- `LLMPort` — AI provider calls (`complete`, `complete_structured`)
+- `LLMPort` — AI provider calls (`complete`, `complete_structured`, `get_last_usage`)
 - `RendererPort` — PDF rendering (`render`)
 - `ArtifactStorePort` — Pipeline artifact persistence (`save`, `load`, `create_run_dir`)
 - `PromptLoaderPort` — Jinja2 template loading (`load`, `render`, `list_templates`)
+- `WorkspacePort` — Workspace and application directory management (`create_workspace`, `create_application`, `list_applications`)
+- `PdfReaderPort` — PDF text extraction (`extract_text`)
+- `StageCallbackPort` — Pipeline stage progress callbacks (`on_stage_start`, `on_stage_complete`)
 
 **`core/services/`** — Business logic orchestration:
-- `PipelineService` — 5-stage resume generation pipeline
+- `PipelineService` — 5-stage resume generation pipeline with per-stage provider/model config
 - `RenderService` — YAML-to-PDF rendering
-- `ValidationService` — ATS compliance checking
-- `WorkspaceService` — Workspace initialization and application setup
+- `ValidationService` — LLM-powered ATS compliance checking (YAML + PDF support)
+- `WorkspaceService` — Workspace initialization and application setup (delegates to `WorkspacePort`)
+- `ThemeService` — Theme discovery and preview (`discover_themes`, `get_theme`)
+- `KBValidator` — Knowledge base structure validation (`validate_kb`)
+- `JDReader` — Job description resolution from file, URL, or stdin (`read_jd`)
 
 Services accept port interfaces via constructor injection. They never
 instantiate adapters directly.
 
 **`core/models/`** — Pydantic v2 data models. One class per file:
-- Pipeline: `JDAnalysis`, `Requirement`, `ExperienceSelection`, `TailoredContent`, `TailoredBullet`, `ReviewReport`, `PipelineResult`
-- Resume: `RenderCVResume`, `ResumeCV`, `ResumeDesign`, `ExperienceEntry`, `SkillGroup`
+- Pipeline: `JDAnalysis`, `Requirement`, `ExperienceSelection`, `TailoredContent`, `TailoredBullet`, `ReviewReport`, `PipelineResult`, `StageMetadata`, `StageConfig`, `TokenUsage`
+- Resume: `RenderCVResume`, `ResumeCV`, `ResumeDesign`, `ExperienceEntry`, `SkillGroup`, `SkillEntry`, `SocialNetwork`, `MissionStatement`, `TailoredRole`
 - Workspace: `WorkspaceConfig`, `ApplicationMetadata`
+- Configuration: `ProfilePreset` (budget/premium stage configs), `ThemeInfo`
+- Validation: `KBValidationResult`, `ATSCheck`, `KeywordCoverage`, `BulletReview`
+- Pricing: `pricing` module with `MODEL_PRICING` and `calculate_cost()`
 
 **`core/exceptions/`** — Error hierarchy rooted at `MkcvError`. One class per file.
 Each exception carries an `exit_code` for the CLI layer.
@@ -110,33 +120,40 @@ Concrete implementations of core ports:
 **`adapters/filesystem/`**:
 - `FileSystemArtifactStore` — implements `ArtifactStorePort` (JSON file I/O)
 - `FileSystemPromptLoader` — implements `PromptLoaderPort` (Jinja2 templates)
-- `WorkspaceManager` — filesystem operations for workspace/application creation
+- `WorkspaceManager` — implements `WorkspacePort` (workspace/application creation)
+- `PyPdfReader` — implements `PdfReaderPort` (text extraction via pypdf)
 
 **`adapters/llm/`** — Provider-agnostic LLM adapters. The factory selects
 the adapter based on configuration and available API keys:
 - `AnthropicAdapter` — Anthropic Claude (structured output via tool-use)
 - `OpenAIAdapter` — OpenAI GPT models (structured output via JSON mode)
+- `OllamaAdapter` — Local Ollama models via OpenAI-compatible API (no API key)
 - `StubLLMAdapter` — deterministic test/dev stub (no API key needed)
-- `_utils.py` — shared utilities (retry logic, token counting)
+- `RetryingLLMAdapter` — decorator that wraps any adapter with exponential backoff on `RateLimitError`
+- `_utils.py` — shared utilities (schema prompts, JSON extraction, validation)
 
-Provider selection: config → API key lookup → adapter instantiation.
-Falls back to `StubLLMAdapter` if no API key is found.
+Provider selection: config → profile preset → API key lookup → adapter
+instantiation. Falls back to `StubLLMAdapter` if no API key is found.
 
 **`adapters/renderers/`** — PDF rendering backends:
 - `RenderCVAdapter` — renders via RenderCV's Python API (Typst engine).
   Parses YAML, generates Typst source, compiles to PDF/PNG, and produces
   Markdown/HTML. Non-PDF formats are best-effort (failures are non-fatal).
-- `StubRenderer` — test stub returning dummy paths
 
 **`adapters/factory.py`** — Manual DI wiring. Factory functions assemble
 fully-wired service instances:
 ```python
-def create_pipeline_service(config) -> PipelineService:
-    llm = _create_llm_adapter(config)  # Anthropic/OpenAI/Stub based on config
+def create_pipeline_service(config, profile="default") -> PipelineService:
+    stage_configs = _resolve_stage_configs(config, profile)  # budget/premium/default
+    providers = _create_providers(config, stage_configs)      # one adapter per provider
     prompts = FileSystemPromptLoader(override_dir=...)
     artifacts = FileSystemArtifactStore()
-    return PipelineService(llm=llm, prompts=prompts, artifacts=artifacts)
+    return PipelineService(providers=providers, prompts=prompts,
+                           artifacts=artifacts, stage_configs=stage_configs)
 ```
+
+Factory functions: `create_pipeline_service`, `create_render_service`,
+`create_validation_service`, `create_workspace_service`.
 
 ---
 
@@ -207,6 +224,7 @@ previously saved artifacts from `.mkcv/` instead of re-running earlier stages.
 
 ```
 MkcvError (exit_code=1)
+├── JDReadError (2)
 ├── ProviderError (4)
 │   ├── RateLimitError (4)     → exponential backoff retry
 │   ├── AuthenticationError (4) → fail fast, show config help

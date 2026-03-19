@@ -1028,6 +1028,10 @@ class _TrackingCallback:
     def __init__(self, stop_after: int | None = None) -> None:
         self._stop_after = stop_after
         self.calls: list[int] = []
+        self.starts: list[int] = []
+
+    def on_stage_start(self, stage_number: int) -> None:
+        self.starts.append(stage_number)
 
     def on_stage_complete(
         self,
