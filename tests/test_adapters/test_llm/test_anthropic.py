@@ -1,5 +1,6 @@
 """Tests for AnthropicAdapter with mocked SDK."""
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
@@ -17,8 +18,80 @@ def anthropic_adapter() -> AnthropicAdapter:
     return AnthropicAdapter(api_key="test-key")
 
 
+def _mock_text_stream(
+    text: str,
+    final_message: Any,
+) -> AsyncMock:
+    """Create a mock for client.messages.stream() that yields text."""
+
+    class _FakeStream:
+        async def __aenter__(self) -> "_FakeStream":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        @property
+        def text_stream(self) -> "_FakeTextIter":
+            return _FakeTextIter(text)
+
+        async def __aiter__(self) -> Any:
+            return self
+
+        async def get_final_message(self) -> Any:
+            return final_message
+
+    class _FakeTextIter:
+        def __init__(self, t: str) -> None:
+            self._text = t
+
+        def __aiter__(self) -> "_FakeTextIter":
+            return self
+
+        async def __anext__(self) -> str:
+            if self._text:
+                chunk = self._text
+                self._text = ""
+                return chunk
+            raise StopAsyncIteration
+
+    return MagicMock(return_value=_FakeStream())
+
+
+def _mock_tool_stream(
+    tool_input: dict[str, Any],
+    final_message: Any,
+) -> AsyncMock:
+    """Create a mock for client.messages.stream() with tool_use output."""
+
+    class _FakeStream:
+        async def __aenter__(self) -> "_FakeStream":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        def __aiter__(self) -> "_FakeStream":
+            return self
+
+        async def __anext__(self) -> Any:
+            raise StopAsyncIteration
+
+        async def get_final_message(self) -> Any:
+            return final_message
+
+    return MagicMock(return_value=_FakeStream())
+
+
+def _make_usage(input_tokens: int = 100, output_tokens: int = 50) -> MagicMock:
+    usage = MagicMock()
+    usage.input_tokens = input_tokens
+    usage.output_tokens = output_tokens
+    return usage
+
+
 class TestAnthropicComplete:
-    """Tests for AnthropicAdapter.complete."""
+    """Tests for AnthropicAdapter.complete (streaming)."""
 
     async def test_complete_returns_text(
         self, anthropic_adapter: AnthropicAdapter
@@ -27,11 +100,12 @@ class TestAnthropicComplete:
         mock_block.type = "text"
         mock_block.text = "Hello from Claude"
 
-        mock_response = MagicMock()
-        mock_response.content = [mock_block]
+        mock_final = MagicMock()
+        mock_final.content = [mock_block]
+        mock_final.usage = _make_usage()
 
-        anthropic_adapter._client.messages.create = AsyncMock(
-            return_value=mock_response
+        anthropic_adapter._client.messages.stream = _mock_text_stream(
+            "Hello from Claude", mock_final
         )
 
         result = await anthropic_adapter.complete(
@@ -47,7 +121,7 @@ class TestAnthropicComplete:
         mock_response.status_code = 429
         mock_response.headers = {}
 
-        anthropic_adapter._client.messages.create = AsyncMock(
+        anthropic_adapter._client.messages.stream = MagicMock(
             side_effect=anthropic.RateLimitError(
                 message="rate limited",
                 response=mock_response,
@@ -68,7 +142,7 @@ class TestAnthropicComplete:
         mock_response.status_code = 401
         mock_response.headers = {}
 
-        anthropic_adapter._client.messages.create = AsyncMock(
+        anthropic_adapter._client.messages.stream = MagicMock(
             side_effect=anthropic.AuthenticationError(
                 message="invalid api key",
                 response=mock_response,
@@ -82,9 +156,28 @@ class TestAnthropicComplete:
                 model="claude-sonnet-4-20250514",
             )
 
+    async def test_complete_tracks_token_usage(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        mock_final = MagicMock()
+        mock_final.content = []
+        mock_final.usage = _make_usage(input_tokens=200, output_tokens=75)
+
+        anthropic_adapter._client.messages.stream = _mock_text_stream(
+            "response", mock_final
+        )
+
+        await anthropic_adapter.complete(
+            [{"role": "user", "content": "hi"}],
+            model="claude-sonnet-4-20250514",
+        )
+        usage = anthropic_adapter.get_last_usage()
+        assert usage.input_tokens == 200
+        assert usage.output_tokens == 75
+
 
 class TestAnthropicCompleteStructured:
-    """Tests for AnthropicAdapter.complete_structured."""
+    """Tests for AnthropicAdapter.complete_structured (streaming)."""
 
     async def test_complete_structured_with_tool_use(
         self, anthropic_adapter: AnthropicAdapter
@@ -114,11 +207,12 @@ class TestAnthropicCompleteStructured:
         mock_block.name = "extract_jdanalysis"
         mock_block.input = tool_input
 
-        mock_response = MagicMock()
-        mock_response.content = [mock_block]
+        mock_final = MagicMock()
+        mock_final.content = [mock_block]
+        mock_final.usage = _make_usage()
 
-        anthropic_adapter._client.messages.create = AsyncMock(
-            return_value=mock_response
+        anthropic_adapter._client.messages.stream = _mock_tool_stream(
+            tool_input, mock_final
         )
 
         result = await anthropic_adapter.complete_structured(
@@ -140,7 +234,7 @@ class TestAnthropicCompleteStructured:
         mock_response.status_code = 429
         mock_response.headers = {}
 
-        anthropic_adapter._client.messages.create = AsyncMock(
+        anthropic_adapter._client.messages.stream = MagicMock(
             side_effect=anthropic.RateLimitError(
                 message="rate limited",
                 response=mock_response,

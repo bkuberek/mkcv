@@ -1,5 +1,11 @@
-"""Anthropic (Claude) LLM adapter."""
+"""Anthropic (Claude) LLM adapter.
 
+Uses streaming for all API calls to avoid the 10-minute timeout on
+long-running requests (required by the Anthropic API for operations
+that may produce large outputs).
+"""
+
+import json
 import logging
 from typing import Any
 
@@ -23,6 +29,9 @@ logger = logging.getLogger(__name__)
 class AnthropicAdapter:
     """LLM adapter using the Anthropic Claude API.
 
+    All calls use streaming to comply with Anthropic's requirement
+    that requests potentially exceeding 10 minutes must stream.
+
     Implements: LLMPort
     """
 
@@ -41,7 +50,7 @@ class AnthropicAdapter:
         temperature: float = 0.3,
         max_tokens: int = 4096,
     ) -> str:
-        """Send a completion request and return the text response."""
+        """Send a streaming completion request and return the text response."""
         system, user_messages = split_system_message(messages)
         try:
             kwargs: dict[str, Any] = {
@@ -52,16 +61,18 @@ class AnthropicAdapter:
             }
             if system:
                 kwargs["system"] = system
-            response = await self._client.messages.create(**kwargs)
+
+            collected_text: list[str] = []
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for text in stream.text_stream:
+                    collected_text.append(text)
+                response = await stream.get_final_message()
+
             self._last_usage = TokenUsage(
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
             )
-            # Extract text from first content block
-            for block in response.content:
-                if block.type == "text":
-                    return str(block.text)
-            return ""
+            return "".join(collected_text)
         except anthropic.RateLimitError as e:
             raise RateLimitError(str(e), provider="anthropic") from e
         except anthropic.AuthenticationError as e:
@@ -82,20 +93,17 @@ class AnthropicAdapter:
         temperature: float = 0.3,
         max_tokens: int = 4096,
     ) -> BaseModel:
-        """Send a completion request and return a validated Pydantic model."""
-        # Use tool_use for structured output
+        """Send a streaming structured completion and return a Pydantic model."""
         system, user_messages = split_system_message(messages)
 
         tool_name = f"extract_{response_model.__name__.lower()}"
         tool_schema = response_model.model_json_schema()
 
-        # Remove metadata keys that Anthropic doesn't accept
         tool_input_schema: dict[str, Any] = {
             "type": "object",
             "properties": tool_schema.get("properties", {}),
             "required": tool_schema.get("required", []),
         }
-        # Handle $defs for nested models
         if "$defs" in tool_schema:
             tool_input_schema["$defs"] = tool_schema["$defs"]
 
@@ -120,13 +128,27 @@ class AnthropicAdapter:
             }
             if system:
                 kwargs["system"] = system
-            response = await self._client.messages.create(**kwargs)
+
+            # Stream the response and collect the final message
+            input_json_parts: list[str] = []
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for event in stream:
+                    # Collect tool input JSON fragments
+                    if hasattr(event, "type") and event.type == "content_block_delta":
+                        delta = getattr(event, "delta", None)
+                        if (
+                            delta is not None
+                            and getattr(delta, "type", None) == "input_json_delta"
+                        ):
+                            input_json_parts.append(getattr(delta, "partial_json", ""))
+                response = await stream.get_final_message()
+
             self._last_usage = TokenUsage(
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
             )
 
-            # Extract tool call input
+            # Extract tool call input from the final message
             for block in response.content:
                 if (
                     block.type == "tool_use"
@@ -137,6 +159,12 @@ class AnthropicAdapter:
                         block.input,
                         response_model,
                     )
+
+            # Fallback: try reassembling from streamed JSON fragments
+            if input_json_parts:
+                raw_json = "".join(input_json_parts)
+                data = json.loads(raw_json)
+                return validate_structured_response(data, response_model)
 
             # Fallback: try to extract JSON from text blocks
             for block in response.content:
