@@ -34,6 +34,17 @@ class WorkspaceService:
         """
         return self._workspace.create_workspace(path)
 
+    def update_readme(self, workspace_root: Path) -> bool:
+        """Regenerate the workspace README.md with the latest mkcv content.
+
+        Args:
+            workspace_root: Path to the workspace root.
+
+        Returns:
+            True if the README was updated, False if already current.
+        """
+        return self._workspace.update_readme(workspace_root)
+
     def setup_application(
         self,
         workspace_root: Path,

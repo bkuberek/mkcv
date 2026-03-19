@@ -25,6 +25,17 @@ class WorkspacePort(Protocol):
         """
         ...
 
+    def update_readme(self, workspace_root: Path) -> bool:
+        """Regenerate the workspace README.md with the latest mkcv content.
+
+        Args:
+            workspace_root: Path to the workspace root.
+
+        Returns:
+            True if the README was updated, False if already current.
+        """
+        ...
+
     def create_application(
         self,
         workspace_root: Path,
