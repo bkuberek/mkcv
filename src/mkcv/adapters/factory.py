@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 _PROVIDER_ENV_KEYS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "ollama": "",  # Ollama doesn't require an API key
 }
 
 _STAGE_CONFIG_KEYS: dict[int, str] = {
@@ -129,6 +130,14 @@ def _create_llm_adapter(
         from mkcv.adapters.llm.stub import StubLLMAdapter
 
         return StubLLMAdapter()
+
+    if provider == "ollama":
+        from mkcv.adapters.llm.ollama import OllamaAdapter
+
+        inner: LLMPort = OllamaAdapter()
+        if with_retry:
+            inner = RetryingLLMAdapter(inner)
+        return inner
 
     api_key = _resolve_api_key(provider, config)
 
