@@ -68,6 +68,55 @@ class TestWorkspaceService:
         assert len(apps) == 1
 
 
+class TestWorkspaceReadme:
+    """Tests that the generated workspace README stays in sync."""
+
+    def test_readme_created_on_init(self, tmp_path: Path) -> None:
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        ws = tmp_path / "ws"
+        svc.init_workspace(ws)
+        assert (ws / "README.md").is_file()
+
+    def test_readme_contains_version(self, tmp_path: Path) -> None:
+        from mkcv import __version__
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        ws = tmp_path / "ws"
+        svc.init_workspace(ws)
+        content = (ws / "README.md").read_text()
+        assert __version__ in content
+
+    def test_readme_mentions_all_providers(self, tmp_path: Path) -> None:
+        from mkcv.adapters.factory import _PROVIDER_ENV_KEYS
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        ws = tmp_path / "ws"
+        svc.init_workspace(ws)
+        content = (ws / "README.md").read_text().lower()
+        for provider in _PROVIDER_ENV_KEYS:
+            assert provider in content, (
+                f"Provider '{provider}' missing from workspace README"
+            )
+
+    def test_readme_mentions_all_commands(self, tmp_path: Path) -> None:
+        from mkcv.cli.app import app as cli_app
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        ws = tmp_path / "ws"
+        svc.init_workspace(ws)
+        content = (ws / "README.md").read_text()
+        for name in cli_app._commands:
+            if name.startswith("-"):
+                continue
+            assert f"mkcv {name}" in content, (
+                f"Command 'mkcv {name}' missing from workspace README"
+            )
+
+
 class TestPipelineService:
     """Tests for PipelineService with unconfigured stub."""
 

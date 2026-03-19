@@ -43,19 +43,29 @@ _STAGE_LABELS: dict[int, str] = {
 def generate_command(
     *,
     jd: Annotated[
-        str,
+        str | None,
         cyclopts.Parameter(
             help=(
-                'Job description source: file path, URL (http/https), or "-" for stdin.'
+                "Job description source: file path, URL (http/https), "
+                '"-" for stdin, or omit for a generic resume.'
             ),
         ),
-    ],
+    ] = None,
     kb: Annotated[
         Path | None,
         cyclopts.Parameter(
             help=(
                 "Path to knowledge base file. "
                 "In workspace mode, defaults to config value."
+            ),
+        ),
+    ] = None,
+    target: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help=(
+                "Target role for generic resume (used when --jd is omitted). "
+                'E.g. "Senior Software Engineer" or "Staff Backend Engineer, Python".'
             ),
         ),
     ] = None,
@@ -117,10 +127,15 @@ def generate_command(
     structure YAML, and review.
 
     The --jd option accepts a file path, an HTTP/HTTPS URL, or "-" to
-    read from stdin.
+    read from stdin. Omit --jd to generate a generic resume (optionally
+    with --target to specify the role).
     """
     # ---- Resolve JD source ----
-    jd_text, jd_display = _resolve_jd(jd)
+    if jd is not None:
+        jd_text, jd_display = _resolve_jd(jd)
+    else:
+        jd_text = _build_generic_jd(target)
+        jd_display = f"<generic: {target}>" if target else "<generic resume>"
 
     # ---- Workspace vs standalone mode ----
     if settings.in_workspace:
@@ -149,6 +164,33 @@ def generate_command(
             render_pdf=render,
             interactive=interactive,
         )
+
+
+def _build_generic_jd(target: str | None) -> str:
+    """Build a synthetic JD for a generic (non-targeted) resume.
+
+    When no real JD is provided, this creates a broad description
+    that guides the pipeline to produce a general-purpose resume
+    showcasing the candidate's strongest skills and achievements.
+    """
+    role = target or "Software Engineer"
+    return (
+        f"Position: {role}\n\n"
+        "This is a general-purpose resume. There is no specific job posting.\n\n"
+        "Produce a strong, well-rounded resume that:\n"
+        "- Highlights the candidate's most impactful achievements and metrics\n"
+        "- Showcases breadth and depth of technical skills\n"
+        "- Emphasizes leadership, architecture, and system design experience\n"
+        "- Uses clear, concise XYZ-formula bullet points\n"
+        "- Is suitable for senior-level individual contributor or technical "
+        "leadership roles\n"
+        "- Covers the candidate's strongest and most recent experience\n\n"
+        "Requirements:\n"
+        "- Strong software engineering background\n"
+        "- System design and architecture experience\n"
+        "- Track record of delivering measurable impact\n"
+        "- Collaboration across teams and stakeholders\n"
+    )
 
 
 def _resolve_jd(source: str) -> tuple[str, str]:
