@@ -8,6 +8,7 @@ from typing import Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.prompt import Confirm
 
 from mkcv.adapters.factory import (
     create_pipeline_service,
@@ -17,6 +18,7 @@ from mkcv.adapters.factory import (
 from mkcv.config import settings
 from mkcv.core.exceptions import MkcvError
 from mkcv.core.models.pipeline_result import PipelineResult
+from mkcv.core.models.stage_metadata import StageMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +199,7 @@ def _generate_workspace_mode(
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
+        interactive=interactive,
     )
 
 
@@ -244,6 +247,7 @@ def _generate_standalone_mode(
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
+        interactive=interactive,
     )
 
 
@@ -255,11 +259,17 @@ def _run_pipeline(
     from_stage: int,
     render_pdf: bool = True,
     theme: str = "sb2nov",
+    interactive: bool = False,
 ) -> None:
     """Execute the AI pipeline, display results, and optionally render PDF."""
     pipeline = create_pipeline_service(settings)
 
-    console.print("  [bold]Running AI pipeline...[/bold]")
+    callback = _InteractiveCallback() if interactive else None
+
+    if interactive:
+        console.print("  [bold]Running AI pipeline (interactive mode)...[/bold]")
+    else:
+        console.print("  [bold]Running AI pipeline...[/bold]")
     console.print()
 
     try:
@@ -269,6 +279,7 @@ def _run_pipeline(
                 kb,
                 output_dir=output_dir,
                 from_stage=from_stage,
+                stage_callback=callback,
             )
         )
     except MkcvError as exc:
@@ -380,3 +391,48 @@ def _display_output_tree(
         console.print(f"  └── {pdf_name}")
 
     console.print()
+
+
+# ------------------------------------------------------------------
+# Interactive mode callback
+# ------------------------------------------------------------------
+
+_STAGE_DESCRIPTIONS: dict[int, str] = {
+    1: "JD analysis complete",
+    2: "Experience selection complete",
+    3: "Content tailoring complete",
+    4: "YAML structuring complete",
+    5: "Review complete",
+}
+
+
+class _InteractiveCallback:
+    """Stage callback for interactive mode.
+
+    Displays stage results and prompts the user to continue or stop.
+    """
+
+    def on_stage_complete(
+        self,
+        stage_number: int,
+        stage_name: str,
+        metadata: StageMetadata,
+    ) -> bool:
+        """Display stage result and ask user whether to continue."""
+        desc = _STAGE_DESCRIPTIONS.get(stage_number, stage_name)
+        console.print(
+            f"  [green]✓[/green] Stage {stage_number}: {desc} "
+            f"({metadata.duration_seconds:.1f}s, "
+            f"model={metadata.model})"
+        )
+
+        # Don't prompt after the last stage
+        if stage_number >= 5:
+            return True
+
+        console.print()
+        return Confirm.ask(
+            "  Continue to next stage?",
+            default=True,
+            console=console,
+        )

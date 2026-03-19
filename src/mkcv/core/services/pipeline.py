@@ -20,6 +20,7 @@ from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.ports.artifacts import ArtifactStorePort
 from mkcv.core.ports.llm import LLMPort
 from mkcv.core.ports.prompts import PromptLoaderPort
+from mkcv.core.ports.stage_callback import StageCallbackPort
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ class PipelineService:
         *,
         output_dir: Path,
         from_stage: int = 1,
+        stage_callback: StageCallbackPort | None = None,
     ) -> PipelineResult:
         """Run the full pipeline from JD + KB to structured resume.
 
@@ -118,6 +120,8 @@ class PipelineService:
             kb_path: Path to knowledge base file.
             output_dir: Directory for pipeline artifacts.
             from_stage: Resume from this stage number (1-5).
+            stage_callback: Optional callback invoked after each stage.
+                Return False from the callback to stop the pipeline early.
 
         Returns:
             PipelineResult with metadata about the run.
@@ -136,22 +140,29 @@ class PipelineService:
             from_stage,
         )
 
+        stopped_early = False
+        review_score = 0
+
         # Stage 1: Analyze JD
         if from_stage <= 1:
             jd_analysis, meta = await self._analyze_jd(jd_text, run_dir=output_dir)
             stages.append(meta)
+            if not self._should_continue(stage_callback, meta):
+                stopped_early = True
         else:
             jd_analysis = self._load_stage_artifact(
                 "stage1_analysis", JDAnalysis, run_dir=output_dir
             )
 
         # Stage 2: Select experience
-        if from_stage <= 2:
+        if not stopped_early and from_stage <= 2:
             selection, meta = await self._select_experience(
                 jd_analysis, kb_text, run_dir=output_dir
             )
             stages.append(meta)
-        else:
+            if not self._should_continue(stage_callback, meta):
+                stopped_early = True
+        elif not stopped_early:
             selection = self._load_stage_artifact(
                 "stage2_selection",
                 ExperienceSelection,
@@ -159,18 +170,20 @@ class PipelineService:
             )
 
         # Stage 3: Tailor content
-        if from_stage <= 3:
+        if not stopped_early and from_stage <= 3:
             content, meta = await self._tailor_content(
                 jd_analysis, selection, kb_text, run_dir=output_dir
             )
             stages.append(meta)
-        else:
+            if not self._should_continue(stage_callback, meta):
+                stopped_early = True
+        elif not stopped_early:
             content = self._load_stage_artifact(
                 "stage3_content", TailoredContent, run_dir=output_dir
             )
 
         # Stage 4: Structure YAML
-        if from_stage <= 4:
+        if not stopped_early and from_stage <= 4:
             resume_yaml, meta = await self._structure_yaml(
                 content, kb_text, run_dir=output_dir
             )
@@ -179,18 +192,25 @@ class PipelineService:
                 "resume.yaml", resume_yaml, output_dir=output_dir
             )
             output_paths["resume_yaml"] = str(yaml_path)
-        else:
+            if not self._should_continue(stage_callback, meta):
+                stopped_early = True
+        elif not stopped_early:
             yaml_path = output_dir / "resume.yaml"
             resume_yaml = yaml_path.read_text(encoding="utf-8")
 
-        # Stage 5: Review
-        review, meta = await self._review(
-            resume_yaml, jd_analysis, kb_text, run_dir=output_dir
-        )
-        stages.append(meta)
+        # Stage 5: Review (skipped if stopped early)
+        if not stopped_early:
+            review, meta = await self._review(
+                resume_yaml, jd_analysis, kb_text, run_dir=output_dir
+            )
+            stages.append(meta)
+            # Notify callback (return value ignored — no next stage)
+            self._should_continue(stage_callback, meta)
 
         total_duration = time.monotonic() - start_time
         total_cost = sum(s.cost_usd for s in stages)
+        if not stopped_early:
+            review_score = review.overall_score
 
         result = PipelineResult(
             run_id=run_id,
@@ -202,16 +222,23 @@ class PipelineService:
             stages=stages,
             total_cost_usd=total_cost,
             total_duration_seconds=round(total_duration, 2),
-            review_score=review.overall_score,
+            review_score=review_score,
             output_paths=output_paths,
         )
 
-        logger.info(
-            "Pipeline run %s completed in %.1fs (score=%d)",
-            run_id,
-            total_duration,
-            review.overall_score,
-        )
+        if stopped_early:
+            logger.info(
+                "Pipeline run %s stopped early after %d stages",
+                run_id,
+                len(stages),
+            )
+        else:
+            logger.info(
+                "Pipeline run %s completed in %.1fs (score=%d)",
+                run_id,
+                total_duration,
+                review_score,
+            )
 
         return result
 
@@ -487,6 +514,24 @@ class PipelineService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _should_continue(
+        callback: StageCallbackPort | None,
+        meta: StageMetadata,
+    ) -> bool:
+        """Check if the pipeline should continue after a stage.
+
+        Args:
+            callback: Optional stage callback (interactive mode).
+            meta: Metadata for the just-completed stage.
+
+        Returns:
+            True to continue, False to stop.
+        """
+        if callback is None:
+            return True
+        return callback.on_stage_complete(meta.stage_number, meta.stage_name, meta)
 
     async def _call_structured(
         self,

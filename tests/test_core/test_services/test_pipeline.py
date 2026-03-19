@@ -20,6 +20,7 @@ from mkcv.core.models.requirement import Requirement
 from mkcv.core.models.review_report import ReviewReport
 from mkcv.core.models.selected_experience import SelectedExperience
 from mkcv.core.models.skill_group import SkillGroup
+from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.models.tailored_bullet import TailoredBullet
 from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.models.tailored_role import TailoredRole
@@ -1014,3 +1015,105 @@ class TestPerStageProviders:
         output_dir = tmp_path / "output"
         with pytest.raises(PipelineStageError, match="nonexistent"):
             await pipeline.generate(jd_file, kb_file, output_dir=output_dir)
+
+
+# ------------------------------------------------------------------
+# Test: Interactive mode (stage_callback)
+# ------------------------------------------------------------------
+
+
+class _TrackingCallback:
+    """Test callback that records calls and optionally stops."""
+
+    def __init__(self, stop_after: int | None = None) -> None:
+        self._stop_after = stop_after
+        self.calls: list[int] = []
+
+    def on_stage_complete(
+        self,
+        stage_number: int,
+        stage_name: str,
+        metadata: StageMetadata,
+    ) -> bool:
+        self.calls.append(stage_number)
+        if self._stop_after is not None:
+            return stage_number < self._stop_after
+        return True
+
+
+class TestInteractiveMode:
+    """Tests for stage_callback (interactive mode) support."""
+
+    async def test_callback_called_for_each_stage(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        cb = _TrackingCallback()
+        output_dir = tmp_path / "output"
+        await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, stage_callback=cb
+        )
+        assert cb.calls == [1, 2, 3, 4, 5]
+
+    async def test_callback_stops_after_stage_1(
+        self,
+        pipeline: PipelineService,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        cb = _TrackingCallback(stop_after=1)
+        output_dir = tmp_path / "output"
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, stage_callback=cb
+        )
+        assert len(result.stages) == 1
+        assert cb.calls == [1]
+        assert len(stub_llm.call_log) == 1
+
+    async def test_callback_stops_after_stage_3(
+        self,
+        pipeline: PipelineService,
+        stub_llm: StubLLMAdapter,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        cb = _TrackingCallback(stop_after=3)
+        output_dir = tmp_path / "output"
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, stage_callback=cb
+        )
+        assert len(result.stages) == 3
+        assert cb.calls == [1, 2, 3]
+
+    async def test_stopped_early_has_zero_review_score(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        cb = _TrackingCallback(stop_after=2)
+        output_dir = tmp_path / "output"
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, stage_callback=cb
+        )
+        assert result.review_score == 0
+
+    async def test_no_callback_runs_all_stages(
+        self,
+        pipeline: PipelineService,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        output_dir = tmp_path / "output"
+        result = await pipeline.generate(
+            jd_file, kb_file, output_dir=output_dir, stage_callback=None
+        )
+        assert len(result.stages) == 5
