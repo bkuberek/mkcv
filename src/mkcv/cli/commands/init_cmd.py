@@ -41,6 +41,7 @@ def init_command(
         console.print(
             f"  [yellow]Workspace already exists at {target}/[/yellow]\n"
             "  To reinitialize, remove mkcv.toml first.\n"
+            "  Existing files will not be overwritten.\n"
         )
         return
 
@@ -55,7 +56,11 @@ def init_command(
 
 
 def _print_created_summary(workspace_root: Path) -> None:
-    """Print a summary of the files and directories created."""
+    """Print a summary of the files and directories created or preserved."""
+    # Track which files existed before init ran. Files written by init
+    # will have an mtime >= the mkcv.toml (which is always freshly created).
+    toml_mtime = (workspace_root / "mkcv.toml").stat().st_mtime
+
     items = [
         ("mkcv.toml", True),
         ("knowledge-base/career.md", True),
@@ -63,13 +68,19 @@ def _print_created_summary(workspace_root: Path) -> None:
         ("applications/", False),
         ("templates/", False),
         (".gitignore", True),
+        ("README.md", True),
     ]
 
     for name, is_file in items:
         full_path = workspace_root / name.rstrip("/")
-        if (is_file and full_path.is_file()) or (not is_file and full_path.is_dir()):
-            console.print(f"  [green]\u2713[/green] Created {name}")
-        else:
+        exists = (is_file and full_path.is_file()) or (
+            not is_file and full_path.is_dir()
+        )
+        if not exists:
             console.print(f"  [red]\u2717[/red] Missing {name}")
+        elif is_file and full_path.stat().st_mtime < toml_mtime:
+            console.print(f"  [blue]\u2714[/blue] Kept existing {name}")
+        else:
+            console.print(f"  [green]\u2713[/green] Created {name}")
 
     console.print()

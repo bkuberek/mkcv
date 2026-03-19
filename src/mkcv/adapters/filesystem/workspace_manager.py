@@ -305,6 +305,18 @@ model = "anthropic/claude-sonnet-4"
 """
 
 
+def _write_if_missing(path: Path, content: str) -> None:
+    """Write content to a file only if it does not already exist.
+
+    This prevents accidental data loss when re-initializing a workspace.
+    """
+    if path.exists():
+        logger.info("Skipped (already exists): %s", path)
+        return
+    path.write_text(content, encoding="utf-8")
+    logger.info("Created %s", path)
+
+
 _MAX_SLUG_LENGTH = 64
 _MAX_COLLISION_ATTEMPTS = 99
 
@@ -319,12 +331,17 @@ class WorkspaceManager:
     def create_workspace(self, path: Path) -> Path:
         """Create a new mkcv workspace at the given path.
 
-        Creates:
+        Creates (only if they don't already exist):
             - mkcv.toml (workspace config)
             - knowledge-base/ (with career.md and voice.md templates)
             - applications/ (empty)
             - templates/ (empty)
             - .gitignore
+            - README.md
+
+        Existing files are NEVER overwritten. Only missing files are
+        created. This makes it safe to re-run on an existing workspace
+        (e.g. after deleting mkcv.toml to reset config).
 
         Args:
             path: Directory to initialize.
@@ -334,12 +351,26 @@ class WorkspaceManager:
 
         Raises:
             WorkspaceExistsError: If mkcv.toml already exists.
+            WorkspaceError: If existing user data would be at risk.
         """
         workspace_root = path.resolve()
         toml_path = workspace_root / "mkcv.toml"
 
         if toml_path.exists():
             raise WorkspaceExistsError(f"Workspace already exists: {toml_path}")
+
+        # Safety check: detect existing workspace content even without
+        # mkcv.toml. Warn but proceed — we only create missing files.
+        workspace_markers = ("knowledge-base", "applications", "templates")
+        has_existing_content = any(
+            (workspace_root / marker).is_dir() for marker in workspace_markers
+        )
+        if has_existing_content:
+            logger.warning(
+                "Directory %s contains existing workspace content. "
+                "Only missing files will be created; nothing will be overwritten.",
+                workspace_root,
+            )
 
         # Create root directory
         try:
@@ -355,33 +386,28 @@ class WorkspaceManager:
         logger.info("Created %s", toml_path)
 
         # Create directories
-        for dir_name in ("knowledge-base", "applications", "templates"):
+        for dir_name in workspace_markers:
             dir_path = workspace_root / dir_name
             dir_path.mkdir(exist_ok=True)
             logger.debug("Ensured directory: %s", dir_path)
 
-        # Create knowledge-base/career.md
-        career_path = workspace_root / "knowledge-base" / "career.md"
-        career_path.write_text(
+        # Create template files — NEVER overwrite existing files
+        _write_if_missing(
+            workspace_root / "knowledge-base" / "career.md",
             _CAREER_MD_TEMPLATE.format(name="Your Name"),
-            encoding="utf-8",
         )
-        logger.info("Created %s", career_path)
-
-        # Create knowledge-base/voice.md
-        voice_path = workspace_root / "knowledge-base" / "voice.md"
-        voice_path.write_text(_VOICE_MD_TEMPLATE, encoding="utf-8")
-        logger.info("Created %s", voice_path)
-
-        # Create .gitignore
-        gitignore_path = workspace_root / ".gitignore"
-        gitignore_path.write_text(_GITIGNORE_TEMPLATE, encoding="utf-8")
-        logger.info("Created %s", gitignore_path)
-
-        # Create README.md (generated from current mkcv state)
-        readme_path = workspace_root / "README.md"
-        readme_path.write_text(_build_readme(), encoding="utf-8")
-        logger.info("Created %s", readme_path)
+        _write_if_missing(
+            workspace_root / "knowledge-base" / "voice.md",
+            _VOICE_MD_TEMPLATE,
+        )
+        _write_if_missing(
+            workspace_root / ".gitignore",
+            _GITIGNORE_TEMPLATE,
+        )
+        _write_if_missing(
+            workspace_root / "README.md",
+            _build_readme(),
+        )
 
         return workspace_root
 

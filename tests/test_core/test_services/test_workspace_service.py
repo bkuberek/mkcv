@@ -68,6 +68,100 @@ class TestWorkspaceService:
         assert len(apps) == 1
 
 
+class TestWorkspaceInitSafety:
+    """Tests that init never overwrites existing user files."""
+
+    def test_init_preserves_existing_career_md(self, tmp_path: Path) -> None:
+        """Existing career.md must NEVER be overwritten."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        kb_dir = ws / "knowledge-base"
+        kb_dir.mkdir()
+        career = kb_dir / "career.md"
+        career.write_text("My precious career data")
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        svc.init_workspace(ws)
+
+        assert career.read_text() == "My precious career data"
+
+    def test_init_preserves_existing_voice_md(self, tmp_path: Path) -> None:
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        kb_dir = ws / "knowledge-base"
+        kb_dir.mkdir()
+        voice = kb_dir / "voice.md"
+        voice.write_text("My custom voice")
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        svc.init_workspace(ws)
+
+        assert voice.read_text() == "My custom voice"
+
+    def test_init_preserves_existing_gitignore(self, tmp_path: Path) -> None:
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        gitignore = ws / ".gitignore"
+        gitignore.write_text("my-custom-ignore")
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        svc.init_workspace(ws)
+
+        assert gitignore.read_text() == "my-custom-ignore"
+
+    def test_init_preserves_existing_readme(self, tmp_path: Path) -> None:
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        readme = ws / "README.md"
+        readme.write_text("My custom readme")
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        svc.init_workspace(ws)
+
+        assert readme.read_text() == "My custom readme"
+
+    def test_init_preserves_existing_applications(self, tmp_path: Path) -> None:
+        """Existing application dirs must survive re-init."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        apps = ws / "applications" / "acme" / "2026-03-engineer"
+        apps.mkdir(parents=True)
+        jd = apps / "jd.txt"
+        jd.write_text("important JD")
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        svc.init_workspace(ws)
+
+        assert jd.read_text() == "important JD"
+
+    def test_init_creates_missing_files_alongside_existing(
+        self, tmp_path: Path
+    ) -> None:
+        """When some files exist, init creates only the missing ones."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        kb_dir = ws / "knowledge-base"
+        kb_dir.mkdir()
+        career = kb_dir / "career.md"
+        career.write_text("existing career")
+
+        manager = WorkspaceManager()
+        svc = WorkspaceService(workspace=manager)
+        svc.init_workspace(ws)
+
+        # career.md preserved
+        assert career.read_text() == "existing career"
+        # voice.md created (was missing)
+        assert (kb_dir / "voice.md").is_file()
+        # mkcv.toml created
+        assert (ws / "mkcv.toml").is_file()
+
+
 class TestWorkspaceReadme:
     """Tests that the generated workspace README stays in sync."""
 
