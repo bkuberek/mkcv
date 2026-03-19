@@ -66,6 +66,7 @@ def _print_created_summary(workspace_root: Path) -> None:
         ("knowledge-base/career.md", True),
         ("knowledge-base/voice.md", True),
         ("applications/", False),
+        ("resumes/", False),
         ("templates/", False),
         (".gitignore", True),
         ("README.md", True),

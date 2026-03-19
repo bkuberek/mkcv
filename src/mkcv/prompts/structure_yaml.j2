@@ -32,11 +32,16 @@ text like "Your Name" or "your@email.com".
 
 ### Step 2: Build the YAML
 
-The output must follow this exact structure:
+The output must follow this exact RenderCV structure. Only these fields exist —
+do NOT invent fields like `summary`, `fluency`, `language`, or `certifications`.
+
+Valid top-level `cv` fields: name, headline, location, email, phone, website,
+social_networks, sections. NO other fields are allowed.
 
 ```yaml
 cv:
   name: "Full Name"
+  headline: "Mission statement / professional headline"
   location: "City, Country"
   email: "email@example.com"
   phone: "+1-234-567-8900"       # omit if not in KB
@@ -46,9 +51,9 @@ cv:
       username: johndoe
     - network: GitHub
       username: johndoe
-  summary: "Mission statement text here"
   sections:
     experience:
+      # ExperienceEntry: company, position, location, start_date, end_date, highlights
       - company: "Company Name"
         position: "Job Title"
         location: "City, Country"  # omit if null in tailored content
@@ -58,10 +63,12 @@ cv:
           - "First bullet (strongest/most relevant)"
           - "Second bullet"
     skills:
+      # OneLineEntry: label, details
       - label: "Category Name"
         details: "Skill 1, Skill 2, Skill 3"
     # Include these sections ONLY if data exists in the KB:
     education:
+      # EducationEntry: institution, area, degree, start_date, end_date, highlights
       - institution: "University Name"
         area: "Field of Study"
         degree: "BS/MS/PhD"
@@ -70,14 +77,18 @@ cv:
         highlights:              # omit if no notable items
           - "Relevant coursework or achievement"
     publications:
+      # PublicationEntry: title, authors, url, date
       - title: "Publication Title"
         authors:
           - "Author Name"
         url: "https://..."
         date: "2023-01"
-    certifications:
-      - name: "Certification Name"
-        date: "2023-01"
+    languages:
+      # OneLineEntry: label, details — NOT language/fluency objects
+      - label: "Portuguese"
+        details: "Native"
+      - label: "English"
+        details: "Proficient"
 design:
   theme: sb2nov
 ```
@@ -87,9 +98,10 @@ design:
 1. **Use rewritten bullets** — take the `rewritten` text from tailored_content
    roles, NOT the originals. These are already optimized.
 
-2. **summary** = the mission statement `text` from tailored_content.
+2. **headline** = the mission statement `text` from tailored_content. This is
+   a top-level `cv` field, NOT inside `sections`. Do NOT use `summary`.
 
-3. **Skills** — each SkillGroup becomes one entry with `label` and `details`
+3. **Skills** — each SkillGroup becomes a OneLineEntry with `label` and `details`
    (skills joined with ", "). Preserve the order from tailored_content.
 
 4. **Experience ordering** — maintain the order from tailored_content (already
@@ -98,16 +110,24 @@ design:
 5. **Education** — include only if found in the KB. Extract institution, degree,
    field, and dates. Omit if not mentioned.
 
-6. **Publications / Certifications** — include only if found in the KB.
+6. **Publications** — include only if found in the KB.
 
 7. **Earlier experience** — if `earlier_experience` is not null, you may add a
    brief "Other Experience" or similar section, or incorporate it as a final
    experience entry with a single highlight.
 
-8. **Languages** — if `languages` is not null, add a languages section.
+8. **Languages** — if found in the KB, add a `languages` section using
+   OneLineEntry format: `label: "Language"`, `details: "Level"`.
+   Do NOT use `language`/`fluency` fields — those don't exist in RenderCV.
 
 9. **Dates** — always use "YYYY-MM" format. Use "present" for current roles.
 
 10. **No markdown fences** — output raw YAML only. No ```yaml wrapper.
+
+11. **CRITICAL: Only use valid RenderCV fields.** The `cv` object has: name,
+    headline, location, email, phone, website, social_networks, sections.
+    Sections contain typed entries (ExperienceEntry, EducationEntry,
+    OneLineEntry, BulletEntry, PublicationEntry, NormalEntry). Do NOT invent
+    fields like `summary`, `certifications`, `fluency`, or `language`.
 
 Respond with valid YAML only. No commentary, no code fences.

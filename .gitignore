@@ -37,5 +37,6 @@ htmlcov/
 
 # mkcv specific
 **/.mkcv/
+output/
 .secrets.toml
 *.secrets.toml

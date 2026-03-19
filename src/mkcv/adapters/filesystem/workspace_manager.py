@@ -283,13 +283,17 @@ model = "anthropic/claude-sonnet-4"
 ├── knowledge-base/
 │   ├── career.md                 # Your career history
 │   └── voice.md                  # Writing tone preferences
-├── applications/
+├── applications/                 # Targeted resumes (with JD)
 │   └── {{company}}/
 │       └── {{date-position}}/
 │           ├── application.toml  # Application metadata
 │           ├── jd.txt            # Job description
 │           ├── resume.yaml       # Generated resume
 │           └── resume.pdf        # Rendered PDF
+├── resumes/                      # Generic resumes (no JD)
+│   └── {{date}}-{{target}}/
+│       ├── resume.yaml
+│       └── resume.pdf
 └── templates/                    # Custom prompt overrides
 ```
 
@@ -361,7 +365,12 @@ class WorkspaceManager:
 
         # Safety check: detect existing workspace content even without
         # mkcv.toml. Warn but proceed — we only create missing files.
-        workspace_markers = ("knowledge-base", "applications", "templates")
+        workspace_markers = (
+            "knowledge-base",
+            "applications",
+            "resumes",
+            "templates",
+        )
         has_existing_content = any(
             (workspace_root / marker).is_dir() for marker in workspace_markers
         )

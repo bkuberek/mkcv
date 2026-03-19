@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import re
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -138,7 +140,14 @@ def generate_command(
         jd_display = f"<generic: {target}>" if target else "<generic resume>"
 
     # ---- Workspace vs standalone mode ----
-    if settings.in_workspace:
+    # Generic mode (no JD): skip application directory creation even in a
+    # workspace. Resolve KB from workspace config but output to .mkcv/.
+    is_generic = jd is None
+    use_workspace_mode = (
+        settings.in_workspace and not is_generic and company and position
+    )
+
+    if use_workspace_mode:
         _generate_workspace_mode(
             jd_text=jd_text,
             jd_display=jd_display,
@@ -152,7 +161,21 @@ def generate_command(
             render_pdf=render,
             interactive=interactive,
         )
+    elif settings.in_workspace and not is_generic and (not company or not position):
+        # Targeted resume in workspace but missing company/position
+        console.print(
+            "[red]Error:[/red] --company and --position are required "
+            "when using --jd in a workspace.\n"
+            "  For a generic resume, omit --jd."
+        )
+        sys.exit(2)
     else:
+        # Standalone mode, or generic mode inside a workspace.
+        # In a workspace, resolve KB from config if not provided.
+        if kb is None and settings.in_workspace and settings.workspace_root:
+            kb_relative = settings.workspace.knowledge_base
+            kb = settings.workspace_root / kb_relative
+
         _generate_standalone_mode(
             jd_text=jd_text,
             jd_display=jd_display,
@@ -164,6 +187,56 @@ def generate_command(
             render_pdf=render,
             interactive=interactive,
         )
+
+
+def _default_output_dir(jd_display: str) -> Path:
+    """Build a dated output directory for resume generation.
+
+    In a workspace:
+        Generic:  resumes/{YYYY-MM}-{slug}/
+        Targeted: handled by workspace mode, not this function.
+    Outside a workspace:
+        output/{YYYY-MM}-{slug}/
+
+    All output goes under a parent directory (resumes/ or output/) to
+    avoid scattering date-named directories into the user's CWD.
+
+    Handles collisions by appending -2, -3, etc.
+    """
+    date_prefix = date.today().strftime("%Y-%m")
+
+    # Extract a slug from the display label
+    if jd_display.startswith("<generic:"):
+        raw = jd_display.removeprefix("<generic:").removesuffix(">").strip()
+    elif jd_display == "<generic resume>":
+        raw = "generic"
+    else:
+        # Targeted standalone (JD file/URL) — use the source name
+        raw = (
+            Path(jd_display).stem
+            if "/" in jd_display or "." in jd_display
+            else jd_display
+        )
+        raw = raw[:40]
+
+    slug = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")[:40] or "resume"
+    dir_name = f"{date_prefix}-{slug}"
+
+    if settings.in_workspace and settings.workspace_root:
+        base = settings.workspace_root / "resumes"
+    else:
+        base = Path.cwd() / "output"
+
+    output = base / dir_name
+
+    # Handle collisions (same target generated multiple times in one month)
+    if output.exists():
+        for i in range(2, 100):
+            candidate = base / f"{dir_name}-{i}"
+            if not candidate.exists():
+                return candidate
+
+    return output
 
 
 def _build_generic_jd(target: str | None) -> str:
@@ -261,12 +334,9 @@ def _generate_workspace_mode(
         console.print(f"[red]Error:[/red] Knowledge base not found: {kb}")
         sys.exit(2)
 
-    # Company and position are required in workspace mode
-    if company is None or position is None:
-        console.print(
-            "[red]Error:[/red] --company and --position are required in workspace mode."
-        )
-        sys.exit(2)
+    # Company and position are guaranteed by the caller dispatch logic
+    assert company is not None
+    assert position is not None
 
     console.print("\n  [bold]mkcv generate[/bold] — workspace mode")
     console.print(f"  Workspace: {workspace_root}")
@@ -346,8 +416,8 @@ def _generate_standalone_mode(
         console.print(f"[red]Error:[/red] Knowledge base not found: {kb}")
         sys.exit(2)
 
-    # Create a .mkcv run directory in CWD
-    run_dir = output_dir or (Path.cwd() / ".mkcv")
+    # Output directory: explicit flag, or auto-generated with date + slug
+    run_dir = output_dir or _default_output_dir(jd_display)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     console.print("\n  [bold]mkcv generate[/bold] — standalone mode")
@@ -457,14 +527,20 @@ def _display_pipeline_summary(result: PipelineResult) -> None:
     """Display a summary of pipeline stage results."""
     for stage in result.stages:
         summary = _stage_summary(stage.stage_number, stage.stage_name, result)
+        model_short = stage.model.split("/")[-1]  # strip provider prefix
+        cost_str = f"${stage.cost_usd:.4f}" if stage.cost_usd > 0 else "free"
         console.print(
             f"  [green]\u2713[/green] Stage {stage.stage_number}: "
-            f"{summary} ({stage.duration_seconds:.1f}s)"
+            f"{summary} [dim]({stage.duration_seconds:.1f}s, "
+            f"{model_short}, {cost_str})[/dim]"
         )
 
+    total_cost = sum(s.cost_usd for s in result.stages)
+    cost_display = f"${total_cost:.4f}" if total_cost > 0 else "free"
     console.print()
     console.print(
         f"  Score: [bold]{result.review_score}[/bold]/100  "
+        f"  Cost: {cost_display}  "
         f"  Duration: {result.total_duration_seconds:.1f}s"
     )
 
