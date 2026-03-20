@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: write
-  id-token: write
-
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -43,23 +39,24 @@ jobs:
       - name: Run tests
         run: uv run pytest --tb=short
 
-  release:
+  version:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    concurrency: release
+    concurrency: version
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Semantic Release
-        id: release
-        uses: python-semantic-release/python-semantic-release@v9
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          git_committer_name: "github-actions[bot]"
-          git_committer_email: "github-actions[bot]@users.noreply.github.com"
+      - run: pip install python-semantic-release
+      - name: Bump version
+        run: semantic-release version --no-vcs-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push version commit and tag
+        run: git push origin main --follow-tags
