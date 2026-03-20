@@ -70,10 +70,13 @@ class TestCreateLLMAdapter:
         assert isinstance(adapter, RetryingLLMAdapter)
         assert isinstance(_unwrap(adapter), OpenAIAdapter)
 
-    def test_falls_back_to_stub_when_no_api_key(self) -> None:
+    def test_falls_back_to_stub_when_no_api_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         config = _make_config(provider="anthropic")
         adapter = _create_llm_adapter("anthropic", config)
-        assert isinstance(adapter, StubLLMAdapter)
+        assert isinstance(_unwrap(adapter), StubLLMAdapter)
 
     def test_uses_env_var_for_anthropic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-key")

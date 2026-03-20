@@ -19,7 +19,9 @@ class TestWorkspaceConfig:
 
     def test_defaults(self) -> None:
         config = WorkspaceConfig()
-        assert config.version == "0.1.0"
+        from mkcv import __version__
+
+        assert config.version == __version__
 
     def test_default_paths(self) -> None:
         config = WorkspaceConfig()
