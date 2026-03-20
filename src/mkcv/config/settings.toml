@@ -14,27 +14,27 @@ interactive = false
 
 [default.pipeline.stages.analyze]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-haiku-4-5-20251001"
 temperature = 0.2
 
 [default.pipeline.stages.select]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-opus-4-20250514"
 temperature = 0.3
 
 [default.pipeline.stages.tailor]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-opus-4-20250514"
 temperature = 0.5
 
 [default.pipeline.stages.structure]
-provider = "openai"
-model = "gpt-4o"
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
 temperature = 0.1
 
 [default.pipeline.stages.review]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-opus-4-20250514"
 temperature = 0.3
 
 [default.cover_letter]
@@ -42,12 +42,12 @@ auto_render = true
 
 [default.cover_letter.stages.generate]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-opus-4-20250514"
 temperature = 0.6
 
 [default.cover_letter.stages.review]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-haiku-4-5-20251001"
 temperature = 0.2
 
 # Cover letter layout/design settings

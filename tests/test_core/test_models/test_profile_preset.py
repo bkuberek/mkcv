@@ -113,23 +113,33 @@ class TestBuiltInPresets:
     def test_comprehensive_includes_earlier_experience(self) -> None:
         assert BUILT_IN_PRESETS["comprehensive"].include_earlier_experience is True
 
-    def test_concise_uses_sonnet(self) -> None:
+    def test_concise_uses_haiku(self) -> None:
         preset = BUILT_IN_PRESETS["concise"]
         for sc in preset.stage_configs.values():
             assert sc.provider == "anthropic"
-            assert "sonnet" in sc.model
+            assert "haiku" in sc.model
 
-    def test_standard_uses_sonnet(self) -> None:
+    def test_standard_uses_smart_mix(self) -> None:
         preset = BUILT_IN_PRESETS["standard"]
         for sc in preset.stage_configs.values():
             assert sc.provider == "anthropic"
-            assert "sonnet" in sc.model
+        # Smart mix: stages 1,4 = Haiku; stages 2,3,5 = Opus
+        assert "haiku" in preset.stage_configs[1].model
+        assert "opus" in preset.stage_configs[2].model
+        assert "opus" in preset.stage_configs[3].model
+        assert "haiku" in preset.stage_configs[4].model
+        assert "opus" in preset.stage_configs[5].model
 
-    def test_comprehensive_uses_opus(self) -> None:
+    def test_comprehensive_uses_smart_mix(self) -> None:
         preset = BUILT_IN_PRESETS["comprehensive"]
         for sc in preset.stage_configs.values():
             assert sc.provider == "anthropic"
-            assert "opus" in sc.model
+        # Smart mix: stages 1,4 = Haiku; stages 2,3,5 = Opus
+        assert "haiku" in preset.stage_configs[1].model
+        assert "opus" in preset.stage_configs[2].model
+        assert "opus" in preset.stage_configs[3].model
+        assert "haiku" in preset.stage_configs[4].model
+        assert "opus" in preset.stage_configs[5].model
 
     def test_all_presets_have_five_stages(self) -> None:
         for name, preset in BUILT_IN_PRESETS.items():

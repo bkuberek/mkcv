@@ -52,6 +52,42 @@ _SONNET_STAGE_CONFIGS: dict[int, StageConfig] = {
     ),
 }
 
+_HAIKU_STAGE_CONFIGS: dict[int, StageConfig] = {
+    1: StageConfig(
+        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.2
+    ),
+    2: StageConfig(
+        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.3
+    ),
+    3: StageConfig(
+        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.5
+    ),
+    4: StageConfig(
+        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.1
+    ),
+    5: StageConfig(
+        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.3
+    ),
+}
+
+_SMART_MIXED_STAGE_CONFIGS: dict[int, StageConfig] = {
+    1: StageConfig(
+        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.2
+    ),
+    2: StageConfig(
+        provider="anthropic", model="claude-opus-4-20250514", temperature=0.3
+    ),
+    3: StageConfig(
+        provider="anthropic", model="claude-opus-4-20250514", temperature=0.5
+    ),
+    4: StageConfig(
+        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.1
+    ),
+    5: StageConfig(
+        provider="anthropic", model="claude-opus-4-20250514", temperature=0.3
+    ),
+}
+
 _OPUS_STAGE_CONFIGS: dict[int, StageConfig] = {
     1: StageConfig(
         provider="anthropic", model="claude-opus-4-20250514", temperature=0.2
@@ -81,29 +117,29 @@ _OLLAMA_STAGE_CONFIGS: dict[int, StageConfig] = {
 BUILT_IN_PRESETS: dict[str, Preset] = {
     "concise": Preset(
         name="concise",
-        description="1-page resume with highlights only",
+        description="1-page resume with highlights only (Haiku — fast & affordable)",
         density=ContentDensity.CONCISE,
         page_budget="1",
         max_roles=3,
         max_bullets_primary=4,
         max_bullets_secondary=2,
         include_earlier_experience=False,
-        stage_configs=dict(_SONNET_STAGE_CONFIGS),
+        stage_configs=dict(_HAIKU_STAGE_CONFIGS),
     ),
     "standard": Preset(
         name="standard",
-        description="1-2 page balanced resume",
+        description="1-2 page balanced resume (smart Haiku/Opus mix)",
         density=ContentDensity.STANDARD,
         page_budget="1-2",
         max_roles=4,
         max_bullets_primary=5,
         max_bullets_secondary=3,
         include_earlier_experience=True,
-        stage_configs=dict(_SONNET_STAGE_CONFIGS),
+        stage_configs=dict(_SMART_MIXED_STAGE_CONFIGS),
     ),
     "comprehensive": Preset(
         name="comprehensive",
-        description="2+ page resume with full career detail",
+        description="2+ page resume with full career detail (smart Haiku/Opus mix)",
         density=ContentDensity.COMPREHENSIVE,
         page_budget="2+",
         max_roles=6,
@@ -111,7 +147,7 @@ BUILT_IN_PRESETS: dict[str, Preset] = {
         max_bullets_secondary=5,
         include_earlier_experience=True,
         max_tokens=16384,
-        stage_configs=dict(_OPUS_STAGE_CONFIGS),
+        stage_configs=dict(_SMART_MIXED_STAGE_CONFIGS),
     ),
 }
 

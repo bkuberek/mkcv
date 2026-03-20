@@ -180,7 +180,12 @@ class TestResolveStageConfigs:
         configs = _resolve_stage_configs(config, preset_name="premium")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
-            assert configs[stage_num].model == "claude-sonnet-4-20250514"
+        # Premium maps to standard which uses smart Haiku/Opus mix
+        assert "haiku" in configs[1].model
+        assert "opus" in configs[2].model
+        assert "opus" in configs[3].model
+        assert "haiku" in configs[4].model
+        assert "opus" in configs[5].model
 
     def test_budget_preset_ignores_config_settings(self) -> None:
         config = MagicMock()
@@ -200,26 +205,36 @@ class TestResolveStageConfigs:
         assert configs[3].temperature == 0.5
         assert configs[4].temperature == 0.1
 
-    def test_concise_preset_uses_sonnet(self) -> None:
+    def test_concise_preset_uses_haiku(self) -> None:
         config = MagicMock()
         configs = _resolve_stage_configs(config, preset_name="concise")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
-            assert "sonnet" in configs[stage_num].model
+            assert "haiku" in configs[stage_num].model
 
-    def test_standard_preset_uses_sonnet(self) -> None:
+    def test_standard_preset_uses_smart_mix(self) -> None:
         config = MagicMock()
         configs = _resolve_stage_configs(config, preset_name="standard")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
-            assert "sonnet" in configs[stage_num].model
+        # Smart mix: stages 1,4 = Haiku; stages 2,3,5 = Opus
+        assert "haiku" in configs[1].model
+        assert "opus" in configs[2].model
+        assert "opus" in configs[3].model
+        assert "haiku" in configs[4].model
+        assert "opus" in configs[5].model
 
-    def test_comprehensive_preset_uses_opus(self) -> None:
+    def test_comprehensive_preset_uses_smart_mix(self) -> None:
         config = MagicMock()
         configs = _resolve_stage_configs(config, preset_name="comprehensive")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
-            assert "opus" in configs[stage_num].model
+        # Smart mix: stages 1,4 = Haiku; stages 2,3,5 = Opus
+        assert "haiku" in configs[1].model
+        assert "opus" in configs[2].model
+        assert "opus" in configs[3].model
+        assert "haiku" in configs[4].model
+        assert "opus" in configs[5].model
 
 
 class TestCreatePipelineServiceWithPreset:

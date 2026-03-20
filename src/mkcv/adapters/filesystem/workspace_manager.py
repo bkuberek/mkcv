@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 _MKCV_TOML_TEMPLATE = """\
 # mkcv workspace configuration
 # Docs: https://github.com/bkuberek/mkcv
+#
+# All settings are optional — sensible defaults are built in.
+# Uncomment sections below to customise. Values shown are the defaults.
 
 [workspace]
 version = "0.1.0"
@@ -39,30 +42,127 @@ application_pattern = "{company}/{position}/{date}"
 
 [defaults]
 theme = "sb2nov"
-profile = "premium"
+profile = "standard"
 
 # ── Rendering ───────────────────────────────────────────────────────
-# Theme controls the visual design of your resume. Run `mkcv themes`
-# to see all available themes and `mkcv themes --preview <name>` to
-# preview one.
+# Theme controls the visual design of your resume PDF. Run
+# `mkcv themes` to list themes, `mkcv themes --preview <name>`
+# to preview one.
 #
 # [rendering]
-# theme = "sb2nov"           # classic, engineeringresumes, moderncv, ...
-# font = "SourceSansPro"     # any system font
+# theme = "sb2nov"                  # classic, engineeringresumes, moderncv, ...
+# font = "SourceSansPro"            # any system font
 # font_size = "10pt"
-# page_size = "letterpaper"  # letterpaper or a4paper
+# page_size = "letterpaper"         # letterpaper or a4paper
 #
 # [rendering.overrides]
-# primary_color = "003366"   # hex color without #
+# primary_color = "003366"          # hex colour without #
+#
+# # Page margins — override RenderCV theme defaults
+# [rendering.page]
+# top_margin = "0.7in"
+# bottom_margin = "0.7in"
+# left_margin = "0.5in"
+# right_margin = "0.5in"
+#
+# # Header spacing below name/headline/connections
+# [rendering.header]
+# space_below_name = "0.15cm"
+# space_below_headline = "0.15cm"
+# space_below_connections = "0.3cm"
+#
+# # Experience section geometry
+# [rendering.entries]
+# date_and_location_width = "3.6cm"
+#
+# # Section heading style
+# [rendering.section_titles]
+# type = "with-full-line"
+# space_above = "0.3cm"
+# space_below = "0.15cm"
+#
+# # Line spacing and text alignment
+# [rendering.typography]
+# line_spacing = "0.7em"
+# alignment = "justified"
 
 # ── Pipeline ────────────────────────────────────────────────────────
-# Override AI providers per-stage. Most users don't need this — the
-# defaults use Anthropic Claude. Uncomment to customise.
+# Override AI provider/model per stage. The defaults use a smart mix:
+# Haiku for mechanical tasks, Opus for decisions and writing.
 #
 # [pipeline.stages.analyze]
-# provider = "openrouter"
-# model = "anthropic/claude-sonnet-4"
+# provider = "anthropic"
+# model = "claude-haiku-4-5-20251001"
 # temperature = 0.2
+#
+# [pipeline.stages.select]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.3
+#
+# [pipeline.stages.tailor]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.5
+#
+# [pipeline.stages.structure]
+# provider = "anthropic"
+# model = "claude-haiku-4-5-20251001"
+# temperature = 0.1
+#
+# [pipeline.stages.review]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.3
+
+# ── Cover Letter ────────────────────────────────────────────────────
+# Settings for cover letter generation (used with --cover-letter).
+#
+# [cover_letter]
+# auto_render = true
+#
+# [cover_letter.stages.generate]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.6
+#
+# [cover_letter.stages.review]
+# provider = "anthropic"
+# model = "claude-haiku-4-5-20251001"
+# temperature = 0.2
+#
+# # Cover letter page layout
+# [cover_letter.design]
+# page_size = "us-letter"
+# margin_top = "1.2in"
+# margin_bottom = "1in"
+# margin_left = "1in"
+# margin_right = "1in"
+# font = "Source Sans Pro"
+# font_size = "11pt"
+# name_size = "16pt"
+# line_spacing = "0.7em"
+# default_salutation = "Dear Hiring Manager,"
+
+# ── Voice ───────────────────────────────────────────────────────────
+# Writing-style guidelines applied during content generation.
+# For detailed control, edit knowledge-base/voice.md instead.
+#
+# [voice]
+# guidelines = ""
+
+# ── Providers ───────────────────────────────────────────────────────
+# API keys. Prefer environment variables (ANTHROPIC_API_KEY, etc.)
+# over storing keys here.
+#
+# [providers.anthropic]
+# api_key = ""           # prefer: export ANTHROPIC_API_KEY=sk-ant-...
+#
+# [providers.openai]
+# api_key = ""           # prefer: export OPENAI_API_KEY=sk-...
+#
+# [providers.openrouter]
+# api_key = ""           # prefer: export OPENROUTER_API_KEY=sk-or-...
 """
 
 _CAREER_MD_TEMPLATE = """\
@@ -315,11 +415,26 @@ mkcv themes                        # List available themes
 mkcv themes --preview sb2nov       # Preview a theme
 ```
 
-### Provider profiles
+## Presets
+
+Presets control which AI models are used at each pipeline stage. Choose a
+preset based on quality, speed, and cost trade-offs:
+
+| Preset | Models | Best for |
+|--------|--------|----------|
+| `concise` | Haiku for all stages | Fast iteration, short resumes |
+| `standard` | Haiku (mechanical) + Opus (decisions) | Default — balanced quality/cost |
+| `comprehensive` | Opus for all stages | Maximum quality, detailed resumes |
+| `budget` | Ollama (local) | Free, offline, no API key needed |
+
+The **standard** preset uses a smart-mixed allocation: Haiku handles
+mechanical tasks (JD analysis, YAML structuring) while Opus handles
+decisions and writing (experience selection, bullet tailoring, review).
 
 ```bash
-mkcv generate --jd job.txt --profile budget   # Ollama (free, local)
-mkcv generate --jd job.txt --profile premium  # Anthropic Claude (best quality)
+mkcv generate --jd job.txt --profile concise
+mkcv generate --jd job.txt --profile standard        # default
+mkcv generate --jd job.txt --profile comprehensive
 ```
 
 ### Using OpenRouter
@@ -335,6 +450,119 @@ model = "anthropic/claude-sonnet-4"
 [pipeline.stages.review]
 provider = "openrouter"
 model = "anthropic/claude-sonnet-4"
+```
+
+## Configuration
+
+All configuration lives in `mkcv.toml`. Settings are optional — sensible
+defaults are built in. The file is pre-populated with the most common options;
+uncomment what you need.
+
+### Resolution order
+
+Configuration is resolved in layers (highest priority wins):
+
+| Layer | Source | Example |
+|-------|--------|---------|
+| 1 | Built-in defaults | Bundled with mkcv |
+| 2 | Global user config | `~/.config/mkcv/settings.toml` |
+| 3 | Workspace config | `mkcv.toml` (this file) |
+| 4 | Environment variables | `MKCV_` prefix (e.g. `MKCV_RENDERING__THEME`) |
+| 5 | CLI flags | `--theme`, `--profile`, etc. |
+
+### Section reference
+
+| Section | Controls |
+|---------|----------|
+| `[workspace]` | Workspace version |
+| `[paths]` | Knowledge base, applications, templates directories |
+| `[naming]` | Company slug, application directory pattern |
+| `[defaults]` | Default theme and profile |
+| `[rendering]` | Resume PDF appearance — font, colours, margins, layout |
+| `[pipeline.stages.*]` | AI provider/model/temperature per pipeline stage |
+| `[cover_letter]` | Cover letter generation and design settings |
+| `[voice]` | Writing-style guidelines |
+| `[providers.*]` | API keys (prefer env vars instead) |
+
+### Rendering (fonts, colours, page size)
+
+```toml
+[rendering]
+theme = "classic"
+font = "Charter"
+font_size = "11pt"
+page_size = "a4paper"          # a4paper or letterpaper
+
+[rendering.overrides]
+primary_color = "004080"       # hex colour without #
+
+[rendering.page]
+top_margin = "0.7in"
+bottom_margin = "0.7in"
+left_margin = "0.5in"
+right_margin = "0.5in"
+```
+
+These apply to all resumes by default. You can override per-command with
+`--theme`.
+
+### Pipeline (AI provider per stage)
+
+The default standard preset uses a smart-mixed allocation:
+
+```toml
+# Haiku for mechanical tasks (fast, cheap)
+[pipeline.stages.analyze]
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+temperature = 0.2
+
+[pipeline.stages.structure]
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+temperature = 0.1
+
+# Opus for decisions and writing (best quality)
+[pipeline.stages.select]
+provider = "anthropic"
+model = "claude-opus-4-20250514"
+temperature = 0.3
+
+[pipeline.stages.tailor]
+provider = "anthropic"
+model = "claude-opus-4-20250514"
+temperature = 0.5
+
+[pipeline.stages.review]
+provider = "anthropic"
+model = "claude-opus-4-20250514"
+temperature = 0.3
+```
+
+### Cover letter
+
+```toml
+[cover_letter]
+auto_render = true
+
+[cover_letter.stages.generate]
+provider = "anthropic"
+model = "claude-opus-4-20250514"
+temperature = 0.6
+
+[cover_letter.stages.review]
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+temperature = 0.2
+
+[cover_letter.design]
+page_size = "us-letter"
+margin_top = "1.2in"
+margin_bottom = "1in"
+margin_left = "1in"
+margin_right = "1in"
+font = "Source Sans Pro"
+font_size = "11pt"
 ```
 
 ## Themes
@@ -405,6 +633,9 @@ mkcv generate --jd job.txt --theme mytheme
 
 Custom themes appear in `mkcv themes` with a `[custom]` badge.
 
+Available base themes to extend: `classic`, `engineeringclassic`,
+`engineeringresumes`, `moderncv`, `sb2nov`.
+
 ## Templates
 
 Templates are **prompt instructions** (Jinja2 `.j2` files) that control how the
@@ -420,54 +651,25 @@ Most users never need to touch templates. If you want to customize AI behavior
 built-in template to `templates/` and edit it. mkcv will use your version
 instead of the built-in one.
 
-To see which templates are available, check the
-[built-in prompts](https://github.com/bkuberek/mkcv/tree/main/src/mkcv/prompts).
+### How prompt templates work
 
-## Configuration
+Each pipeline stage (analyze, select, tailor, structure, review) has a
+corresponding Jinja2 template that instructs the AI. Templates receive the
+pipeline context (JD analysis, selected experience, etc.) as variables.
 
-All configuration lives in `mkcv.toml`. Settings are optional — sensible
-defaults are built in. The file is pre-populated with the most common options;
-uncomment what you need.
+### How to override built-in prompts
 
-### Rendering (fonts, colours, page size)
+1. Find the template you want to change in the
+   [built-in prompts](https://github.com/bkuberek/mkcv/tree/main/src/mkcv/prompts)
+2. Copy it to `templates/` in your workspace, keeping the same filename
+3. Edit the copy — mkcv automatically uses workspace templates over built-ins
 
-```toml
-[rendering]
-theme = "classic"
-font = "Charter"
-font_size = "11pt"
-page_size = "a4paper"          # a4paper or letterpaper
+For example, to customize the tailoring instructions:
 
-[rendering.overrides]
-primary_color = "004080"       # hex colour without #
-```
-
-These apply to all resumes by default. You can override per-command with
-`--theme`.
-
-### Pipeline (AI provider per stage)
-
-```toml
-[pipeline.stages.analyze]
-provider = "anthropic"
-model = "claude-sonnet-4-20250514"
-temperature = 0.2
-
-[pipeline.stages.review]
-provider = "openrouter"
-model = "anthropic/claude-sonnet-4"
-```
-
-### Cover letter
-
-```toml
-[cover_letter]
-auto_render = true
-
-[cover_letter.stages.generate]
-provider = "anthropic"
-model = "claude-sonnet-4-20250514"
-temperature = 0.6
+```bash
+cp $(python -c "import mkcv.prompts; \\
+  print(mkcv.prompts.__path__[0])")/tailor.j2 templates/
+# Edit templates/tailor.j2 to your liking
 ```
 
 ## Workspace Structure
