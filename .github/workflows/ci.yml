@@ -2,9 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  workflow_call:
 
 jobs:
   lint:
@@ -38,25 +37,3 @@ jobs:
       - run: uv sync --extra dev
       - name: Run tests
         run: uv run pytest --tb=short
-
-  version:
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    concurrency: version
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install python-semantic-release
-      - name: Bump version
-        run: semantic-release version --no-vcs-release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Push version commit and tag
-        run: git push origin main --follow-tags
