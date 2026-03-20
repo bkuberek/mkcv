@@ -4,8 +4,10 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 import sys
 import time
+import tomllib
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -100,6 +102,13 @@ def generate_command(
             help="Position title (required in workspace mode).",
         ),
     ] = None,
+    app_dir: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name="--app-dir",
+            help="Re-generate from an existing application directory.",
+        ),
+    ] = None,
     output_dir: Annotated[
         Path | None,
         cyclopts.Parameter(
@@ -189,6 +198,22 @@ def generate_command(
     read from stdin. Omit --jd to generate a generic resume (optionally
     with --target to specify the role).
     """
+    # ---- Mutual exclusivity: --app-dir vs --jd/--company/--position/--target ----
+    if app_dir is not None:
+        conflicting = {
+            "--jd": jd,
+            "--company": company,
+            "--position": position,
+            "--target": target,
+        }
+        provided = [name for name, val in conflicting.items() if val is not None]
+        if provided:
+            flags = ", ".join(provided)
+            console.print(
+                f"[red]Error:[/red] --app-dir cannot be combined with {flags}."
+            )
+            sys.exit(2)
+
     # ---- Resolve preset from --preset / --profile ----
     resolved_preset, resolved_provider = _resolve_preset_and_provider(
         preset_raw=preset, profile=profile, provider=provider
@@ -196,6 +221,27 @@ def generate_command(
 
     # ---- Resolve theme from CLI / config / default ----
     effective_theme = resolve_theme(theme, settings.rendering.theme)
+
+    # Resolve per-output-type presets (needed before app-dir dispatch)
+    effective_cv_preset = cv_preset or resolved_preset
+    effective_cl_preset = cl_preset or resolved_preset
+
+    # ---- App-dir regeneration mode ----
+    if app_dir is not None:
+        _generate_from_app_dir(
+            app_dir=app_dir,
+            kb=kb,
+            output_dir=output_dir,
+            theme=effective_theme,
+            preset=effective_cv_preset,
+            provider=resolved_provider,
+            from_stage=from_stage,
+            render_pdf=render,
+            interactive=interactive,
+            chain_cover_letter=cover_letter,
+            cl_preset=effective_cl_preset,
+        )
+        return
 
     # ---- Resolve JD source ----
     if jd is not None:
@@ -209,10 +255,6 @@ def generate_command(
     # workspace. Resolve KB from workspace config but output to .mkcv/.
     is_generic = jd is None
     use_workspace_mode = settings.in_workspace and not is_generic
-
-    # Resolve per-output-type presets
-    effective_cv_preset = cv_preset or resolved_preset
-    effective_cl_preset = cl_preset or resolved_preset
 
     # If in workspace mode without company/position, extract from JD via LLM
     if use_workspace_mode and (not company or not position):
@@ -486,6 +528,260 @@ def _write_jd_file(jd_text: str, target_dir: Path) -> Path:
     jd_path = target_dir / "jd.txt"
     jd_path.write_text(jd_text, encoding="utf-8")
     return jd_path
+
+
+# ------------------------------------------------------------------
+# App-dir regeneration helpers
+# ------------------------------------------------------------------
+
+
+def _find_jd_in_app_dir(app_dir: Path) -> Path | None:
+    """Find a JD file in an application directory.
+
+    Checks for ``jd.md`` first, then ``jd.txt``.
+
+    Args:
+        app_dir: Application directory to search.
+
+    Returns:
+        Path to the JD file, or None if not found.
+    """
+    for name in ("jd.md", "jd.txt"):
+        jd_path = app_dir / name
+        if jd_path.is_file():
+            return jd_path
+    return None
+
+
+def _read_app_metadata(app_dir: Path) -> tuple[str | None, str | None]:
+    """Read company and position from ``application.toml``.
+
+    Args:
+        app_dir: Application directory containing ``application.toml``.
+
+    Returns:
+        Tuple of (company, position), either may be None.
+    """
+    toml_path = app_dir / "application.toml"
+    if not toml_path.is_file():
+        return None, None
+
+    try:
+        with toml_path.open("rb") as f:
+            data = tomllib.load(f)
+        app_data = data.get("application", {})
+        return app_data.get("company"), app_data.get("position")
+    except (tomllib.TOMLDecodeError, OSError):
+        return None, None
+
+
+def _find_latest_version_dir(parent: Path) -> Path | None:
+    """Find the highest-numbered ``v{N}`` directory under *parent*.
+
+    Args:
+        parent: Directory to scan for versioned subdirectories.
+
+    Returns:
+        Path to the latest version directory, or None if none exist.
+    """
+    if not parent.is_dir():
+        return None
+
+    pattern = re.compile(r"^v(\d+)$")
+    versions: list[tuple[int, Path]] = []
+    for entry in parent.iterdir():
+        if entry.is_dir():
+            match = pattern.match(entry.name)
+            if match:
+                versions.append((int(match.group(1)), entry))
+
+    if not versions:
+        return None
+
+    versions.sort(key=lambda x: x[0])
+    return versions[-1][1]
+
+
+def _copy_stage_artifacts(source_version: Path, target_version: Path) -> int:
+    """Copy pipeline stage JSON artifacts from one version to another.
+
+    Copies all ``.json`` files from ``source_version/.mkcv/`` into
+    ``target_version/.mkcv/``, creating the target directory if needed.
+
+    Args:
+        source_version: Source version directory (e.g., ``app/resumes/v1``).
+        target_version: Target version directory (e.g., ``app/resumes/v2``).
+
+    Returns:
+        Number of files copied.
+    """
+    source_mkcv = source_version / ".mkcv"
+    if not source_mkcv.is_dir():
+        return 0
+
+    target_mkcv = target_version / ".mkcv"
+    target_mkcv.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for json_file in sorted(source_mkcv.glob("*.json")):
+        shutil.copy2(str(json_file), str(target_mkcv / json_file.name))
+        copied += 1
+
+    return copied
+
+
+def _generate_from_app_dir(
+    *,
+    app_dir: Path,
+    kb: Path | None,
+    output_dir: Path | None,
+    theme: str,
+    preset: str,
+    provider: str | None,
+    from_stage: int,
+    render_pdf: bool,
+    interactive: bool,
+    chain_cover_letter: bool = False,
+    cl_preset: str = "standard",
+) -> None:
+    """Re-generate a resume from an existing application directory.
+
+    Validates the app dir, finds JD and metadata, creates a new version
+    directory, copies prior stage artifacts when resuming, and runs the
+    pipeline.
+
+    Args:
+        app_dir: Existing application directory path.
+        kb: Optional explicit knowledge base path.
+        output_dir: Optional explicit output directory.
+        theme: Visual theme name.
+        preset: Pipeline preset name.
+        provider: Optional AI provider override.
+        from_stage: Pipeline stage to resume from (1-5).
+        render_pdf: Whether to auto-render PDF after pipeline.
+        interactive: Whether to pause after each stage.
+        chain_cover_letter: Whether to chain cover letter generation.
+        cl_preset: Preset for cover letter generation.
+    """
+    # 1. Resolve to absolute path
+    app_dir = app_dir.resolve()
+
+    # 2. Validate directory exists
+    if not app_dir.is_dir():
+        console.print(f"[red]Error:[/red] Application directory not found: {app_dir}")
+        sys.exit(2)
+
+    # 3. Validate application.toml exists
+    if not (app_dir / "application.toml").is_file():
+        console.print(
+            "[red]Error:[/red] Not an application directory — "
+            f"missing application.toml in {app_dir}"
+        )
+        sys.exit(2)
+
+    # 4. Find JD
+    jd_path = _find_jd_in_app_dir(app_dir)
+    if jd_path is None:
+        console.print(
+            "[red]Error:[/red] No JD file found in application directory.\n"
+            f"  Expected jd.md or jd.txt in {app_dir}"
+        )
+        sys.exit(2)
+
+    # 5. Read company/position from metadata
+    app_company, app_position = _read_app_metadata(app_dir)
+    if not app_company or not app_position:
+        console.print(
+            "[red]Error:[/red] Could not read company/position from "
+            f"application.toml in {app_dir}"
+        )
+        sys.exit(2)
+
+    # 6. Resolve KB
+    if kb is None and settings.in_workspace and settings.workspace_root:
+        kb_relative = settings.workspace.knowledge_base
+        kb = settings.workspace_root / kb_relative
+    if kb is None:
+        console.print(
+            "[red]Error:[/red] --kb is required when not in a workspace.\n"
+            "  Provide --kb or run from inside an mkcv workspace."
+        )
+        sys.exit(2)
+    if not kb.is_file():
+        console.print(f"[red]Error:[/red] Knowledge base not found: {kb}")
+        sys.exit(2)
+
+    # 7. Create version dir
+    if output_dir is not None:
+        run_dir = output_dir
+    else:
+        workspace_service = create_workspace_service()
+        run_dir = workspace_service.create_output_version(app_dir, "resumes")
+
+    # 8. Copy prior stage artifacts when resuming from a later stage
+    if from_stage > 1:
+        latest_version = _find_latest_version_dir(app_dir / "resumes")
+        # Exclude the newly created run_dir from "latest" consideration
+        if latest_version is not None and latest_version == run_dir:
+            # The newly created dir is the latest; look for the one before
+            resumes_parent = app_dir / "resumes"
+            pattern = re.compile(r"^v(\d+)$")
+            versions: list[tuple[int, Path]] = []
+            for entry in resumes_parent.iterdir():
+                if entry.is_dir() and entry != run_dir:
+                    match = pattern.match(entry.name)
+                    if match:
+                        versions.append((int(match.group(1)), entry))
+            if versions:
+                versions.sort(key=lambda x: x[0])
+                latest_version = versions[-1][1]
+            else:
+                latest_version = None
+
+        if latest_version is None:
+            console.print(
+                "[red]Error:[/red] --from-stage requires a previous version "
+                "to copy artifacts from, but no prior version was found."
+            )
+            sys.exit(2)
+
+        copied = _copy_stage_artifacts(latest_version, run_dir)
+        if copied > 0:
+            console.print(
+                f"  [green]\u2713[/green] Copied {copied} stage artifact(s) "
+                f"from {latest_version.name}"
+            )
+
+    # 9. Display header
+    console.print("\n  [bold]mkcv generate[/bold] — app-dir regeneration")
+    console.print(f"  App dir:   {app_dir}")
+    console.print(f"  Company:   {app_company}")
+    console.print(f"  Position:  {app_position}")
+    console.print(f"  JD:        {jd_path}")
+    console.print(f"  KB:        {kb}")
+    console.print(f"  Output:    {run_dir}")
+    console.print(f"  Theme:     {theme}")
+    console.print(f"  Preset:    {preset}")
+    if from_stage > 1:
+        console.print(f"  From:      stage {from_stage}")
+    console.print()
+
+    # 10. Run the pipeline
+    _run_pipeline(
+        jd=jd_path,
+        kb=kb,
+        output_dir=run_dir,
+        preset_name=preset,
+        provider_override=provider,
+        from_stage=from_stage,
+        render_pdf=render_pdf,
+        theme=theme,
+        interactive=interactive,
+        chain_cover_letter=chain_cover_letter,
+        jd_text=jd_path.read_text(encoding="utf-8"),
+        cl_preset=cl_preset,
+        app_dir=app_dir,
+    )
 
 
 def _generate_workspace_mode(

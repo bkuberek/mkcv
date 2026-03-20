@@ -1038,3 +1038,224 @@ class TestVersionedOutputWorkspaceMode:
         mock_ws_service.create_output_version.assert_called_once_with(
             app_dir, "cover-letter"
         )
+
+
+class TestAppDirMutualExclusivity:
+    """Tests for --app-dir mutual exclusivity with other flags."""
+
+    def test_app_dir_with_jd_exits_2(self, tmp_path: Path) -> None:
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        with pytest.raises(SystemExit, match="2"):
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(app_dir=app_dir, jd="some-jd.txt")
+
+    def test_app_dir_with_company_exits_2(self, tmp_path: Path) -> None:
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        with pytest.raises(SystemExit, match="2"):
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(app_dir=app_dir, company="TestCo")
+
+    def test_app_dir_with_position_exits_2(self, tmp_path: Path) -> None:
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        with pytest.raises(SystemExit, match="2"):
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(app_dir=app_dir, position="Engineer")
+
+    def test_app_dir_with_target_exits_2(self, tmp_path: Path) -> None:
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        with pytest.raises(SystemExit, match="2"):
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(app_dir=app_dir, target="Staff Engineer")
+
+
+class TestAppDirValidation:
+    """Tests for --app-dir validation errors."""
+
+    def test_app_dir_not_found_exits(self, tmp_path: Path) -> None:
+        nonexistent = tmp_path / "nonexistent"
+        with (
+            patch(f"{_CMD}.settings"),
+            pytest.raises(SystemExit, match="2"),
+        ):
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(app_dir=nonexistent)
+
+    def test_app_dir_missing_application_toml_exits(self, tmp_path: Path) -> None:
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        with (
+            patch(f"{_CMD}.settings"),
+            pytest.raises(SystemExit, match="2"),
+        ):
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(app_dir=app_dir)
+
+    def test_app_dir_missing_jd_exits(self, tmp_path: Path) -> None:
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        (app_dir / "application.toml").write_text(
+            '[application]\ncompany = "Co"\nposition = "Eng"\n'
+        )
+        with (
+            patch(f"{_CMD}.settings"),
+            pytest.raises(SystemExit, match="2"),
+        ):
+            from mkcv.cli.commands.generate import generate_command
+
+            generate_command(app_dir=app_dir)
+
+
+class TestAppDirHelpers:
+    """Unit tests for app-dir helper functions."""
+
+    def test_find_jd_prefers_md_over_txt(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _find_jd_in_app_dir
+
+        (tmp_path / "jd.md").write_text("# JD")
+        (tmp_path / "jd.txt").write_text("JD text")
+        result = _find_jd_in_app_dir(tmp_path)
+        assert result is not None
+        assert result.name == "jd.md"
+
+    def test_find_jd_falls_back_to_txt(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _find_jd_in_app_dir
+
+        (tmp_path / "jd.txt").write_text("JD text")
+        result = _find_jd_in_app_dir(tmp_path)
+        assert result is not None
+        assert result.name == "jd.txt"
+
+    def test_find_jd_returns_none_when_missing(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _find_jd_in_app_dir
+
+        result = _find_jd_in_app_dir(tmp_path)
+        assert result is None
+
+    def test_read_app_metadata_returns_company_position(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _read_app_metadata
+
+        (tmp_path / "application.toml").write_text(
+            '[application]\ncompany = "Acme"\nposition = "SWE"\n'
+        )
+        company, position = _read_app_metadata(tmp_path)
+        assert company == "Acme"
+        assert position == "SWE"
+
+    def test_read_app_metadata_returns_none_when_missing(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _read_app_metadata
+
+        company, position = _read_app_metadata(tmp_path)
+        assert company is None
+        assert position is None
+
+    def test_read_app_metadata_handles_malformed_toml(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _read_app_metadata
+
+        (tmp_path / "application.toml").write_text("not valid toml [[[")
+        company, position = _read_app_metadata(tmp_path)
+        assert company is None
+        assert position is None
+
+    def test_find_latest_version_dir_returns_highest(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _find_latest_version_dir
+
+        (tmp_path / "v1").mkdir()
+        (tmp_path / "v2").mkdir()
+        (tmp_path / "v3").mkdir()
+        result = _find_latest_version_dir(tmp_path)
+        assert result is not None
+        assert result.name == "v3"
+
+    def test_find_latest_version_dir_returns_none_when_empty(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _find_latest_version_dir
+
+        result = _find_latest_version_dir(tmp_path)
+        assert result is None
+
+    def test_find_latest_version_dir_returns_none_for_nonexistent(self) -> None:
+        from mkcv.cli.commands.generate import _find_latest_version_dir
+
+        result = _find_latest_version_dir(Path("/nonexistent/dir"))
+        assert result is None
+
+    def test_find_latest_version_dir_ignores_non_version_dirs(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _find_latest_version_dir
+
+        (tmp_path / "v1").mkdir()
+        (tmp_path / "not-a-version").mkdir()
+        (tmp_path / "latest").mkdir()
+        result = _find_latest_version_dir(tmp_path)
+        assert result is not None
+        assert result.name == "v1"
+
+    def test_copy_stage_artifacts_copies_json_files(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _copy_stage_artifacts
+
+        source = tmp_path / "v1"
+        source_mkcv = source / ".mkcv"
+        source_mkcv.mkdir(parents=True)
+        (source_mkcv / "stage1.json").write_text('{"data": 1}')
+        (source_mkcv / "stage2.json").write_text('{"data": 2}')
+        (source_mkcv / "notes.txt").write_text("not json")
+
+        target = tmp_path / "v2"
+        target.mkdir()
+
+        copied = _copy_stage_artifacts(source, target)
+        assert copied == 2
+        assert (target / ".mkcv" / "stage1.json").is_file()
+        assert (target / ".mkcv" / "stage2.json").is_file()
+        assert not (target / ".mkcv" / "notes.txt").exists()
+
+    def test_copy_stage_artifacts_returns_zero_when_no_source(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _copy_stage_artifacts
+
+        source = tmp_path / "v1"
+        source.mkdir()
+        target = tmp_path / "v2"
+        target.mkdir()
+
+        copied = _copy_stage_artifacts(source, target)
+        assert copied == 0
+
+    def test_copy_stage_artifacts_creates_target_mkcv_dir(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _copy_stage_artifacts
+
+        source = tmp_path / "v1"
+        source_mkcv = source / ".mkcv"
+        source_mkcv.mkdir(parents=True)
+        (source_mkcv / "stage1.json").write_text('{"data": 1}')
+
+        target = tmp_path / "v2"
+        target.mkdir()
+
+        _copy_stage_artifacts(source, target)
+        assert (target / ".mkcv").is_dir()
