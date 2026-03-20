@@ -162,12 +162,13 @@ def generate_command(
         ),
     ] = True,
     interactive: Annotated[
-        bool,
+        bool | None,
         cyclopts.Parameter(
-            name=["--interactive", "-i"],
-            help="Review and edit resume sections interactively after AI tailoring.",
+            name=["--interactive", "-i", "--no-interactive"],
+            help="Review and edit resume sections interactively after AI tailoring. "
+            "Defaults to on when running in an interactive terminal.",
         ),
-    ] = False,
+    ] = None,
     cover_letter: Annotated[
         bool,
         cyclopts.Parameter(
@@ -226,6 +227,10 @@ def generate_command(
     # Resolve per-output-type presets (needed before app-dir dispatch)
     effective_cv_preset = cv_preset or resolved_preset
     effective_cl_preset = cl_preset or resolved_preset
+
+    # ---- Resolve interactive default from TTY ----
+    if interactive is None:
+        interactive = sys.stdin.isatty()
 
     # ---- App-dir regeneration mode ----
     if app_dir is not None:
