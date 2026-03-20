@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mkcv"
-version = "1.0.0"
+version = "1.1.0"
 description = "AI-powered CLI tool that generates ATS-compliant PDF resumes tailored to specific job applications"
 readme = "README.md"
 license = {text = "MIT"}
