@@ -229,26 +229,24 @@ class TestGenerateStandaloneMode:
             generate_command(jd=str(jd), kb=kb, render=True)
         mock_render_svc.render_resume.assert_called_once()
 
-    def test_interactive_uses_interactive_callback(self, tmp_path: Path) -> None:
+    def test_interactive_calls_interactive_pipeline(self, tmp_path: Path) -> None:
         jd = _jd_path(tmp_path)
         kb = tmp_path / "kb.md"
         kb.write_text("Knowledge base content")
-        result = _make_pipeline_result(tmp_path)
-        mock_pipeline = MagicMock()
         with (
             patch(f"{_CMD}.settings") as mock_settings,
-            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
-            patch(f"{_CMD}.asyncio.run", return_value=result),
             patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
             patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(jd))),
             patch(f"{_CMD}._write_jd_file", return_value=jd),
-            patch(f"{_CMD}._InteractiveProgressCallback") as mock_cls,
+            patch(
+                f"{_CMD}._run_interactive_pipeline",
+            ) as mock_interactive,
         ):
             mock_settings.in_workspace = False
             from mkcv.cli.commands.generate import generate_command
 
             generate_command(jd=str(jd), kb=kb, interactive=True)
-        mock_cls.assert_called_once()
+        mock_interactive.assert_called_once()
 
     def test_non_interactive_uses_progress_callback(self, tmp_path: Path) -> None:
         jd = _jd_path(tmp_path)
@@ -1141,9 +1139,7 @@ class TestAppDirHelpers:
         result = _find_jd_in_app_dir(tmp_path)
         assert result is None
 
-    def test_read_app_metadata_returns_company_position(
-        self, tmp_path: Path
-    ) -> None:
+    def test_read_app_metadata_returns_company_position(self, tmp_path: Path) -> None:
         from mkcv.cli.commands.generate import _read_app_metadata
 
         (tmp_path / "application.toml").write_text(
@@ -1153,18 +1149,14 @@ class TestAppDirHelpers:
         assert company == "Acme"
         assert position == "SWE"
 
-    def test_read_app_metadata_returns_none_when_missing(
-        self, tmp_path: Path
-    ) -> None:
+    def test_read_app_metadata_returns_none_when_missing(self, tmp_path: Path) -> None:
         from mkcv.cli.commands.generate import _read_app_metadata
 
         company, position = _read_app_metadata(tmp_path)
         assert company is None
         assert position is None
 
-    def test_read_app_metadata_handles_malformed_toml(
-        self, tmp_path: Path
-    ) -> None:
+    def test_read_app_metadata_handles_malformed_toml(self, tmp_path: Path) -> None:
         from mkcv.cli.commands.generate import _read_app_metadata
 
         (tmp_path / "application.toml").write_text("not valid toml [[[")
@@ -1172,9 +1164,7 @@ class TestAppDirHelpers:
         assert company is None
         assert position is None
 
-    def test_find_latest_version_dir_returns_highest(
-        self, tmp_path: Path
-    ) -> None:
+    def test_find_latest_version_dir_returns_highest(self, tmp_path: Path) -> None:
         from mkcv.cli.commands.generate import _find_latest_version_dir
 
         (tmp_path / "v1").mkdir()
@@ -1210,9 +1200,7 @@ class TestAppDirHelpers:
         assert result is not None
         assert result.name == "v1"
 
-    def test_copy_stage_artifacts_copies_json_files(
-        self, tmp_path: Path
-    ) -> None:
+    def test_copy_stage_artifacts_copies_json_files(self, tmp_path: Path) -> None:
         from mkcv.cli.commands.generate import _copy_stage_artifacts
 
         source = tmp_path / "v1"
@@ -1244,9 +1232,7 @@ class TestAppDirHelpers:
         copied = _copy_stage_artifacts(source, target)
         assert copied == 0
 
-    def test_copy_stage_artifacts_creates_target_mkcv_dir(
-        self, tmp_path: Path
-    ) -> None:
+    def test_copy_stage_artifacts_creates_target_mkcv_dir(self, tmp_path: Path) -> None:
         from mkcv.cli.commands.generate import _copy_stage_artifacts
 
         source = tmp_path / "v1"

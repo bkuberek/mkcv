@@ -1,12 +1,10 @@
 """Tests for generate command progress callbacks."""
 
-from unittest.mock import patch
-
 from rich.console import Console
 
 from mkcv.cli.commands.generate import (
-    _InteractiveProgressCallback,
     _ProgressCallback,
+    _StopAfterStageCallback,
 )
 from mkcv.core.models.stage_metadata import StageMetadata
 
@@ -72,38 +70,50 @@ class TestProgressCallback:
             cb.on_stage_complete(stage, f"stage_{stage}", meta)
 
 
-class TestInteractiveProgressCallback:
-    """Tests for _InteractiveProgressCallback (with user prompts)."""
+class TestStopAfterStageCallback:
+    """Tests for _StopAfterStageCallback (stops pipeline at a given stage)."""
 
     def test_on_stage_start_creates_status(self) -> None:
         console = Console(force_terminal=False)
-        cb = _InteractiveProgressCallback(console)
+        cb = _StopAfterStageCallback(console, stop_after=3)
         cb.on_stage_start(1)
         assert cb._status is not None
 
     def test_on_stage_complete_clears_status(self) -> None:
         console = Console(force_terminal=False)
-        cb = _InteractiveProgressCallback(console)
-        cb.on_stage_start(3)
-        meta = _make_metadata(stage_number=3)
-        with patch("mkcv.cli.commands.generate.Confirm.ask", return_value=True):
-            result = cb.on_stage_complete(3, "tailor_content", meta)
+        cb = _StopAfterStageCallback(console, stop_after=3)
+        cb.on_stage_start(2)
+        meta = _make_metadata(stage_number=2)
+        result = cb.on_stage_complete(2, "select_experience", meta)
         assert result is True
         assert cb._status is None
 
-    def test_last_stage_does_not_prompt(self) -> None:
+    def test_continues_before_stop_stage(self) -> None:
         console = Console(force_terminal=False)
-        cb = _InteractiveProgressCallback(console)
-        cb.on_stage_start(5)
-        meta = _make_metadata(stage_number=5)
-        result = cb.on_stage_complete(5, "review", meta)
-        assert result is True
+        cb = _StopAfterStageCallback(console, stop_after=3)
+        for stage in (1, 2):
+            cb.on_stage_start(stage)
+            meta = _make_metadata(stage_number=stage)
+            assert cb.on_stage_complete(stage, f"stage_{stage}", meta) is True
 
-    def test_user_can_stop_after_stage(self) -> None:
+    def test_stops_at_designated_stage(self) -> None:
         console = Console(force_terminal=False)
-        cb = _InteractiveProgressCallback(console)
+        cb = _StopAfterStageCallback(console, stop_after=3)
+        cb.on_stage_start(3)
+        meta = _make_metadata(stage_number=3)
+        result = cb.on_stage_complete(3, "tailor_content", meta)
+        assert result is False
+
+    def test_stops_after_stage_number(self) -> None:
+        console = Console(force_terminal=False)
+        cb = _StopAfterStageCallback(console, stop_after=2)
         cb.on_stage_start(2)
         meta = _make_metadata(stage_number=2)
-        with patch("mkcv.cli.commands.generate.Confirm.ask", return_value=False):
-            result = cb.on_stage_complete(2, "select_experience", meta)
-        assert result is False
+        assert cb.on_stage_complete(2, "select_experience", meta) is False
+
+    def test_on_stage_complete_without_prior_start(self) -> None:
+        console = Console(force_terminal=False)
+        cb = _StopAfterStageCallback(console, stop_after=3)
+        meta = _make_metadata(stage_number=1)
+        result = cb.on_stage_complete(1, "analyze_jd", meta)
+        assert result is True

@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Annotated
 
 import cyclopts
 from rich.console import Console
-from rich.prompt import Confirm
 
 if TYPE_CHECKING:
     from rich.status import Status
@@ -164,7 +163,7 @@ def generate_command(
     interactive: Annotated[
         bool,
         cyclopts.Parameter(
-            help="Pause after each stage for review.",
+            help="Review and edit resume sections interactively after AI tailoring.",
         ),
     ] = False,
     cover_letter: Annotated[
@@ -967,6 +966,55 @@ def _run_pipeline(
     if not kb_result.is_valid:
         sys.exit(5)
 
+    if interactive and from_stage <= 3:
+        _run_interactive_pipeline(
+            jd=jd,
+            kb=kb,
+            output_dir=output_dir,
+            preset_name=preset_name,
+            provider_override=provider_override,
+            from_stage=from_stage,
+            render_pdf=render_pdf,
+            theme=theme,
+            chain_cover_letter=chain_cover_letter,
+            jd_text=jd_text,
+            cl_preset=cl_preset,
+            app_dir=app_dir,
+        )
+        return
+
+    _run_standard_pipeline(
+        jd=jd,
+        kb=kb,
+        output_dir=output_dir,
+        preset_name=preset_name,
+        provider_override=provider_override,
+        from_stage=from_stage,
+        render_pdf=render_pdf,
+        theme=theme,
+        chain_cover_letter=chain_cover_letter,
+        jd_text=jd_text,
+        cl_preset=cl_preset,
+        app_dir=app_dir,
+    )
+
+
+def _run_standard_pipeline(
+    *,
+    jd: Path,
+    kb: Path,
+    output_dir: Path,
+    preset_name: str,
+    provider_override: str | None = None,
+    from_stage: int = 1,
+    render_pdf: bool = True,
+    theme: str,
+    chain_cover_letter: bool = False,
+    jd_text: str = "",
+    cl_preset: str = "standard",
+    app_dir: Path | None = None,
+) -> None:
+    """Run the full AI pipeline without interactive review."""
     pipeline = create_pipeline_service(
         settings,
         preset_name=preset_name,
@@ -974,12 +1022,7 @@ def _run_pipeline(
         theme=theme,
     )
 
-    if interactive:
-        callback: _ProgressCallback | _InteractiveProgressCallback = (
-            _InteractiveProgressCallback(console)
-        )
-    else:
-        callback = _ProgressCallback(console)
+    callback = _ProgressCallback(console)
 
     console.print("  [bold]Running AI pipeline...[/bold]")
     console.print()
@@ -999,6 +1042,161 @@ def _run_pipeline(
         console.print(f"  [red]Error:[/red] {exc}")
         sys.exit(exc.exit_code)
 
+    _finalize_pipeline(
+        result=result,
+        output_dir=output_dir,
+        preset_name=preset_name,
+        provider_override=provider_override,
+        render_pdf=render_pdf,
+        theme=theme,
+        chain_cover_letter=chain_cover_letter,
+        jd_text=jd_text,
+        cl_preset=cl_preset,
+        app_dir=app_dir,
+    )
+
+
+def _run_interactive_pipeline(
+    *,
+    jd: Path,
+    kb: Path,
+    output_dir: Path,
+    preset_name: str,
+    provider_override: str | None = None,
+    from_stage: int = 1,
+    render_pdf: bool = True,
+    theme: str,
+    chain_cover_letter: bool = False,
+    jd_text: str = "",
+    cl_preset: str = "standard",
+    app_dir: Path | None = None,
+) -> None:
+    """Run stages 1-3 with spinners, interactive review, then stages 4-5.
+
+    After stage 3 produces ``TailoredContent``, an ``InteractiveSession``
+    lets the user accept, skip, or edit each section.  On ``/done`` the
+    (possibly modified) content is written back to the artifact store and
+    stages 4-5 continue.  On ``/cancel`` the process exits cleanly.
+    """
+    from mkcv.cli.interactive import InteractiveSession
+    from mkcv.core.models.tailored_content import TailoredContent
+
+    artifact_dir = output_dir / ".mkcv"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    # -- Phase 1: run stages 1-3 with spinners (no interactive prompts) --
+    pipeline = create_pipeline_service(
+        settings,
+        preset_name=preset_name,
+        provider_override=provider_override,
+        theme=theme,
+    )
+
+    stop_callback = _StopAfterStageCallback(console, stop_after=3)
+
+    console.print("  [bold]Running AI pipeline (stages 1-3)...[/bold]")
+    console.print()
+
+    try:
+        first_result = asyncio.run(
+            pipeline.generate(
+                jd,
+                kb,
+                output_dir=output_dir,
+                from_stage=from_stage,
+                stage_callback=stop_callback,
+                theme=theme,
+            )
+        )
+    except MkcvError as exc:
+        console.print(f"  [red]Error:[/red] {exc}")
+        sys.exit(exc.exit_code)
+
+    # -- Phase 2: load stage-3 content and run interactive session --
+    stage3_path = artifact_dir / "stage3_content.json"
+    if not stage3_path.is_file():
+        console.print(
+            "  [red]Error:[/red] Stage 3 content not found — "
+            "cannot start interactive review."
+        )
+        sys.exit(1)
+
+    stage3_data = json.loads(stage3_path.read_text(encoding="utf-8"))
+    content = TailoredContent.model_validate(stage3_data)
+
+    session = InteractiveSession(content, console)
+    edited_content = session.run()
+
+    if edited_content is None:
+        console.print("  [dim]Interactive review cancelled. No output generated.[/dim]")
+        sys.exit(130)
+
+    # -- Phase 3: write modified content back and run stages 4-5 --
+    stage3_path.write_text(
+        json.dumps(edited_content.model_dump(), indent=2, default=str),
+        encoding="utf-8",
+    )
+    logger.debug("Wrote edited stage3_content back to %s", stage3_path)
+
+    pipeline_4 = create_pipeline_service(
+        settings,
+        preset_name=preset_name,
+        provider_override=provider_override,
+        theme=theme,
+    )
+
+    resume_callback = _ProgressCallback(console)
+
+    console.print()
+    console.print("  [bold]Running AI pipeline (stages 4-5)...[/bold]")
+    console.print()
+
+    try:
+        second_result = asyncio.run(
+            pipeline_4.generate(
+                jd,
+                kb,
+                output_dir=output_dir,
+                from_stage=4,
+                stage_callback=resume_callback,
+                theme=theme,
+            )
+        )
+    except MkcvError as exc:
+        console.print(f"  [red]Error:[/red] {exc}")
+        sys.exit(exc.exit_code)
+
+    # Merge stage metadata from both runs for accurate summaries
+    merged_result = _merge_pipeline_results(first_result, second_result)
+
+    _finalize_pipeline(
+        result=merged_result,
+        output_dir=output_dir,
+        preset_name=preset_name,
+        provider_override=provider_override,
+        render_pdf=render_pdf,
+        theme=theme,
+        chain_cover_letter=chain_cover_letter,
+        jd_text=jd_text,
+        cl_preset=cl_preset,
+        app_dir=app_dir,
+    )
+
+
+def _finalize_pipeline(
+    *,
+    result: PipelineResult,
+    output_dir: Path,
+    preset_name: str,
+    provider_override: str | None,
+    render_pdf: bool,
+    theme: str,
+    chain_cover_letter: bool,
+    jd_text: str,
+    cl_preset: str,
+    app_dir: Path | None,
+) -> None:
+    """Write metadata, display summary, render PDF, and chain cover letter."""
     # Write run metadata in the output directory
     _write_run_metadata(
         output_dir=output_dir,
@@ -1031,6 +1229,28 @@ def _run_pipeline(
             cl_preset=cl_preset,
             app_dir=app_dir,
         )
+
+
+def _merge_pipeline_results(
+    first: PipelineResult,
+    second: PipelineResult,
+) -> PipelineResult:
+    """Merge results from a split pipeline run (stages 1-3 + stages 4-5).
+
+    Combines stage metadata from both runs and takes final output paths
+    and scores from the second run (which has stages 4-5).
+    """
+    merged_stages = list(first.stages) + list(second.stages)
+    total_duration = first.total_duration_seconds + second.total_duration_seconds
+    total_cost = sum(s.cost_usd for s in merged_stages)
+
+    return second.model_copy(
+        update={
+            "stages": merged_stages,
+            "total_duration_seconds": total_duration,
+            "total_cost_usd": total_cost,
+        },
+    )
 
 
 def _write_run_metadata(
@@ -1338,19 +1558,21 @@ class _ProgressCallback:
 
 
 # ------------------------------------------------------------------
-# Interactive mode callback with spinner
+# Callback that stops the pipeline after a given stage
 # ------------------------------------------------------------------
 
 
-class _InteractiveProgressCallback:
-    """Stage callback for interactive mode with a spinner.
+class _StopAfterStageCallback:
+    """Stage callback that shows spinners and stops after a specified stage.
 
-    Shows a spinner while each stage runs, displays results,
-    and prompts the user to continue or stop.
+    Used for the interactive flow: runs stages 1-N with progress spinners,
+    then returns ``False`` after stage N to hand control to
+    ``InteractiveSession``.
     """
 
-    def __init__(self, target_console: Console) -> None:
+    def __init__(self, target_console: Console, *, stop_after: int) -> None:
         self._console = target_console
+        self._stop_after = stop_after
         self._status: Status | None = None
         self._stage_start: float = 0.0
 
@@ -1370,7 +1592,7 @@ class _InteractiveProgressCallback:
         stage_name: str,
         metadata: StageMetadata,
     ) -> bool:
-        """Stop the spinner, display result, and ask to continue."""
+        """Stop the spinner and halt after the target stage."""
         if self._status is not None:
             self._status.stop()
             self._status = None
@@ -1378,17 +1600,8 @@ class _InteractiveProgressCallback:
         label = _STAGE_LABELS.get(stage_number, stage_name)
         duration = metadata.duration_seconds
         self._console.print(
-            f"  [green]\u2713[/green] Stage {stage_number}/5: "
-            f"{label} ({duration:.1f}s, model={metadata.model})"
+            f"  [green]\u2713[/green] Stage {stage_number}/5: {label} ({duration:.1f}s)"
         )
 
-        # Don't prompt after the last stage
-        if stage_number >= 5:
-            return True
-
-        self._console.print()
-        return Confirm.ask(
-            "  Continue to next stage?",
-            default=True,
-            console=self._console,
-        )
+        # Continue only if we haven't reached the stop stage
+        return stage_number < self._stop_after
