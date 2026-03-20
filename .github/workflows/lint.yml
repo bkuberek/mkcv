@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v4
-      - run: uv sync
+      - run: uv sync --extra dev
       - name: Ruff check
         run: uv run ruff check src/ tests/
       - name: Ruff format check
