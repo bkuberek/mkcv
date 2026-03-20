@@ -269,3 +269,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ## Development
 
 For detailed development setup, architecture documentation, and coding conventions, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## Built with AI
+
+This project was built with the assistance of AI using [Spec-Driven Development (SDD)](https://github.com/Gentleman-Programming/agent-teams-lite), a structured workflow for planning and implementing features through proposal, spec, design, and task phases. Cross-session memory is powered by [Engram](https://github.com/Gentleman-Programming/engram), and code quality is enforced by [Clean Code skills](https://skills.sh/sickn33/antigravity-awesome-skills/clean-code).
