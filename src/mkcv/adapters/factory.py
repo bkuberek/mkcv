@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from mkcv.config.configuration import Configuration
     from mkcv.core.ports.llm import LLMPort
     from mkcv.core.services.batch_render import BatchRenderService
+    from mkcv.core.services.regeneration import RegenerationService
 
 from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
 from mkcv.adapters.filesystem.pdf_reader import PyPdfReader
@@ -644,6 +645,49 @@ def create_batch_render_service(
     return BatchRenderService(
         render_service=render_service,
         postprocessor=postprocessor,
+    )
+
+
+def create_regeneration_service(
+    config: Configuration,
+    preset_name: str = "default",
+    *,
+    provider_override: str | None = None,
+) -> RegenerationService:
+    """Create a fully-wired RegenerationService.
+
+    Uses stage-3 (tailor) configuration since regeneration is
+    fundamentally the same operation as the tailor stage, just
+    scoped to one section.
+
+    Args:
+        config: Application configuration.
+        preset_name: Preset or legacy profile name.
+        provider_override: When set, override the LLM provider.
+
+    Returns:
+        RegenerationService with LLM and prompt adapters connected.
+    """
+    from mkcv.core.services.regeneration import RegenerationService
+
+    stage_configs = _resolve_stage_configs(config, preset_name=preset_name)
+    tailor_config = stage_configs[3]  # Stage 3 = tailor
+
+    if provider_override:
+        tailor_config = StageConfig(
+            provider=provider_override,
+            model=tailor_config.model,
+            temperature=tailor_config.temperature,
+        )
+
+    llm = _create_llm_adapter(tailor_config.provider, config)
+    prompts = _create_prompt_loader(config)
+
+    return RegenerationService(
+        llm=llm,
+        prompts=prompts,
+        model=tailor_config.model,
+        temperature=tailor_config.temperature,
     )
 
 

@@ -1,0 +1,147 @@
+{# Regenerate a single resume section based on user feedback.
+
+Context variables:
+  - section_type: str — one of "mission", "skills", "experience",
+      "earlier_experience", "languages"
+  - current_content: dict | str — serialized content of the current section
+  - instructions: list[str] — accumulated user feedback/instructions
+  - jd_analysis: dict | None — structured JD analysis from Stage 1
+  - ats_keywords: list[str] | None — keywords to incorporate
+  - kb_text: str | None — the full knowledge base for reference
+  - role_index: int | None — index of the role (experience sections only)
+
+Output: JSON matching the section-specific model schema.
+#}
+{% include '_voice_anchor.j2' %}
+
+You are an expert resume writer performing a targeted regeneration of a single
+resume section based on user feedback. Apply the user's instructions while
+maintaining ATS optimization and factual accuracy.
+
+{% if jd_analysis %}
+## Target Role
+
+Company: {{ jd_analysis.company }}
+Position: {{ jd_analysis.role_title }}
+{% if jd_analysis.seniority_level is defined %}
+Seniority: {{ jd_analysis.seniority_level }}
+{% endif %}
+{% if jd_analysis.role_summary is defined %}
+Summary: {{ jd_analysis.role_summary }}
+{% endif %}
+{% endif %}
+
+{% if ats_keywords %}
+## ATS Keywords to Incorporate
+
+These keywords should appear naturally in the regenerated content where relevant.
+Do not force keywords — weave them in where they fit organically.
+
+{{ ats_keywords | join(', ') }}
+{% endif %}
+
+## Current {{ section_type | replace("_", " ") | title }} Content
+
+{{ current_content | tojson(indent=2) if current_content is mapping else current_content }}
+
+## User Feedback (apply ALL of these instructions)
+
+{% for instruction in instructions %}
+{{ loop.index }}. {{ instruction }}
+{% endfor %}
+
+Incorporate every instruction above into your regeneration. The user expects all
+of their feedback to be reflected in the output.
+
+{% if kb_text %}
+## Knowledge Base (source of truth for accuracy)
+
+{{ kb_text }}
+{% endif %}
+
+---
+
+## Output Instructions
+
+{% if section_type == "mission" %}
+Regenerate the **mission statement** for the resume header.
+
+Produce a JSON object with these fields:
+- `text`: The mission statement (15-30 words, max 500 characters). Formula:
+  "[descriptor] [role-type] with [X years] experience in [core competency],
+  specializing in [what matters to this JD]."
+- `rationale`: One sentence explaining why this framing works for this application.
+
+Keep it direct, concrete, and confident. Position the candidate — this is NOT
+an objective statement.
+
+{% elif section_type == "skills" %}
+Regenerate the **skills section** of the resume.
+
+Produce a JSON object with a single field:
+- `skills`: An array of skill group objects, each with:
+  - `label`: Clear category name matching industry conventions
+    (e.g., "Languages," "Infrastructure & Cloud," "Data & ML").
+  - `skills`: Array of specific skill names. Lead each group with the most
+    JD-relevant skills. Include ATS keywords verbatim where they name a technology.
+
+Aim for 2-4 labeled categories. Omit skills irrelevant to the target role.
+
+{% elif section_type == "experience" %}
+Regenerate the **experience entry** (a single role) for the resume.
+
+Produce a JSON object with these fields:
+- `company`: Company name.
+- `position`: Job title.
+- `location`: Location if known, otherwise null.
+- `start_date`: Format "YYYY-MM".
+- `end_date`: Format "YYYY-MM" or "present".
+- `summary`: Optional one-sentence context for the role (null if not needed).
+- `bullets`: Array of bullet objects, each with:
+  - `original`: The source bullet from the KB — must be an EXACT quote. For
+    user-added bullets, use "[user-added]".
+  - `rewritten`: The optimized version. Lead with a strong action verb, follow
+    the XYZ formula (Action + What + Impact/Result), and incorporate ATS keywords
+    where they fit naturally.
+  - `keywords_incorporated`: Which ATS keywords this bullet contains.
+  - `confidence`: "high" (faithful rewrite), "medium" (reasonable inference),
+    or "low" (stretched beyond KB).
+- `tech_stack`: Optional comma-separated technology line (null if not useful).
+
+Maintain all existing bullets unless the user specifically asks to add, remove,
+or reorder them. Preserve the `original` field for each bullet exactly as-is.
+Quantify impact ONLY with numbers from the KB — never invent metrics.
+
+{% elif section_type == "earlier_experience" %}
+Regenerate the **earlier experience** summary for the resume.
+
+Produce a JSON object with a single field:
+- `earlier_experience`: A brief 1-2 sentence summary of older roles worth
+  mentioning. Show career breadth or fill a gap without excessive detail.
+
+Keep it concise and factual. Only reference roles and companies found in the KB.
+
+{% elif section_type == "languages" %}
+Regenerate the **languages** section for the resume.
+
+Produce a JSON object with a single field:
+- `languages`: An array of language strings (e.g., ["English (Native)",
+  "Spanish (Proficient)", "French (Intermediate)"]).
+
+Include only languages found in the KB. Add proficiency levels if available
+in the KB.
+
+{% endif %}
+
+## Critical Rules
+
+1. **NEVER fabricate** metrics, numbers, team sizes, or achievements not in the KB.
+2. **NEVER invent** technologies the candidate did not use.
+3. Apply ALL user instructions — the user expects every piece of feedback to be
+   reflected in the output.
+4. Maintain ATS keyword coverage where possible, but user instructions take
+   priority over keyword optimization.
+5. If a user instruction conflicts with accuracy (e.g., asks to add a skill not
+   in the KB), follow the instruction but set confidence to "low" where applicable.
+
+Respond with a single JSON object. No text outside the JSON.

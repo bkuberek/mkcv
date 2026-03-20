@@ -17,6 +17,7 @@ class CommandKind(Enum):
     CANCEL = auto()
     HELP = auto()
     REGENERATE = auto()
+    FREE_TEXT = auto()
     UNKNOWN = auto()
 
 
@@ -56,7 +57,7 @@ def parse(raw: str) -> ParsedCommand:
     - Empty / whitespace-only input  ->  DISPLAY (re-render current section)
     - ``/command [args]``            ->  matching CommandKind with args
     - Unknown ``/something``         ->  UNKNOWN
-    - Bare text (no leading ``/``)   ->  UNKNOWN
+    - Bare text (no leading ``/``)   ->  FREE_TEXT (regeneration instruction)
     """
     stripped = raw.strip()
 
@@ -64,7 +65,7 @@ def parse(raw: str) -> ParsedCommand:
         return ParsedCommand(kind=CommandKind.DISPLAY)
 
     if not stripped.startswith("/"):
-        return ParsedCommand(kind=CommandKind.UNKNOWN, args=stripped)
+        return ParsedCommand(kind=CommandKind.FREE_TEXT, args=stripped)
 
     parts = stripped.split(maxsplit=1)
     cmd_token = parts[0].lower()

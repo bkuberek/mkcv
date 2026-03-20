@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from mkcv.adapters.factory import (
     create_cover_letter_service,
     create_pipeline_service,
+    create_regeneration_service,
     create_render_service,
     create_workspace_service,
 )
@@ -161,11 +162,13 @@ def generate_command(
         ),
     ] = True,
     interactive: Annotated[
-        bool,
+        bool | None,
         cyclopts.Parameter(
-            help="Review and edit resume sections interactively after AI tailoring.",
+            name=["--interactive", "-i", "--no-interactive"],
+            help="Review and edit resume sections interactively after AI tailoring. "
+            "Defaults to on when running in an interactive terminal.",
         ),
-    ] = False,
+    ] = None,
     cover_letter: Annotated[
         bool,
         cyclopts.Parameter(
@@ -224,6 +227,10 @@ def generate_command(
     # Resolve per-output-type presets (needed before app-dir dispatch)
     effective_cv_preset = cv_preset or resolved_preset
     effective_cl_preset = cl_preset or resolved_preset
+
+    # ---- Resolve interactive default from TTY ----
+    if interactive is None:
+        interactive = sys.stdin.isatty()
 
     # ---- App-dir regeneration mode ----
     if app_dir is not None:
@@ -1124,7 +1131,65 @@ def _run_interactive_pipeline(
     stage3_data = json.loads(stage3_path.read_text(encoding="utf-8"))
     content = TailoredContent.model_validate(stage3_data)
 
-    session = InteractiveSession(content, console)
+    # -- Build regeneration service and context (graceful degradation) --
+    regen_service = None
+    regen_context = None
+
+    stage1_path = artifact_dir / "stage1_analysis.json"
+    if stage1_path.is_file():
+        from mkcv.core.models.regeneration_context import RegenerationContext
+
+        try:
+            jd_data = json.loads(stage1_path.read_text(encoding="utf-8"))
+            kb_text = kb.read_text(encoding="utf-8")
+
+            # Optionally load stage-2 selection for richer context
+            stage2_path = artifact_dir / "stage2_selection.json"
+            sel_data = None
+            if stage2_path.is_file():
+                sel_data = json.loads(stage2_path.read_text(encoding="utf-8"))
+
+            regen_context = RegenerationContext(
+                jd_analysis=jd_data,
+                ats_keywords=jd_data.get("ats_keywords", []),
+                kb_text=kb_text,
+                selection=sel_data,
+            )
+            regen_service = create_regeneration_service(
+                settings,
+                preset_name=preset_name,
+                provider_override=provider_override,
+            )
+            logger.debug("Regeneration service created for interactive session")
+        except Exception:
+            logger.warning(
+                "Could not create regeneration service; "
+                "interactive regeneration will be unavailable",
+                exc_info=True,
+            )
+            regen_service = None
+            regen_context = None
+    else:
+        logger.debug(
+            "Stage 1 artifact not found at %s; "
+            "interactive regeneration will be unavailable",
+            stage1_path,
+        )
+
+    # -- Build prompt function with tab completion (graceful degradation) --
+    from mkcv.cli.interactive.prompt_input import create_prompt_fn
+    from mkcv.cli.interactive.sections import build_sections
+
+    sections = build_sections(content)
+    prompt_fn = create_prompt_fn(sections)
+
+    session = InteractiveSession(
+        content,
+        console,
+        regeneration_service=regen_service,
+        regeneration_context=regen_context,
+        prompt_fn=prompt_fn,
+    )
     edited_content = session.run()
 
     if edited_content is None:

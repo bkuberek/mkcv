@@ -97,12 +97,46 @@ class TestParseSpecialInput:
 
     def test_bare_text_without_slash(self) -> None:
         result = parse("some bare text")
-        assert result.kind == CommandKind.UNKNOWN
+        assert result.kind == CommandKind.FREE_TEXT
         assert result.args == "some bare text"
 
     def test_leading_whitespace_is_stripped(self) -> None:
         result = parse("  /accept  ")
         assert result.kind == CommandKind.ACCEPT
+
+
+class TestParseFreeText:
+    """Bare text (no leading /) returns FREE_TEXT with the text as args."""
+
+    def test_bare_text_returns_free_text(self) -> None:
+        result = parse("some text")
+        assert result.kind == CommandKind.FREE_TEXT
+        assert result.args == "some text"
+
+    def test_unknown_slash_command_still_unknown(self) -> None:
+        result = parse("/foo")
+        assert result.kind == CommandKind.UNKNOWN
+        assert result.args == ""
+
+    def test_free_text_preserves_multiword_text(self) -> None:
+        result = parse("make it shorter and more concise")
+        assert result.kind == CommandKind.FREE_TEXT
+        assert result.args == "make it shorter and more concise"
+
+    def test_free_text_strips_surrounding_whitespace(self) -> None:
+        result = parse("  make it shorter  ")
+        assert result.kind == CommandKind.FREE_TEXT
+        assert result.args == "make it shorter"
+
+    def test_free_text_single_word(self) -> None:
+        result = parse("shorter")
+        assert result.kind == CommandKind.FREE_TEXT
+        assert result.args == "shorter"
+
+    def test_free_text_with_special_characters(self) -> None:
+        result = parse("add more keywords: Python, AWS, Docker")
+        assert result.kind == CommandKind.FREE_TEXT
+        assert result.args == "add more keywords: Python, AWS, Docker"
 
 
 class TestParsedCommandDataclass:

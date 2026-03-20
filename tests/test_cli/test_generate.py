@@ -1245,3 +1245,424 @@ class TestAppDirHelpers:
 
         _copy_stage_artifacts(source, target)
         assert (target / ".mkcv").is_dir()
+
+
+class TestInteractivePipelineRegenWiring:
+    """Tests that _run_interactive_pipeline wires up regeneration service."""
+
+    @staticmethod
+    def _stage3_data() -> dict[str, object]:
+        """Minimal stage-3 JSON content for TailoredContent."""
+        return {
+            "mission": {
+                "text": "Experienced engineer.",
+                "rationale": "Aligns with role.",
+            },
+            "skills": [{"label": "Languages", "skills": ["Python"]}],
+            "roles": [
+                {
+                    "company": "Acme",
+                    "position": "Engineer",
+                    "start_date": "2020-01",
+                    "end_date": "2023-06",
+                    "bullets": [
+                        {
+                            "original": "orig",
+                            "rewritten": "rewrite",
+                            "keywords_incorporated": [],
+                            "confidence": "high",
+                        }
+                    ],
+                }
+            ],
+        }
+
+    @staticmethod
+    def _stage1_data() -> dict[str, object]:
+        """Minimal stage-1 JD analysis JSON."""
+        return {
+            "company": "Acme Corp",
+            "role_title": "Engineer",
+            "ats_keywords": ["python", "distributed"],
+        }
+
+    @staticmethod
+    def _stage2_data() -> dict[str, object]:
+        """Minimal stage-2 selection JSON."""
+        return {"selected_roles": ["Engineer"]}
+
+    def _setup_artifacts(
+        self,
+        tmp_path: Path,
+        *,
+        with_stage1: bool = True,
+        with_stage2: bool = True,
+    ) -> Path:
+        """Create output dir with stage artifacts and return it."""
+        output_dir = tmp_path / "output"
+        mkcv_dir = output_dir / ".mkcv"
+        mkcv_dir.mkdir(parents=True)
+
+        import json
+
+        (mkcv_dir / "stage3_content.json").write_text(
+            json.dumps(self._stage3_data()),
+        )
+        if with_stage1:
+            (mkcv_dir / "stage1_analysis.json").write_text(
+                json.dumps(self._stage1_data()),
+            )
+        if with_stage2:
+            (mkcv_dir / "stage2_selection.json").write_text(
+                json.dumps(self._stage2_data()),
+            )
+        return output_dir
+
+    def test_interactive_session_receives_regen_service_and_context(
+        self, tmp_path: Path
+    ) -> None:
+        """When stage-1 artifact exists, InteractiveSession gets regen service."""
+        output_dir = self._setup_artifacts(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        jd = tmp_path / "jd.txt"
+        jd.write_text("Job description")
+
+        mock_pipeline = MagicMock()
+        mock_regen_service = MagicMock()
+        mock_session_cls = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.run.return_value = None  # cancelled
+
+        mock_session_cls.return_value = mock_session_instance
+
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(
+                f"{_CMD}.create_regeneration_service",
+                return_value=mock_regen_service,
+            ) as mock_create_regen,
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch(
+                "mkcv.cli.interactive.InteractiveSession",
+                mock_session_cls,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            mock_settings.in_workspace = False
+
+            from mkcv.cli.commands.generate import _run_interactive_pipeline
+
+            _run_interactive_pipeline(
+                jd=jd,
+                kb=kb,
+                output_dir=output_dir,
+                preset_name="standard",
+                theme="sb2nov",
+            )
+
+        # Verify InteractiveSession was called with regen_service and regen_context
+        mock_session_cls.assert_called_once()
+        call_kwargs = mock_session_cls.call_args
+        assert call_kwargs.kwargs["regeneration_service"] is mock_regen_service
+        assert call_kwargs.kwargs["regeneration_context"] is not None
+        regen_ctx = call_kwargs.kwargs["regeneration_context"]
+        assert regen_ctx.ats_keywords == ["python", "distributed"]
+        assert regen_ctx.kb_text == "Knowledge base content"
+        assert regen_ctx.jd_analysis["company"] == "Acme Corp"
+        assert regen_ctx.selection == self._stage2_data()
+
+        # Verify create_regeneration_service was called
+        mock_create_regen.assert_called_once()
+
+    def test_interactive_session_without_stage1_has_no_regen(
+        self, tmp_path: Path
+    ) -> None:
+        """When stage-1 artifact is missing, session gets no regen service."""
+        output_dir = self._setup_artifacts(tmp_path, with_stage1=False)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        jd = tmp_path / "jd.txt"
+        jd.write_text("Job description")
+
+        mock_pipeline = MagicMock()
+        mock_session_cls = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.run.return_value = None  # cancelled
+
+        mock_session_cls.return_value = mock_session_instance
+
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.create_regeneration_service") as mock_create_regen,
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch(
+                "mkcv.cli.interactive.InteractiveSession",
+                mock_session_cls,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            mock_settings.in_workspace = False
+
+            from mkcv.cli.commands.generate import _run_interactive_pipeline
+
+            _run_interactive_pipeline(
+                jd=jd,
+                kb=kb,
+                output_dir=output_dir,
+                preset_name="standard",
+                theme="sb2nov",
+            )
+
+        # Verify InteractiveSession was called with None for regen service
+        mock_session_cls.assert_called_once()
+        call_kwargs = mock_session_cls.call_args
+        assert call_kwargs.kwargs["regeneration_service"] is None
+        assert call_kwargs.kwargs["regeneration_context"] is None
+
+        # create_regeneration_service should NOT have been called
+        mock_create_regen.assert_not_called()
+
+    def test_interactive_session_without_stage2_still_has_regen(
+        self, tmp_path: Path
+    ) -> None:
+        """When stage-2 is missing but stage-1 exists, regen works without selection."""
+        output_dir = self._setup_artifacts(
+            tmp_path, with_stage1=True, with_stage2=False
+        )
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        jd = tmp_path / "jd.txt"
+        jd.write_text("Job description")
+
+        mock_pipeline = MagicMock()
+        mock_regen_service = MagicMock()
+        mock_session_cls = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.run.return_value = None  # cancelled
+
+        mock_session_cls.return_value = mock_session_instance
+
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(
+                f"{_CMD}.create_regeneration_service",
+                return_value=mock_regen_service,
+            ),
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch(
+                "mkcv.cli.interactive.InteractiveSession",
+                mock_session_cls,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            mock_settings.in_workspace = False
+
+            from mkcv.cli.commands.generate import _run_interactive_pipeline
+
+            _run_interactive_pipeline(
+                jd=jd,
+                kb=kb,
+                output_dir=output_dir,
+                preset_name="standard",
+                theme="sb2nov",
+            )
+
+        # Verify session gets regen service with context.selection = None
+        mock_session_cls.assert_called_once()
+        call_kwargs = mock_session_cls.call_args
+        assert call_kwargs.kwargs["regeneration_service"] is mock_regen_service
+        regen_ctx = call_kwargs.kwargs["regeneration_context"]
+        assert regen_ctx is not None
+        assert regen_ctx.selection is None
+
+    def test_regen_service_creation_error_degrades_gracefully(
+        self, tmp_path: Path
+    ) -> None:
+        """If create_regeneration_service raises, session works without regen."""
+        output_dir = self._setup_artifacts(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        jd = tmp_path / "jd.txt"
+        jd.write_text("Job description")
+
+        mock_pipeline = MagicMock()
+        mock_session_cls = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.run.return_value = None  # cancelled
+
+        mock_session_cls.return_value = mock_session_instance
+
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(
+                f"{_CMD}.create_regeneration_service",
+                side_effect=RuntimeError("No API key"),
+            ),
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch(
+                "mkcv.cli.interactive.InteractiveSession",
+                mock_session_cls,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            mock_settings.in_workspace = False
+
+            from mkcv.cli.commands.generate import _run_interactive_pipeline
+
+            _run_interactive_pipeline(
+                jd=jd,
+                kb=kb,
+                output_dir=output_dir,
+                preset_name="standard",
+                theme="sb2nov",
+            )
+
+        # Verify session was still created, but without regen service
+        mock_session_cls.assert_called_once()
+        call_kwargs = mock_session_cls.call_args
+        assert call_kwargs.kwargs["regeneration_service"] is None
+        assert call_kwargs.kwargs["regeneration_context"] is None
+
+
+class TestInteractivePipelinePromptFnWiring:
+    """Tests that _run_interactive_pipeline wires prompt_fn via create_prompt_fn."""
+
+    @staticmethod
+    def _stage3_data() -> dict[str, object]:
+        """Minimal stage-3 JSON content for TailoredContent."""
+        return {
+            "mission": {
+                "text": "Experienced engineer.",
+                "rationale": "Aligns with role.",
+            },
+            "skills": [{"label": "Languages", "skills": ["Python"]}],
+            "roles": [
+                {
+                    "company": "Acme",
+                    "position": "Engineer",
+                    "start_date": "2020-01",
+                    "end_date": "2023-06",
+                    "bullets": [
+                        {
+                            "original": "orig",
+                            "rewritten": "rewrite",
+                            "keywords_incorporated": [],
+                            "confidence": "high",
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def _setup_artifacts(self, tmp_path: Path) -> Path:
+        """Create output dir with stage artifacts and return it."""
+        import json
+
+        output_dir = tmp_path / "output"
+        mkcv_dir = output_dir / ".mkcv"
+        mkcv_dir.mkdir(parents=True)
+
+        (mkcv_dir / "stage3_content.json").write_text(
+            json.dumps(self._stage3_data()),
+        )
+        return output_dir
+
+    def test_prompt_fn_passed_to_interactive_session(self, tmp_path: Path) -> None:
+        """When create_prompt_fn returns a callable, it is passed to the session."""
+        output_dir = self._setup_artifacts(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        jd = tmp_path / "jd.txt"
+        jd.write_text("Job description")
+
+        mock_pipeline = MagicMock()
+        mock_session_cls = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.run.return_value = None  # cancelled
+
+        mock_session_cls.return_value = mock_session_instance
+        mock_prompt_fn = MagicMock()
+
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.create_regeneration_service"),
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch(
+                "mkcv.cli.interactive.InteractiveSession",
+                mock_session_cls,
+            ),
+            patch(
+                "mkcv.cli.interactive.prompt_input.create_prompt_fn",
+                return_value=mock_prompt_fn,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            mock_settings.in_workspace = False
+
+            from mkcv.cli.commands.generate import _run_interactive_pipeline
+
+            _run_interactive_pipeline(
+                jd=jd,
+                kb=kb,
+                output_dir=output_dir,
+                preset_name="standard",
+                theme="sb2nov",
+            )
+
+        # Verify prompt_fn is passed to InteractiveSession
+        mock_session_cls.assert_called_once()
+        call_kwargs = mock_session_cls.call_args
+        assert call_kwargs.kwargs["prompt_fn"] is mock_prompt_fn
+
+    def test_prompt_fn_is_none_when_create_returns_none(self, tmp_path: Path) -> None:
+        """When create_prompt_fn returns None (non-TTY), prompt_fn=None is passed."""
+        output_dir = self._setup_artifacts(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        jd = tmp_path / "jd.txt"
+        jd.write_text("Job description")
+
+        mock_pipeline = MagicMock()
+        mock_session_cls = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.run.return_value = None  # cancelled
+
+        mock_session_cls.return_value = mock_session_instance
+
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_pipeline_service", return_value=mock_pipeline),
+            patch(f"{_CMD}.create_regeneration_service"),
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch(
+                "mkcv.cli.interactive.InteractiveSession",
+                mock_session_cls,
+            ),
+            patch(
+                "mkcv.cli.interactive.prompt_input.create_prompt_fn",
+                return_value=None,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            mock_settings.in_workspace = False
+
+            from mkcv.cli.commands.generate import _run_interactive_pipeline
+
+            _run_interactive_pipeline(
+                jd=jd,
+                kb=kb,
+                output_dir=output_dir,
+                preset_name="standard",
+                theme="sb2nov",
+            )
+
+        # Verify prompt_fn=None is passed to InteractiveSession
+        mock_session_cls.assert_called_once()
+        call_kwargs = mock_session_cls.call_args
+        assert call_kwargs.kwargs["prompt_fn"] is None
