@@ -11,6 +11,7 @@ from typing import Any
 import tomli_w
 from ruamel.yaml import YAML
 
+from mkcv import __version__
 from mkcv.core.exceptions.workspace import WorkspaceError, WorkspaceExistsError
 from mkcv.core.models.application_metadata import ApplicationMetadata
 from mkcv.core.models.jd_document import JDDocument
@@ -27,20 +28,24 @@ _MKCV_TOML_TEMPLATE = """\
 #
 # All settings are optional — sensible defaults are built in.
 # Uncomment sections below to customise. Values shown are the defaults.
+#
+# All section headers use the [default.] prefix because mkcv uses
+# Dynaconf environments. This prefix is required for settings to
+# take effect.
 
-[workspace]
-version = "0.1.0"
+[default.workspace]
+version = "{__mkcv_version__}"
 
-[paths]
+[default.paths]
 knowledge_base_dir = "knowledge-base"
 applications_dir = "applications"
 templates_dir = "templates"
 
-[naming]
+[default.naming]
 company_slug = true
 application_pattern = "{company}/{position}/{date}"
 
-[defaults]
+[default.defaults]
 theme = "sb2nov"
 profile = "standard"
 
@@ -49,40 +54,40 @@ profile = "standard"
 # `mkcv themes` to list themes, `mkcv themes --preview <name>`
 # to preview one.
 #
-# [rendering]
+# [default.rendering]
 # theme = "sb2nov"                  # classic, engineeringresumes, moderncv, ...
 # font = "SourceSansPro"            # any system font
 # font_size = "10pt"
 # page_size = "letterpaper"         # letterpaper or a4paper
 #
-# [rendering.overrides]
+# [default.rendering.overrides]
 # primary_color = "003366"          # hex colour without #
 #
 # # Page margins — override RenderCV theme defaults
-# [rendering.page]
+# [default.rendering.page]
 # top_margin = "0.7in"
 # bottom_margin = "0.7in"
 # left_margin = "0.5in"
 # right_margin = "0.5in"
 #
 # # Header spacing below name/headline/connections
-# [rendering.header]
+# [default.rendering.header]
 # space_below_name = "0.15cm"
 # space_below_headline = "0.15cm"
 # space_below_connections = "0.3cm"
 #
 # # Experience section geometry
-# [rendering.entries]
+# [default.rendering.entries]
 # date_and_location_width = "3.6cm"
 #
 # # Section heading style
-# [rendering.section_titles]
-# type = "with-full-line"
+# [default.rendering.section_titles]
+# type = "with_full_line"
 # space_above = "0.3cm"
 # space_below = "0.15cm"
 #
 # # Line spacing and text alignment
-# [rendering.typography]
+# [default.rendering.typography]
 # line_spacing = "0.7em"
 # alignment = "justified"
 
@@ -90,27 +95,27 @@ profile = "standard"
 # Override AI provider/model per stage. The defaults use a smart mix:
 # Haiku for mechanical tasks, Opus for decisions and writing.
 #
-# [pipeline.stages.analyze]
+# [default.pipeline.stages.analyze]
 # provider = "anthropic"
 # model = "claude-haiku-4-5-20251001"
 # temperature = 0.2
 #
-# [pipeline.stages.select]
+# [default.pipeline.stages.select]
 # provider = "anthropic"
 # model = "claude-opus-4-20250514"
 # temperature = 0.3
 #
-# [pipeline.stages.tailor]
+# [default.pipeline.stages.tailor]
 # provider = "anthropic"
 # model = "claude-opus-4-20250514"
 # temperature = 0.5
 #
-# [pipeline.stages.structure]
+# [default.pipeline.stages.structure]
 # provider = "anthropic"
-# model = "claude-haiku-4-5-20251001"
+# model = "claude-sonnet-4-20250514"
 # temperature = 0.1
 #
-# [pipeline.stages.review]
+# [default.pipeline.stages.review]
 # provider = "anthropic"
 # model = "claude-opus-4-20250514"
 # temperature = 0.3
@@ -118,21 +123,21 @@ profile = "standard"
 # ── Cover Letter ────────────────────────────────────────────────────
 # Settings for cover letter generation (used with --cover-letter).
 #
-# [cover_letter]
+# [default.cover_letter]
 # auto_render = true
 #
-# [cover_letter.stages.generate]
+# [default.cover_letter.stages.generate]
 # provider = "anthropic"
 # model = "claude-opus-4-20250514"
 # temperature = 0.6
 #
-# [cover_letter.stages.review]
+# [default.cover_letter.stages.review]
 # provider = "anthropic"
 # model = "claude-haiku-4-5-20251001"
 # temperature = 0.2
 #
 # # Cover letter page layout
-# [cover_letter.design]
+# [default.cover_letter.design]
 # page_size = "us-letter"
 # margin_top = "1.2in"
 # margin_bottom = "1in"
@@ -148,20 +153,20 @@ profile = "standard"
 # Writing-style guidelines applied during content generation.
 # For detailed control, edit knowledge-base/voice.md instead.
 #
-# [voice]
+# [default.voice]
 # guidelines = ""
 
 # ── Providers ───────────────────────────────────────────────────────
 # API keys. Prefer environment variables (ANTHROPIC_API_KEY, etc.)
 # over storing keys here.
 #
-# [providers.anthropic]
+# [default.providers.anthropic]
 # api_key = ""           # prefer: export ANTHROPIC_API_KEY=sk-ant-...
 #
-# [providers.openai]
+# [default.providers.openai]
 # api_key = ""           # prefer: export OPENAI_API_KEY=sk-...
 #
-# [providers.openrouter]
+# [default.providers.openrouter]
 # api_key = ""           # prefer: export OPENROUTER_API_KEY=sk-or-...
 """
 
@@ -443,11 +448,11 @@ To use [OpenRouter](https://openrouter.ai), set the API key and configure
 your `mkcv.toml`:
 
 ```toml
-[pipeline.stages.analyze]
+[default.pipeline.stages.analyze]
 provider = "openrouter"
 model = "anthropic/claude-sonnet-4"
 
-[pipeline.stages.review]
+[default.pipeline.stages.review]
 provider = "openrouter"
 model = "anthropic/claude-sonnet-4"
 ```
@@ -474,29 +479,29 @@ Configuration is resolved in layers (highest priority wins):
 
 | Section | Controls |
 |---------|----------|
-| `[workspace]` | Workspace version |
-| `[paths]` | Knowledge base, applications, templates directories |
-| `[naming]` | Company slug, application directory pattern |
-| `[defaults]` | Default theme and profile |
-| `[rendering]` | Resume PDF appearance — font, colours, margins, layout |
-| `[pipeline.stages.*]` | AI provider/model/temperature per pipeline stage |
-| `[cover_letter]` | Cover letter generation and design settings |
-| `[voice]` | Writing-style guidelines |
-| `[providers.*]` | API keys (prefer env vars instead) |
+| `[default.workspace]` | Workspace version |
+| `[default.paths]` | Knowledge base, applications, templates directories |
+| `[default.naming]` | Company slug, application directory pattern |
+| `[default.defaults]` | Default theme and profile |
+| `[default.rendering]` | Resume PDF appearance — font, colours, margins, layout |
+| `[default.pipeline.stages.*]` | AI provider/model/temperature per pipeline stage |
+| `[default.cover_letter]` | Cover letter generation and design settings |
+| `[default.voice]` | Writing-style guidelines |
+| `[default.providers.*]` | API keys (prefer env vars instead) |
 
 ### Rendering (fonts, colours, page size)
 
 ```toml
-[rendering]
+[default.rendering]
 theme = "classic"
 font = "Charter"
 font_size = "11pt"
 page_size = "a4paper"          # a4paper or letterpaper
 
-[rendering.overrides]
+[default.rendering.overrides]
 primary_color = "004080"       # hex colour without #
 
-[rendering.page]
+[default.rendering.page]
 top_margin = "0.7in"
 bottom_margin = "0.7in"
 left_margin = "0.5in"
@@ -512,28 +517,28 @@ The default standard preset uses a smart-mixed allocation:
 
 ```toml
 # Haiku for mechanical tasks (fast, cheap)
-[pipeline.stages.analyze]
+[default.pipeline.stages.analyze]
 provider = "anthropic"
 model = "claude-haiku-4-5-20251001"
 temperature = 0.2
 
-[pipeline.stages.structure]
+[default.pipeline.stages.structure]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-sonnet-4-20250514"
 temperature = 0.1
 
 # Opus for decisions and writing (best quality)
-[pipeline.stages.select]
+[default.pipeline.stages.select]
 provider = "anthropic"
 model = "claude-opus-4-20250514"
 temperature = 0.3
 
-[pipeline.stages.tailor]
+[default.pipeline.stages.tailor]
 provider = "anthropic"
 model = "claude-opus-4-20250514"
 temperature = 0.5
 
-[pipeline.stages.review]
+[default.pipeline.stages.review]
 provider = "anthropic"
 model = "claude-opus-4-20250514"
 temperature = 0.3
@@ -542,20 +547,20 @@ temperature = 0.3
 ### Cover letter
 
 ```toml
-[cover_letter]
+[default.cover_letter]
 auto_render = true
 
-[cover_letter.stages.generate]
+[default.cover_letter.stages.generate]
 provider = "anthropic"
 model = "claude-opus-4-20250514"
 temperature = 0.6
 
-[cover_letter.stages.review]
+[default.cover_letter.stages.review]
 provider = "anthropic"
 model = "claude-haiku-4-5-20251001"
 temperature = 0.2
 
-[cover_letter.design]
+[default.cover_letter.design]
 page_size = "us-letter"
 margin_top = "1.2in"
 margin_bottom = "1in"
@@ -589,7 +594,7 @@ a detailed preview with colours and fonts.
 
 ```bash
 # Set the default in mkcv.toml
-# [defaults]
+# [default.defaults]
 # theme = "classic"
 
 # Or pass it per-command
@@ -832,7 +837,8 @@ class WorkspaceManager:
             ) from exc
 
         # Write mkcv.toml with commented configuration guidance
-        toml_path.write_text(_MKCV_TOML_TEMPLATE, encoding="utf-8")
+        toml_content = _MKCV_TOML_TEMPLATE.replace("{__mkcv_version__}", __version__)
+        toml_path.write_text(toml_content, encoding="utf-8")
         logger.info("Created %s", toml_path)
 
         # Create directories

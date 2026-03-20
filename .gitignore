@@ -40,3 +40,8 @@ htmlcov/
 output/
 .secrets.toml
 *.secrets.toml
+
+# Agent tooling
+.claude/
+.atl/
+openspec/

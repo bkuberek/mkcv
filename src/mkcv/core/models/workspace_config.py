@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, Field
 
+from mkcv import __version__
+
 
 class WorkspacePaths(BaseModel):
     """Path configuration within a workspace."""
@@ -28,7 +30,7 @@ class WorkspaceDefaults(BaseModel):
 class WorkspaceConfig(BaseModel):
     """Workspace configuration parsed from mkcv.toml."""
 
-    version: str = "0.1.0"
+    version: str = __version__
     paths: WorkspacePaths = Field(default_factory=WorkspacePaths)
     naming: WorkspaceNaming = Field(default_factory=WorkspaceNaming)
     defaults: WorkspaceDefaults = Field(default_factory=WorkspaceDefaults)

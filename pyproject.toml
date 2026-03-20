@@ -10,7 +10,19 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
 authors = [
-    {name = "Bruno Kuberek"}
+    {name = "Bastian Kuberek", email = "bastian@bkuberek.com"}
+]
+keywords = ["resume", "cv", "ai", "cli", "ats", "job-search", "career", "pdf"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 dependencies = [
     "cyclopts>=3.0",
@@ -25,6 +37,12 @@ dependencies = [
     "rendercv[full]>=2.7",
     "pypdf>=6.9.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/bkuberek/mkcv"
+Repository = "https://github.com/bkuberek/mkcv"
+Issues = "https://github.com/bkuberek/mkcv/issues"
+Changelog = "https://github.com/bkuberek/mkcv/blob/main/CHANGELOG.md"
 
 [project.scripts]
 mkcv = "mkcv.cli.app:main"

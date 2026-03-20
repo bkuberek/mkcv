@@ -1,0 +1,197 @@
+# mkcv Configuration
+# ==================
+# Copy this file to your workspace root as mkcv.toml.
+# All settings are optional -- defaults are shown below (commented out).
+#
+# Configuration is resolved in 5 layers (later overrides earlier):
+#   1. Built-in defaults (bundled with package)
+#   2. Global user config (~/.config/mkcv/settings.toml)
+#   3. Workspace config (this file: mkcv.toml)
+#   4. Environment variables (MKCV_ prefix)
+#   5. CLI flags
+#
+# API keys are always set via environment variables:
+#   export ANTHROPIC_API_KEY=sk-ant-...
+#   export OPENAI_API_KEY=sk-...
+#   export OPENROUTER_API_KEY=sk-or-...
+
+# ---------------------------------------------------------------------------
+# General settings
+# ---------------------------------------------------------------------------
+[general]
+# Enable verbose (DEBUG) logging. Overridden by --verbose / -v CLI flag.
+# verbose = false
+
+# Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# log_level = "WARNING"
+
+# Python logging format string
+# log_format = "%(levelname)s: %(message)s"
+
+# ---------------------------------------------------------------------------
+# Resume generation pipeline
+# ---------------------------------------------------------------------------
+[pipeline]
+# Which stage to start from (1-5). Useful for re-running from a specific stage.
+# Stages: 1=analyze, 2=select, 3=tailor, 4=structure, 5=review
+# from_stage = 1
+
+# Automatically render the resume to PDF after generation completes.
+# auto_render = true
+
+# Pause after each pipeline stage for review before proceeding.
+# interactive = false
+
+# Per-stage LLM configuration
+# Each stage can use a different provider, model, and temperature.
+# Supported providers: anthropic, openai, ollama, openrouter
+
+# Stage 1: Analyze the job description -- extract requirements, keywords, priorities
+[pipeline.stages.analyze]
+# provider = "anthropic"
+# model = "claude-haiku-4-5-20251001"
+# temperature = 0.2
+
+# Stage 2: Select the most relevant experience from your knowledge base
+[pipeline.stages.select]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.3
+
+# Stage 3: Tailor bullet points -- rewrite with XYZ formula, weave in keywords
+[pipeline.stages.tailor]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.5
+
+# Stage 4: Structure the resume into RenderCV-compatible YAML
+[pipeline.stages.structure]
+# provider = "anthropic"
+# model = "claude-sonnet-4-20250514"
+# temperature = 0.1
+
+# Stage 5: Review for ATS compliance, scoring, improvement suggestions
+[pipeline.stages.review]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.3
+
+# ---------------------------------------------------------------------------
+# Cover letter generation
+# ---------------------------------------------------------------------------
+[cover_letter]
+# Automatically render the cover letter to PDF after generation.
+# auto_render = true
+
+# LLM configuration for cover letter stages
+[cover_letter.stages.generate]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.6
+
+[cover_letter.stages.review]
+# provider = "anthropic"
+# model = "claude-haiku-4-5-20251001"
+# temperature = 0.2
+
+# Cover letter layout and design
+# Uncomment and modify to customize cover letter appearance.
+# [cover_letter.design]
+# page_size = "us-letter"           # Page size: "us-letter" or "a4"
+# margin_top = "1.2in"              # Top margin
+# margin_bottom = "1in"             # Bottom margin
+# margin_left = "1in"               # Left margin
+# margin_right = "1in"              # Right margin
+# font = "Source Sans Pro"          # Font family
+# font_size = "11pt"                # Font size
+# name_size = "16pt"                # Name heading size
+# line_spacing = "0.7em"            # Line spacing
+# default_salutation = "Dear Hiring Manager,"  # Default greeting
+
+# ---------------------------------------------------------------------------
+# Resume rendering (PDF output)
+# ---------------------------------------------------------------------------
+[rendering]
+# Resume theme. Available themes: sb2nov, classic, moderncv, engineeringresumes
+# Use `mkcv themes` to see all available themes and `mkcv themes --preview <name>` for details.
+# theme = "sb2nov"
+
+# Default font family
+# font = "SourceSansPro"
+
+# Default font size
+# font_size = "10pt"
+
+# Page size: "letterpaper" or "a4paper"
+# page_size = "letterpaper"
+
+# Theme property overrides
+# These override the theme's built-in defaults for specific properties.
+[rendering.overrides]
+# font = "Charter"                  # Override font family
+# font_size = "11pt"                # Override font size
+# page_size = "a4paper"             # Override page size
+# primary_color = "004080"          # Primary accent color (hex, no #)
+
+# Page geometry (margins)
+# Overrides the theme's default page margins.
+# [rendering.page]
+# top_margin = "0.7in"
+# bottom_margin = "0.7in"
+# left_margin = "0.5in"
+# right_margin = "0.5in"
+
+# Header layout
+# Controls spacing below name, headline, and connections in the resume header.
+# [rendering.header]
+# space_below_name = "0.15cm"
+# space_below_headline = "0.15cm"
+# space_below_connections = "0.3cm"
+
+# Entry layout
+# Controls experience section geometry.
+# [rendering.entries]
+# date_and_location_width = "3.6cm"
+
+# Section titles
+# Controls heading style for resume sections (Experience, Education, etc.).
+# [rendering.section_titles]
+# type = "with_full_line"           # Options: "with_full_line", "with_parial_line", "moderncv", "with_line"
+# space_above = "0.3cm"
+# space_below = "0.15cm"
+
+# Typography
+# Controls text line spacing and alignment.
+# [rendering.typography]
+# line_spacing = "0.7em"
+# alignment = "justified"           # Options: "justified", "left-aligned"
+
+# ---------------------------------------------------------------------------
+# Workspace settings
+# ---------------------------------------------------------------------------
+[workspace]
+# Path to knowledge base file (relative to workspace root)
+# knowledge_base = "knowledge-base/career.md"
+
+# Directory where generated applications are stored
+# applications_dir = "applications"
+
+# Directory for custom prompt template overrides
+# templates_dir = "templates"
+
+# Naming pattern for application directories.
+# Available variables: {company}, {position}, {date}
+# naming_pattern = "{company}/{position}/{date}"
+
+# Slugify company name in directory paths (lowercase, hyphens)
+# company_slug = true
+
+# ---------------------------------------------------------------------------
+# Voice and writing style
+# ---------------------------------------------------------------------------
+[voice]
+# Custom writing guidelines for the AI. Describe your preferred tone, style,
+# and any specific instructions for how bullets should be written.
+# Example: "Use active voice. Prefer concise, metric-driven statements.
+#           Avoid buzzwords like 'synergy' and 'leverage'."
+# guidelines = ""
