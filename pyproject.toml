@@ -36,6 +36,7 @@ dependencies = [
     "openai>=1.50",
     "rendercv[full]>=2.7",
     "pypdf>=6.9.1",
+    "prompt_toolkit>=3.0",
 ]
 
 [project.urls]

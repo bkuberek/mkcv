@@ -169,13 +169,18 @@ def render_help(console: Console) -> None:
     rows: list[tuple[str, str, str]] = [
         ("/accept", "/a", "Accept this section and advance"),
         ("/skip", "/s", "Skip this section and advance"),
-        ("/edit", "/e", "Edit this section (mission text only in MVP)"),
+        ("/edit", "/e", "Edit this section (mission, skills, bullets, etc.)"),
         ("/display", "/d", "Re-display the current section"),
         ("/sections", "", "Show all sections with their status"),
         ("/goto N", "/g N", "Jump to section number N"),
         ("/done", "", "Finish review (all sections must be accepted or skipped)"),
         ("/cancel", "", "Cancel and discard all changes"),
-        ("/regenerate", "/regen", "Regenerate section with a prompt (future)"),
+        (
+            "/regenerate",
+            "/regen",
+            "Regenerate section with LLM: /regenerate <instructions>",
+        ),
+        ("<text>", "", "Type instructions to regenerate the current section"),
         ("/help", "/h", "Show this help"),
         ("(empty)", "", "Re-display the current section"),
     ]
@@ -184,6 +189,10 @@ def render_help(console: Console) -> None:
         table.add_row(cmd, alias, desc)
 
     console.print(table)
+    console.print(
+        "[dim]Note: regeneration instructions accumulate per-section "
+        "until /accept.[/dim]",
+    )
 
 
 # ---------------------------------------------------------------------------

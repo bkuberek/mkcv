@@ -340,3 +340,38 @@ class TestRenderHelp:
         assert "/a" in output
         assert "/s" in output
         assert "/h" in output
+
+    def test_lists_free_text_row(self) -> None:
+        console, buf = _capture_console()
+
+        render_help(console)
+        output = buf.getvalue()
+
+        assert "<text>" in output
+        assert "Type instructions to regenerate" in output
+
+    def test_edit_description_mentions_all_sections(self) -> None:
+        console, buf = _capture_console()
+
+        render_help(console)
+        output = buf.getvalue()
+
+        assert "mission, skills, bullets" in output
+
+    def test_regenerate_description_shows_usage(self) -> None:
+        console, buf = _capture_console()
+
+        render_help(console)
+        output = buf.getvalue()
+
+        assert "Regenerate section with LLM" in output
+        assert "/regenerate <instructions>" in output
+
+    def test_shows_instruction_accumulation_note(self) -> None:
+        console, buf = _capture_console()
+
+        render_help(console)
+        output = buf.getvalue()
+
+        assert "instructions accumulate per-section" in output
+        assert "/accept" in output

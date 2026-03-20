@@ -9,6 +9,7 @@ from mkcv.adapters.factory import (
     _resolve_preset,
     _resolve_stage_configs,
     create_pipeline_service,
+    create_regeneration_service,
     create_workspace_service,
 )
 from mkcv.adapters.llm.anthropic import AnthropicAdapter
@@ -16,6 +17,7 @@ from mkcv.adapters.llm.openai import OpenAIAdapter
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.llm.stub import StubLLMAdapter
 from mkcv.core.models.profile_preset import ContentDensity
+from mkcv.core.services.regeneration import RegenerationService
 from mkcv.core.services.workspace import WorkspaceService
 
 
@@ -338,3 +340,76 @@ class TestCreateWorkspaceService:
         assert hasattr(svc, "init_workspace")
         assert hasattr(svc, "setup_application")
         assert hasattr(svc, "list_applications")
+
+
+class TestCreateRegenerationService:
+    """Tests for create_regeneration_service factory function."""
+
+    def _make_stub_config(self) -> MagicMock:
+        """Build a config that resolves to stub provider for all stages."""
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+        stage = MagicMock()
+        stage.provider = "stub"
+        stage.model = "stub-model"
+        stage.temperature = 0.3
+        config.pipeline.stages.analyze = stage
+        config.pipeline.stages.select = stage
+        config.pipeline.stages.tailor = stage
+        config.pipeline.stages.structure = stage
+        config.pipeline.stages.review = stage
+        return config
+
+    def test_returns_regeneration_service(self) -> None:
+        config = self._make_stub_config()
+        svc = create_regeneration_service(config)
+        assert isinstance(svc, RegenerationService)
+
+    def test_uses_stage3_config(self) -> None:
+        config = self._make_stub_config()
+        tailor = MagicMock()
+        tailor.provider = "stub"
+        tailor.model = "tailor-model-x"
+        tailor.temperature = 0.7
+        config.pipeline.stages.tailor = tailor
+
+        svc = create_regeneration_service(config)
+        assert svc._model == "tailor-model-x"
+        assert svc._temperature == 0.7
+
+    def test_preset_uses_stage3_model(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+
+        svc = create_regeneration_service(config, preset_name="standard")
+        # Standard preset stage 3 uses Opus
+        assert "opus" in svc._model
+        assert svc._temperature == 0.5
+
+    def test_provider_override_changes_provider(self) -> None:
+        config = MagicMock()
+        config.providers = None
+        config.in_workspace = False
+        config.workspace_root = None
+
+        svc = create_regeneration_service(
+            config, preset_name="standard", provider_override="stub"
+        )
+        assert isinstance(svc, RegenerationService)
+        # The LLM adapter should be a StubLLMAdapter
+        assert isinstance(svc._llm, StubLLMAdapter)
+
+    def test_default_preset_reads_from_config(self) -> None:
+        config = self._make_stub_config()
+        svc = create_regeneration_service(config, preset_name="default")
+        assert isinstance(svc, RegenerationService)
+        assert svc._model == "stub-model"
+
+    def test_has_prompt_loader(self) -> None:
+        config = self._make_stub_config()
+        svc = create_regeneration_service(config)
+        assert svc._prompts is not None
