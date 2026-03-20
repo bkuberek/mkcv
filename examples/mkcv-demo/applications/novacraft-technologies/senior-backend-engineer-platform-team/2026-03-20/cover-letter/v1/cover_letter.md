@@ -1,0 +1,18 @@
+# Cover Letter — NovaCraft Technologies
+
+**Senior Backend Engineer - Platform Team**
+
+---
+
+Dear Hiring Manager,
+
+Your Platform team's mission to build the infrastructure backbone for $4B in annual transaction volume immediately caught my attention. As someone who recently architected an API gateway consolidating 200+ microservices at Arcline Systems, I understand the critical role platform engineering plays in fintech scale — where every millisecond of latency directly impacts revenue. The opportunity to shape NovaCraft's technical foundation for the next 3-5 years, particularly as you triple transaction volume year-over-year, aligns perfectly with my experience building high-throughput systems that grow with the business.
+
+My recent work at Arcline Systems directly maps to your platform challenges. When I joined, our monolithic order processing system was buckling under load, managing only 500 orders per minute. I designed and implemented an event-driven pipeline using Apache Kafka and Python that now processes 8,000 orders per minute — a 16x improvement that gave us years of runway. More importantly, I built this system with the same principles your role demands: sub-100ms p99 latency, horizontal scalability, and clear service contracts that 15+ product teams could depend on. The architectural decisions I documented through ADRs and design reviews became the blueprint for how we approach all platform services.
+
+Beyond technical execution, I've focused on platform adoption and developer experience — critical for a team supporting 15+ product engineering teams. At Arcline, I built a self-service deployment platform that reduced deploy times from 45 minutes to 4 minutes, but the real win was developer autonomy. By providing clear API standards, comprehensive observability, and Infrastructure as Code templates, we eliminated 72% of deployment failures and freed the platform team from constant firefighting. At Meridian Health, I navigated the complexity of HIPAA compliance while maintaining system performance — experience that translates directly to maintaining PCI-DSS and SOC 2 compliance without sacrificing the developer experience at NovaCraft.
+
+I'm excited about the opportunity to bring my platform engineering expertise to NovaCraft's next growth phase. The combination of technical challenges — 30,000+ RPS, global scale, real-time fraud detection — and the chance to define architectural standards for a rapidly scaling fintech makes this role particularly compelling. I'd welcome the opportunity to discuss how my experience building resilient, developer-friendly platforms can help NovaCraft maintain its 3x growth trajectory while keeping latency low and reliability high.
+
+Best regards,  
+Alex Chen

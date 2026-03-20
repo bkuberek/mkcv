@@ -1,0 +1,8 @@
+# mkcv workspace ignores
+.mkcv/
+*.pdf
+*.png
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,104 @@
+cv:
+  name: "Alex Chen"
+  headline: "Senior platform engineer with 9 years building high-throughput distributed
+    systems, specializing in event-driven architectures and developer platform acceleration."
+  location: "San Francisco, CA"
+  email: "alex.chen@example.com"
+  phone: "+1 415 555 0100"
+  website: "https://alexchen.example.com"
+  social_networks:
+  - network: LinkedIn
+    username: alexchen-example
+  - network: GitHub
+    username: alexchen-example
+  sections:
+    experience:
+    - company: "Arcline Systems"
+      position: "Senior Staff Engineer"
+      location: "San Francisco, CA (Hybrid)"
+      start_date: "2023-01"
+      end_date: "present"
+      highlights:
+      - "Designed and implemented company-wide API Gateway using Go and Envoy Proxy,
+        consolidating 12 legacy ingress configurations and reducing p99 latency from
+        340ms to 85ms for all customer-facing endpoints serving 200+ microservices"
+      - "Architected event-driven order processing pipeline on Apache Kafka and Python,
+        replacing synchronous monolith and improving throughput from 500 to 8,000
+        orders per minute during peak traffic, demonstrating ability to scale high-throughput
+        systems for transaction processing"
+      - "Built internal developer platform with self-service deployment tooling using
+        Kubernetes (EKS), Terraform, and Infrastructure as Code practices, reducing
+        average deploy time from 45 minutes to 4 minutes and cutting deployment failures
+        by 72% across 6-engineer Platform Team"
+      - "Mentored 3 mid-level engineers to senior promotions over 18 months through
+        weekly 1:1s, System Design reviews, and stretch assignments on cross-team
+        projects, demonstrating Technical Leadership in platform team context"
+      - "Drove adoption of gRPC and Protocol Buffers for internal service communication
+        across distributed systems, migrating 34 REST endpoints and reducing inter-service
+        payload sizes by 60% while improving type safety"
+    - company: "Meridian Health Technologies"
+      position: "Senior Software Engineer"
+      location: "Remote"
+      start_date: "2020-03"
+      end_date: "2022-12"
+      highlights:
+      - "Built real-time data synchronization service in Python (FastAPI) and PostgreSQL
+        processing 2.3M events per day with 99.97% uptime over 18 months, demonstrating
+        high-throughput systems expertise critical for payment processing platforms"
+      - "Designed and implemented HIPAA-compliant audit logging system using Apache
+        Kafka and Elasticsearch for event streaming, enabling full request traceability
+        and passing 3 consecutive compliance audits with zero findings — demonstrating
+        regulatory compliance expertise applicable to PCI-DSS and SOC 2 requirements"
+      - "Optimized PostgreSQL query performance for reporting module, reducing average
+        query time from 12 seconds to 800ms by implementing materialized views, composite
+        indexes, and connection pooling — critical skills for fintech transaction
+        databases"
+    - company: "BrightPath Education"
+      position: "Software Engineer"
+      location: "New York, NY"
+      start_date: "2017-06"
+      end_date: "2020-02"
+      highlights:
+      - "Designed and implemented RESTful API layer serving 15,000 requests per second
+        at peak using Python (Django) with Redis caching, demonstrating ability to
+        build high-throughput systems approaching the scale requirements for payment
+        platforms"
+      - "Led migration from single PostgreSQL instance to read-replica architecture,
+        improving read query throughput by 4x and eliminating downtime during traffic
+        spikes — essential for maintaining payment system availability"
+    skills:
+    - label: "Languages & Frameworks"
+      details: "Python, Go, PostgreSQL, FastAPI, Django, gRPC, Protocol Buffers"
+    - label: "Platform & Infrastructure"
+      details: "Kubernetes, AWS (EKS, ECS, Lambda), Docker, Terraform, Infrastructure
+        as Code, API Gateway (Envoy), Service Mesh"
+    - label: "Data & Streaming"
+      details: "Apache Kafka, Event Streaming, Redis, Elasticsearch, High-throughput
+        systems"
+    - label: "Architecture & Leadership"
+      details: "Microservices, Distributed Systems, System Design, Technical Leadership,
+        Mentoring"
+    education:
+    - institution: "Columbia University"
+      area: "Computer Science"
+      degree: "M.S."
+      start_date: "2013-09"
+      end_date: "2015-05"
+      highlights:
+      - "Focus: Distributed Systems and Machine Learning"
+      - "Teaching Assistant for Operating Systems (2 semesters)"
+    - institution: "University of California, Berkeley"
+      area: "Computer Science"
+      degree: "B.S."
+      start_date: "2009-09"
+      end_date: "2013-05"
+      highlights:
+      - "Dean's List (6 semesters)"
+      - "Senior capstone: distributed key-value store with Raft consensus"
+    languages:
+    - label: "English"
+      details: "Native"
+    - label: "Mandarin"
+      details: "Conversational"
+design:
+  theme: sb2nov
