@@ -1,0 +1,145 @@
+# mkcv workspace configuration
+# Docs: https://github.com/bkuberek/mkcv
+#
+# All settings are optional — sensible defaults are built in.
+# Uncomment sections below to customise. Values shown are the defaults.
+#
+# All section headers use the [default.] prefix because mkcv uses
+# Dynaconf environments. This prefix is required for settings to
+# take effect.
+
+[default.workspace]
+version = "1.1.0"
+
+[default.paths]
+knowledge_base_dir = "knowledge-base"
+applications_dir = "applications"
+templates_dir = "templates"
+
+[default.naming]
+company_slug = true
+application_pattern = "{company}/{position}/{date}"
+
+[default.defaults]
+theme = "sb2nov"
+profile = "standard"
+
+# ── Rendering ───────────────────────────────────────────────────────
+# Theme controls the visual design of your resume PDF. Run
+# `mkcv themes` to list themes, `mkcv themes --preview <name>`
+# to preview one.
+#
+# [default.rendering]
+# theme = "sb2nov"                  # classic, engineeringresumes, moderncv, ...
+# font = "SourceSansPro"            # any system font
+# font_size = "10pt"
+# page_size = "letterpaper"         # letterpaper or a4paper
+#
+# [default.rendering.overrides]
+# primary_color = "003366"          # hex colour without #
+#
+# # Page margins — override RenderCV theme defaults
+# [default.rendering.page]
+# top_margin = "0.7in"
+# bottom_margin = "0.7in"
+# left_margin = "0.5in"
+# right_margin = "0.5in"
+#
+# # Header spacing below name/headline/connections
+# [default.rendering.header]
+# space_below_name = "0.15cm"
+# space_below_headline = "0.15cm"
+# space_below_connections = "0.3cm"
+#
+# # Experience section geometry
+# [default.rendering.entries]
+# date_and_location_width = "3.6cm"
+#
+# # Section heading style
+# [default.rendering.section_titles]
+# type = "with_full_line"
+# space_above = "0.3cm"
+# space_below = "0.15cm"
+#
+# # Line spacing and text alignment
+# [default.rendering.typography]
+# line_spacing = "0.7em"
+# alignment = "justified"
+
+# ── Pipeline ────────────────────────────────────────────────────────
+# Override AI provider/model per stage. The defaults use a smart mix:
+# Haiku for mechanical tasks, Opus for decisions and writing.
+#
+# [default.pipeline.stages.analyze]
+# provider = "anthropic"
+# model = "claude-haiku-4-5-20251001"
+# temperature = 0.2
+#
+# [default.pipeline.stages.select]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.3
+#
+# [default.pipeline.stages.tailor]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.5
+#
+# [default.pipeline.stages.structure]
+# provider = "anthropic"
+# model = "claude-sonnet-4-20250514"
+# temperature = 0.1
+#
+# [default.pipeline.stages.review]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.3
+
+# ── Cover Letter ────────────────────────────────────────────────────
+# Settings for cover letter generation (used with --cover-letter).
+#
+# [default.cover_letter]
+# auto_render = true
+#
+# [default.cover_letter.stages.generate]
+# provider = "anthropic"
+# model = "claude-opus-4-20250514"
+# temperature = 0.6
+#
+# [default.cover_letter.stages.review]
+# provider = "anthropic"
+# model = "claude-haiku-4-5-20251001"
+# temperature = 0.2
+#
+# # Cover letter page layout
+# [default.cover_letter.design]
+# page_size = "us-letter"
+# margin_top = "1.2in"
+# margin_bottom = "1in"
+# margin_left = "1in"
+# margin_right = "1in"
+# font = "Source Sans Pro"
+# font_size = "11pt"
+# name_size = "16pt"
+# line_spacing = "0.7em"
+# default_salutation = "Dear Hiring Manager,"
+
+# ── Voice ───────────────────────────────────────────────────────────
+# Writing-style guidelines applied during content generation.
+# For detailed control, edit knowledge-base/voice.md instead.
+#
+# [default.voice]
+# guidelines = ""
+
+# ── Providers ───────────────────────────────────────────────────────
+# API keys. Prefer environment variables (ANTHROPIC_API_KEY, etc.)
+# over storing keys here.
+#
+# [default.providers.anthropic]
+# api_key = ""           # prefer: export ANTHROPIC_API_KEY=sk-ant-...
+#
+# [default.providers.openai]
+# api_key = ""           # prefer: export OPENAI_API_KEY=sk-...
+#
+# [default.providers.openrouter]
+# api_key = ""           # prefer: export OPENROUTER_API_KEY=sk-or-...

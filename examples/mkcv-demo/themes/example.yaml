@@ -1,0 +1,23 @@
+# Example custom theme for mkcv
+# Rename this file to use it: mv example.yaml mytheme.yaml
+#
+# Custom themes extend a built-in RenderCV theme with property overrides.
+# Available base themes: classic, engineeringclassic, engineeringresumes,
+#                        moderncv, sb2nov
+#
+# applies_to controls which documents use this theme:
+#   "all" (default) - both resumes and cover letters
+#   "resume"        - resumes only
+#   "cover_letter"  - cover letters only
+#
+# To use: mkcv generate --theme mytheme
+
+name: example
+extends: classic
+description: "Example custom theme"
+applies_to: all
+overrides:
+  # font: "Charter"
+  # font_size: "11pt"
+  # page_size: "a4paper"
+  # primary_color: "004080"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.resources
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,25 @@ if TYPE_CHECKING:
     from mkcv.core.models.cover_letter import CoverLetter
 
 logger = logging.getLogger(__name__)
+
+# Characters that have special meaning in Typst and must be escaped with
+# a backslash when they appear in plain-text content.  Order matters:
+# backslash MUST be replaced first so we don't double-escape the backslashes
+# we insert for other characters.
+_TYPST_SPECIAL_CHARS: re.Pattern[str] = re.compile(r"([\\#\$@\*_`<>\~\[\]\{\}])")
+
+
+def escape_typst(text: str) -> str:
+    r"""Escape Typst special characters in *text* so it renders as literal content.
+
+    Every character that Typst treats as markup (``#``, ``$``, ``@``, ``*``,
+    ``_``, back-tick, ``<``, ``>``, ``~``, ``\``, ``[``, ``]``, ``{``, ``}``)
+    is prefixed with a backslash.
+
+    >>> escape_typst("earned $4B+ in revenue")
+    'earned \\\\$4B+ in revenue'
+    """
+    return _TYPST_SPECIAL_CHARS.sub(r"\\\1", text)
 
 
 class TypstCoverLetterRenderer:
@@ -95,6 +115,7 @@ class TypstCoverLetterRenderer:
             autoescape=False,
             keep_trailing_newline=True,
         )
+        env.filters["escape_typst"] = escape_typst
         template = env.get_template("cover_letter.typ.j2")
 
         # Determine whether to show company and role lines
@@ -112,16 +133,20 @@ class TypstCoverLetterRenderer:
             default=resolved_design.default_salutation,
         )
 
+        # Escape LLM-generated content so Typst special characters
+        # (e.g. $, #, @, *, _, \, [ ] { } < > ~ `) are rendered literally.
+        esc = escape_typst
+
         return template.render(
-            # Content
-            salutation=salutation,
-            opening_paragraph=cover_letter.opening_paragraph,
-            body_paragraphs=cover_letter.body_paragraphs,
-            closing_paragraph=cover_letter.closing_paragraph,
-            sign_off=cover_letter.sign_off,
-            candidate_name=cover_letter.candidate_name,
-            company=cover_letter.company,
-            role_title=cover_letter.role_title,
+            # Content (escaped for Typst)
+            salutation=esc(salutation),
+            opening_paragraph=esc(cover_letter.opening_paragraph),
+            body_paragraphs=[esc(p) for p in cover_letter.body_paragraphs],
+            closing_paragraph=esc(cover_letter.closing_paragraph),
+            sign_off=esc(cover_letter.sign_off),
+            candidate_name=esc(cover_letter.candidate_name),
+            company=esc(cover_letter.company),
+            role_title=esc(cover_letter.role_title),
             theme=theme,
             # Smart addressing
             show_company=show_company,
