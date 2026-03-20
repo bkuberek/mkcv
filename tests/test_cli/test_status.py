@@ -1,10 +1,12 @@
 """Tests for the mkcv status command."""
 
 from datetime import UTC, date, datetime
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 import tomli_w
+from rich.console import Console
 
 from mkcv.cli.commands.status import (
     _build_application_table,
@@ -68,67 +70,58 @@ def _make_application(
 class TestStatusWithWorkspace:
     """Tests for status command when a workspace is found."""
 
+    @staticmethod
+    def _capture(workspace_dir: Path) -> str:
+        buf = StringIO()
+        con = Console(file=buf, force_terminal=True, width=120)
+        with (
+            patch(_FIND_WORKSPACE, return_value=workspace_dir),
+            patch("mkcv.cli.commands.status.console", con),
+        ):
+            status_command()
+        return buf.getvalue()
+
     def test_status_shows_workspace_root(
         self,
         workspace_dir: Path,
-        capsys: object,
     ) -> None:
-        with patch(_FIND_WORKSPACE, return_value=workspace_dir):
-            status_command()
-
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "Root:" in captured.out
-        assert workspace_dir.name in captured.out
+        output = self._capture(workspace_dir)
+        assert "Root:" in output
+        assert workspace_dir.name in output
 
     def test_status_shows_config_path(
         self,
         workspace_dir: Path,
-        capsys: object,
     ) -> None:
-        with patch(_FIND_WORKSPACE, return_value=workspace_dir):
-            status_command()
-
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "mkcv.toml" in captured.out
+        output = self._capture(workspace_dir)
+        assert "mkcv.toml" in output
 
     def test_status_shows_knowledge_base_exists(
         self,
         workspace_dir: Path,
-        capsys: object,
     ) -> None:
-        with patch(_FIND_WORKSPACE, return_value=workspace_dir):
-            status_command()
-
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "exists" in captured.out
+        output = self._capture(workspace_dir)
+        assert "exists" in output
 
     def test_status_shows_knowledge_base_missing(
         self,
         workspace_dir: Path,
-        capsys: object,
     ) -> None:
         kb_path = workspace_dir / "knowledge-base" / "career.md"
         kb_path.unlink()
 
-        with patch(_FIND_WORKSPACE, return_value=workspace_dir):
-            status_command()
-
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "missing" in captured.out
+        output = self._capture(workspace_dir)
+        assert "missing" in output
 
     def test_status_shows_application_count(
         self,
         workspace_dir: Path,
-        capsys: object,
     ) -> None:
         _make_application(workspace_dir, "acme", "2025-06-engineer")
         _make_application(workspace_dir, "globex", "2025-06-developer")
 
-        with patch(_FIND_WORKSPACE, return_value=workspace_dir):
-            status_command()
-
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "2" in captured.out
+        output = self._capture(workspace_dir)
+        assert "2" in output
 
 
 class TestStatusNoWorkspace:
