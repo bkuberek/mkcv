@@ -240,9 +240,7 @@ class TestCreatePromptFn:
 
     def test_returns_none_when_prompt_toolkit_unavailable(self) -> None:
         """Should return None when _HAS_PROMPT_TOOLKIT is False."""
-        with patch(
-            "mkcv.cli.interactive.prompt_input._HAS_PROMPT_TOOLKIT", False
-        ):
+        with patch("mkcv.cli.interactive.prompt_input._HAS_PROMPT_TOOLKIT", False):
             result = create_prompt_fn(_make_sections())
             assert result is None
 

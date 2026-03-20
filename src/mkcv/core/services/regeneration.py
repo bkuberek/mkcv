@@ -226,9 +226,7 @@ class RegenerationService:
                 )
             case "languages":
                 lang_result = cast("LanguagesSection", result)
-                return content.model_copy(
-                    update={"languages": lang_result.languages}
-                )
+                return content.model_copy(update={"languages": lang_result.languages})
             case _:  # pragma: no cover
                 raise PipelineStageError(
                     f"Cannot merge section: {section_type!r}",

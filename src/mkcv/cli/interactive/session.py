@@ -283,9 +283,13 @@ class InteractiveSession:
                 )
                 return
             group_to_remove = skills[idx - 1]
-            confirm = self._ask(
-                f"Remove group '{group_to_remove.label}'? [y/n]",
-            ).strip().lower()
+            confirm = (
+                self._ask(
+                    f"Remove group '{group_to_remove.label}'? [y/n]",
+                )
+                .strip()
+                .lower()
+            )
             if confirm != "y":
                 self._console.print("[dim]Removal cancelled.[/dim]")
                 return
@@ -417,9 +421,13 @@ class InteractiveSession:
                     "[red]Cannot remove the only bullet.[/red]",
                 )
                 return
-            confirm = self._ask(
-                f"Remove bullet {bullet_idx}? [y/n]",
-            ).strip().lower()
+            confirm = (
+                self._ask(
+                    f"Remove bullet {bullet_idx}? [y/n]",
+                )
+                .strip()
+                .lower()
+            )
             if confirm != "y":
                 self._console.print("[dim]Removal cancelled.[/dim]")
                 return

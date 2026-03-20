@@ -1572,9 +1572,7 @@ class TestInteractivePipelinePromptFnWiring:
         )
         return output_dir
 
-    def test_prompt_fn_passed_to_interactive_session(
-        self, tmp_path: Path
-    ) -> None:
+    def test_prompt_fn_passed_to_interactive_session(self, tmp_path: Path) -> None:
         """When create_prompt_fn returns a callable, it is passed to the session."""
         output_dir = self._setup_artifacts(tmp_path)
         kb = tmp_path / "kb.md"
@@ -1622,9 +1620,7 @@ class TestInteractivePipelinePromptFnWiring:
         call_kwargs = mock_session_cls.call_args
         assert call_kwargs.kwargs["prompt_fn"] is mock_prompt_fn
 
-    def test_prompt_fn_is_none_when_create_returns_none(
-        self, tmp_path: Path
-    ) -> None:
+    def test_prompt_fn_is_none_when_create_returns_none(self, tmp_path: Path) -> None:
         """When create_prompt_fn returns None (non-TTY), prompt_fn=None is passed."""
         output_dir = self._setup_artifacts(tmp_path)
         kb = tmp_path / "kb.md"

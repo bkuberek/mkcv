@@ -1609,7 +1609,9 @@ class TestRegenerationDispatch:
         """PipelineStageError from regen service shows error but doesn't crash."""
         content = _make_content(roles=0, with_skills=False)
         error = PipelineStageError(
-            "LLM call failed", stage="regenerate_section", stage_number=0,
+            "LLM call failed",
+            stage="regenerate_section",
+            stage_number=0,
         )
         service = _make_mock_regen_service(side_effect=error)
         ctx = _make_regen_context()

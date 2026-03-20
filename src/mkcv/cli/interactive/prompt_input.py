@@ -84,7 +84,7 @@ if _HAS_PROMPT_TOOLKIT:
             text_lower = text.lower()
             for prefix in ("/goto ", "/g "):
                 if text_lower.startswith(prefix):
-                    partial_num = text[len(prefix):]
+                    partial_num = text[len(prefix) :]
                     yield from self._goto_completions(partial_num)
                     return
 
