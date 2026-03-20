@@ -13,7 +13,7 @@
 |----------|----------------------------------------|
 | Name     | Alex Chen                              |
 | Email    | alex.chen@example.com                  |
-| Phone    | (555) 867-5309                         |
+| Phone    | +1 415 555 0100                        |
 | Location | San Francisco, CA                      |
 | LinkedIn | linkedin.com/in/alexchen-example       |
 | GitHub   | github.com/alexchen-example            |
