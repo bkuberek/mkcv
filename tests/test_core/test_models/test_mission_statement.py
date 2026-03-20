@@ -24,12 +24,12 @@ class TestMissionStatement:
         assert mission.rationale == "JD prioritizes ML expertise"
 
     def test_text_at_max_length(self) -> None:
-        text = "x" * 200
+        text = "x" * 500
         mission = MissionStatement(text=text, rationale="Test")
-        assert len(mission.text) == 200
+        assert len(mission.text) == 500
 
     def test_text_exceeds_max_length_rejected(self) -> None:
-        text = "x" * 201
+        text = "x" * 501
         with pytest.raises(ValidationError):
             MissionStatement(text=text, rationale="Test")
 

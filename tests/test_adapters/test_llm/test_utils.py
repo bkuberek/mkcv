@@ -1,11 +1,14 @@
 """Tests for shared LLM adapter utilities."""
 
+import json
+
 import pytest
 from pydantic import BaseModel
 
 from mkcv.adapters.llm._utils import (
     build_schema_prompt,
     extract_json_from_text,
+    resolve_schema_refs,
     split_system_message,
     validate_structured_response,
 )
@@ -92,3 +95,142 @@ class TestSplitSystemMessage:
         system, remaining = split_system_message(messages)
         assert system is None
         assert len(remaining) == 2
+
+
+class TestResolveSchemaRefs:
+    """Tests for resolve_schema_refs."""
+
+    def test_inlines_ref_definitions(self) -> None:
+        """$ref references are replaced with the actual definition."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "item": {"$ref": "#/$defs/Item"},
+            },
+            "$defs": {
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                    },
+                    "required": ["name"],
+                },
+            },
+        }
+        resolved = resolve_schema_refs(schema)
+        assert "$defs" not in resolved
+        assert "$ref" not in json.dumps(resolved)
+        assert resolved["properties"]["item"] == {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+
+    def test_removes_defs_from_output(self) -> None:
+        """$defs key is stripped from the resolved schema."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {"x": {"type": "string"}},
+            "$defs": {"Unused": {"type": "integer"}},
+        }
+        resolved = resolve_schema_refs(schema)
+        assert "$defs" not in resolved
+
+    def test_passthrough_without_refs(self) -> None:
+        """Schemas with no $ref or $defs pass through unchanged."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+            "required": ["name", "age"],
+        }
+        resolved = resolve_schema_refs(schema)
+        assert resolved == schema
+
+    def test_nested_refs_within_definitions(self) -> None:
+        """$ref inside a definition is resolved recursively."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "outer": {"$ref": "#/$defs/Outer"},
+            },
+            "$defs": {
+                "Outer": {
+                    "type": "object",
+                    "properties": {
+                        "inner": {"$ref": "#/$defs/Inner"},
+                    },
+                },
+                "Inner": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "number"},
+                    },
+                },
+            },
+        }
+        resolved = resolve_schema_refs(schema)
+        assert "$ref" not in json.dumps(resolved)
+        assert "$defs" not in resolved
+        inner = resolved["properties"]["outer"]["properties"]["inner"]
+        assert inner == {
+            "type": "object",
+            "properties": {"value": {"type": "number"}},
+        }
+
+    def test_ref_in_array_items(self) -> None:
+        """$ref used inside array items is resolved."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/Entry"},
+                },
+            },
+            "$defs": {
+                "Entry": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                },
+            },
+        }
+        resolved = resolve_schema_refs(schema)
+        assert "$ref" not in json.dumps(resolved)
+        assert resolved["properties"]["items"]["items"] == {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+        }
+
+    def test_circular_ref_does_not_recurse_infinitely(self) -> None:
+        """Circular $ref chains are broken gracefully."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "node": {"$ref": "#/$defs/Node"},
+            },
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "child": {"$ref": "#/$defs/Node"},
+                    },
+                },
+            },
+        }
+        resolved = resolve_schema_refs(schema)
+        # The circular child should be replaced with a fallback
+        child = resolved["properties"]["node"]["properties"]["child"]
+        assert child == {"type": "object"}
+
+    def test_tailored_content_schema_resolves(self) -> None:
+        """The real TailoredContent model resolves without $ref or $defs."""
+        from mkcv.core.models.tailored_content import TailoredContent
+
+        schema = TailoredContent.model_json_schema()
+        resolved = resolve_schema_refs(schema)
+        serialized = json.dumps(resolved)
+        assert "$defs" not in resolved
+        assert "$ref" not in serialized

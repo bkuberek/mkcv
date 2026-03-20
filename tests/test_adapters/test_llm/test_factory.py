@@ -180,11 +180,11 @@ class TestResolveStageConfigs:
         configs = _resolve_stage_configs(config, preset_name="premium")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
-        # Premium maps to standard which uses smart Haiku/Opus mix
+        # Premium maps to standard which uses smart Haiku/Sonnet/Opus mix
         assert "haiku" in configs[1].model
         assert "opus" in configs[2].model
         assert "opus" in configs[3].model
-        assert "haiku" in configs[4].model
+        assert "sonnet" in configs[4].model
         assert "opus" in configs[5].model
 
     def test_budget_preset_ignores_config_settings(self) -> None:
@@ -217,11 +217,11 @@ class TestResolveStageConfigs:
         configs = _resolve_stage_configs(config, preset_name="standard")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
-        # Smart mix: stages 1,4 = Haiku; stages 2,3,5 = Opus
+        # Smart mix: stage 1 = Haiku; stages 2,3,5 = Opus; stage 4 = Sonnet
         assert "haiku" in configs[1].model
         assert "opus" in configs[2].model
         assert "opus" in configs[3].model
-        assert "haiku" in configs[4].model
+        assert "sonnet" in configs[4].model
         assert "opus" in configs[5].model
 
     def test_comprehensive_preset_uses_smart_mix(self) -> None:
@@ -229,11 +229,11 @@ class TestResolveStageConfigs:
         configs = _resolve_stage_configs(config, preset_name="comprehensive")
         for stage_num in range(1, 6):
             assert configs[stage_num].provider == "anthropic"
-        # Smart mix: stages 1,4 = Haiku; stages 2,3,5 = Opus
+        # Smart mix: stage 1 = Haiku; stages 2,3,5 = Opus; stage 4 = Sonnet
         assert "haiku" in configs[1].model
         assert "opus" in configs[2].model
         assert "opus" in configs[3].model
-        assert "haiku" in configs[4].model
+        assert "sonnet" in configs[4].model
         assert "opus" in configs[5].model
 
 

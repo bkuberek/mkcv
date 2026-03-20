@@ -1,5 +1,6 @@
 """mkcv render — render a resume YAML file to PDF."""
 
+import logging
 import platform
 import subprocess
 import sys
@@ -12,6 +13,8 @@ from rich.console import Console
 from mkcv.adapters.factory import create_render_service
 from mkcv.config import settings
 from mkcv.core.services.theme import parse_theme_argument, resolve_theme
+
+logger = logging.getLogger(__name__)
 
 console = Console()
 
@@ -85,6 +88,9 @@ def render_command(
     # Single-theme path (existing behavior, unchanged)
     effective_theme = resolve_theme(theme, settings.rendering.theme)
 
+    # Apply workspace design config if available
+    yaml_content = _apply_workspace_design(resolved_yaml, effective_theme)
+
     service = create_render_service(settings)
 
     result = service.render_resume(
@@ -92,6 +98,7 @@ def render_command(
         effective_output_dir,
         theme=effective_theme,
         formats=requested_formats,
+        yaml_content=yaml_content,
     )
 
     console.print()
@@ -107,6 +114,50 @@ def render_command(
 
     if open and result.pdf_path.exists():
         _open_file(result.pdf_path)
+
+
+def _apply_workspace_design(yaml_path: Path, theme: str) -> str | None:
+    """Build design from workspace config and inject into YAML content.
+
+    When running inside a workspace, reads the design settings from
+    mkcv.toml and merges them into the YAML file content so that
+    workspace config overrides the baked-in design section.
+
+    Args:
+        yaml_path: Resolved path to the resume YAML file.
+        theme: Effective theme name to use.
+
+    Returns:
+        Modified YAML content with workspace design applied, or None
+        if not in a workspace or no design overrides are configured.
+    """
+    if not settings.in_workspace:
+        return None
+
+    from mkcv.adapters.factory import _build_resume_design
+    from mkcv.core.services.yaml_postprocessor import YamlPostProcessor
+
+    design = _build_resume_design(settings, theme)
+    if not design.has_overrides():
+        return None
+
+    logger.info("Applying workspace design config to render")
+
+    try:
+        yaml_str = yaml_path.read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("Could not read YAML file for design injection")
+        return None
+
+    try:
+        postprocessor = YamlPostProcessor()
+        return postprocessor.inject_design(yaml_str, design)
+    except (ValueError, OSError):
+        logger.warning(
+            "Failed to inject workspace design; rendering with baked-in design",
+            exc_info=True,
+        )
+        return None
 
 
 def _render_multi_theme(

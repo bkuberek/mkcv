@@ -31,25 +31,48 @@ class TestExperienceEntry:
                 highlights=[],
             )
 
-    def test_max_six_highlights(self) -> None:
+    def test_max_ten_highlights(self) -> None:
         with pytest.raises(ValidationError):
             ExperienceEntry(
                 company="Acme Corp",
                 position="Staff Engineer",
                 start_date="2020-01",
                 end_date="2024-06",
-                highlights=["h1", "h2", "h3", "h4", "h5", "h6", "h7"],
+                highlights=[
+                    "h1",
+                    "h2",
+                    "h3",
+                    "h4",
+                    "h5",
+                    "h6",
+                    "h7",
+                    "h8",
+                    "h9",
+                    "h10",
+                    "h11",
+                ],
             )
 
-    def test_six_highlights_allowed(self) -> None:
+    def test_ten_highlights_allowed(self) -> None:
         entry = ExperienceEntry(
             company="Acme Corp",
             position="Staff Engineer",
             start_date="2020-01",
             end_date="2024-06",
-            highlights=["h1", "h2", "h3", "h4", "h5", "h6"],
+            highlights=[
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+                "h7",
+                "h8",
+                "h9",
+                "h10",
+            ],
         )
-        assert len(entry.highlights) == 6
+        assert len(entry.highlights) == 10
 
     def test_location_defaults_to_none(self) -> None:
         entry = ExperienceEntry(

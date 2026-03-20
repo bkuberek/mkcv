@@ -149,9 +149,9 @@ class TestResumeDesignToRendercvDict:
         assert result["header"] == {"space_below_name": "0.15cm"}
 
     def test_nested_section_titles_emitted(self) -> None:
-        design = ResumeDesign(section_titles=SectionTitleLayout(type="with-full-line"))
+        design = ResumeDesign(section_titles=SectionTitleLayout(type="with_full_line"))
         result = design.to_rendercv_dict()
-        assert result["section_titles"] == {"type": "with-full-line"}
+        assert result["section_titles"] == {"type": "with_full_line"}
 
     def test_nested_typography_emitted(self) -> None:
         design = ResumeDesign(typography=TypographyLayout(line_spacing="0.8em"))

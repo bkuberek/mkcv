@@ -43,7 +43,7 @@ class TestRenderServiceDelegation:
         service.render_resume(yaml_path, output_dir, theme="sb2nov")
 
         mock_renderer.render.assert_called_once_with(
-            yaml_path, output_dir, theme="sb2nov", formats=None
+            yaml_path, output_dir, theme="sb2nov", formats=None, yaml_content=None
         )
 
     def test_render_resume_passes_theme(
@@ -57,7 +57,7 @@ class TestRenderServiceDelegation:
         service.render_resume(yaml_path, output_dir, theme="classic")
 
         mock_renderer.render.assert_called_once_with(
-            yaml_path, output_dir, theme="classic", formats=None
+            yaml_path, output_dir, theme="classic", formats=None, yaml_content=None
         )
 
     def test_render_resume_passes_formats(
@@ -73,7 +73,35 @@ class TestRenderServiceDelegation:
         )
 
         mock_renderer.render.assert_called_once_with(
-            yaml_path, output_dir, theme="sb2nov", formats=["pdf", "png"]
+            yaml_path,
+            output_dir,
+            theme="sb2nov",
+            formats=["pdf", "png"],
+            yaml_content=None,
+        )
+
+    def test_render_resume_passes_yaml_content(
+        self,
+        service: RenderService,
+        mock_renderer: MagicMock,
+    ) -> None:
+        yaml_path = Path("/tmp/resume.yaml")
+        output_dir = Path("/tmp/output")
+        content = "cv:\n  name: Test\ndesign:\n  theme: sb2nov\n"
+
+        service.render_resume(
+            yaml_path,
+            output_dir,
+            theme="sb2nov",
+            yaml_content=content,
+        )
+
+        mock_renderer.render.assert_called_once_with(
+            yaml_path,
+            output_dir,
+            theme="sb2nov",
+            formats=None,
+            yaml_content=content,
         )
 
     def test_render_resume_returns_rendered_output(

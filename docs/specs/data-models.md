@@ -115,7 +115,7 @@ class TailoredRole(BaseModel):
     )
 
 class MissionStatement(BaseModel):
-    text: str = Field(max_length=200)
+    text: str = Field(max_length=500)
     rationale: str = Field(
         description="Why this mission statement works for this application"
     )
@@ -168,7 +168,7 @@ class ExperienceEntry(BaseModel):
     location: str | None = None
     start_date: str  # YYYY-MM or "present"
     end_date: str
-    highlights: list[str] = Field(min_length=1, max_length=6)
+    highlights: list[str] = Field(min_length=1, max_length=10)
 
 class ResumeSection(BaseModel):
     """Flexible section that can hold different content types."""

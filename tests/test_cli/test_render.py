@@ -10,6 +10,7 @@ from mkcv.core.models.batch_render_result import (
     BatchRenderResult,
     ThemeRenderResult,
 )
+from mkcv.core.models.resume_design import ResumeDesign
 from mkcv.core.ports.renderer import RenderedOutput
 
 
@@ -501,3 +502,99 @@ class TestRenderMultiTheme:
 
         # Should use single-theme path with resolve_theme default
         mock_service.render_resume.assert_called_once()
+
+
+class TestRenderWorkspaceDesign:
+    """Tests for workspace design config application during render."""
+
+    def test_workspace_design_injected_into_yaml_content(
+        self,
+        tmp_path: Path,
+        mock_rendered_output: RenderedOutput,
+    ) -> None:
+        """When in a workspace with design overrides, yaml_content is passed."""
+        yaml_file = tmp_path / "resume.yaml"
+        yaml_file.write_text("cv:\n  name: Test\n", encoding="utf-8")
+
+        mock_service = MagicMock()
+        mock_service.render_resume.return_value = mock_rendered_output
+
+        design = ResumeDesign(theme="sb2nov", font="Roboto")
+
+        with (
+            patch(f"{_FACTORY}.create_render_service", return_value=mock_service),
+            patch(f"{_FACTORY}.settings") as mock_settings,
+            patch(
+                "mkcv.adapters.factory._build_resume_design",
+                return_value=design,
+            ),
+        ):
+            mock_settings.in_workspace = True
+            mock_settings.rendering.theme = "sb2nov"
+
+            from mkcv.cli.commands.render import render_command
+
+            render_command(yaml_file)
+
+        call_kwargs = mock_service.render_resume.call_args.kwargs
+        assert call_kwargs["yaml_content"] is not None
+        assert "Roboto" in call_kwargs["yaml_content"]
+
+    def test_no_workspace_passes_none_yaml_content(
+        self,
+        tmp_path: Path,
+        mock_rendered_output: RenderedOutput,
+    ) -> None:
+        """When not in a workspace, yaml_content should be None."""
+        yaml_file = tmp_path / "resume.yaml"
+        yaml_file.write_text("cv:\n  name: Test\n", encoding="utf-8")
+
+        mock_service = MagicMock()
+        mock_service.render_resume.return_value = mock_rendered_output
+
+        with (
+            patch(f"{_FACTORY}.create_render_service", return_value=mock_service),
+            patch(f"{_FACTORY}.settings") as mock_settings,
+        ):
+            mock_settings.in_workspace = False
+            mock_settings.rendering.theme = "sb2nov"
+
+            from mkcv.cli.commands.render import render_command
+
+            render_command(yaml_file)
+
+        call_kwargs = mock_service.render_resume.call_args.kwargs
+        assert call_kwargs["yaml_content"] is None
+
+    def test_workspace_with_default_design_passes_none(
+        self,
+        tmp_path: Path,
+        mock_rendered_output: RenderedOutput,
+    ) -> None:
+        """When workspace design has no overrides, yaml_content should be None."""
+        yaml_file = tmp_path / "resume.yaml"
+        yaml_file.write_text("cv:\n  name: Test\n", encoding="utf-8")
+
+        mock_service = MagicMock()
+        mock_service.render_resume.return_value = mock_rendered_output
+
+        # Default design with no overrides
+        design = ResumeDesign(theme="sb2nov")
+
+        with (
+            patch(f"{_FACTORY}.create_render_service", return_value=mock_service),
+            patch(f"{_FACTORY}.settings") as mock_settings,
+            patch(
+                "mkcv.adapters.factory._build_resume_design",
+                return_value=design,
+            ),
+        ):
+            mock_settings.in_workspace = True
+            mock_settings.rendering.theme = "sb2nov"
+
+            from mkcv.cli.commands.render import render_command
+
+            render_command(yaml_file)
+
+        call_kwargs = mock_service.render_resume.call_args.kwargs
+        assert call_kwargs["yaml_content"] is None

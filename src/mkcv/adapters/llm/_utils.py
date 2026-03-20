@@ -10,6 +10,54 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+def resolve_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Recursively resolve $ref references in a JSON schema, inlining all $defs.
+
+    Returns a new schema dict with no ``$ref`` or ``$defs`` — all definitions
+    are inlined at point of use.  This avoids issues with models that don't
+    handle JSON Schema ``$ref`` correctly in ``tool_use``.
+
+    A ``_seen`` set guards against infinite recursion from circular
+    ``$ref`` chains (unlikely with Pydantic models, but safe to protect).
+
+    Args:
+        schema: A JSON Schema dict, potentially containing ``$defs`` and
+            ``$ref`` references.
+
+    Returns:
+        A new dict with all references resolved and ``$defs`` removed.
+    """
+    defs: dict[str, Any] = schema.get("$defs", {})
+
+    def _resolve(node: Any, seen: frozenset[str] = frozenset()) -> Any:
+        if isinstance(node, dict):
+            # Handle $ref
+            if "$ref" in node:
+                ref_path: str = node["$ref"]
+                # Only handle local #/$defs/ references
+                prefix = "#/$defs/"
+                if ref_path.startswith(prefix):
+                    def_name = ref_path[len(prefix) :]
+                    if def_name in seen:
+                        # Circular reference — return an empty object schema
+                        # to break the cycle.
+                        return {"type": "object"}
+                    if def_name in defs:
+                        return _resolve(defs[def_name], seen | frozenset({def_name}))
+                # Unknown $ref format — return as-is
+                return node
+
+            # Recurse into dict values, dropping $defs at every level
+            return {k: _resolve(v, seen) for k, v in node.items() if k != "$defs"}
+
+        if isinstance(node, list):
+            return [_resolve(item, seen) for item in node]
+
+        return node
+
+    return _resolve(schema)  # type: ignore[no-any-return]
+
+
 def extract_json_from_text(text: str) -> dict[str, Any]:
     """Extract JSON from text that may contain markdown code fences.
 

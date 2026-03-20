@@ -35,6 +35,7 @@ class RenderCVAdapter:
         *,
         theme: str,
         formats: list[str] | None = None,
+        yaml_content: str | None = None,
     ) -> RenderedOutput:
         """Render a resume YAML file to the requested formats.
 
@@ -44,6 +45,9 @@ class RenderCVAdapter:
             theme: RenderCV theme name (ignored if design is in YAML).
             formats: Output formats to generate (e.g. ["pdf", "png"]).
                 When None, all supported formats are generated.
+            yaml_content: Pre-processed YAML content to render instead
+                of reading from yaml_path. When provided, yaml_path is
+                still used for path resolution but its content is ignored.
 
         Returns:
             RenderedOutput with paths to generated files.
@@ -68,10 +72,13 @@ class RenderCVAdapter:
 
         logger.info("Rendering %s with RenderCV", resolved_yaml.name)
 
-        try:
-            main_yaml = resolved_yaml.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise RenderError(f"Failed to read YAML file: {resolved_yaml}") from exc
+        if yaml_content is not None:
+            main_yaml = yaml_content
+        else:
+            try:
+                main_yaml = resolved_yaml.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise RenderError(f"Failed to read YAML file: {resolved_yaml}") from exc
 
         try:
             _, rendercv_model = build_rendercv_dictionary_and_model(

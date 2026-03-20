@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from mkcv.adapters.llm._utils import (
     extract_json_from_text,
+    resolve_schema_refs,
     split_system_message,
     validate_structured_response,
 )
@@ -107,6 +108,9 @@ class AnthropicAdapter:
         if "$defs" in tool_schema:
             tool_input_schema["$defs"] = tool_schema["$defs"]
 
+        # Resolve $ref references so models get a flat, unambiguous schema
+        tool_input_schema = resolve_schema_refs(tool_input_schema)
+
         tools = [
             {
                 "name": tool_name,
@@ -153,7 +157,21 @@ class AnthropicAdapter:
                 raw_json = "".join(input_json_parts)
                 try:
                     data: dict[str, Any] = json.loads(raw_json)
-                    return validate_structured_response(data, response_model)
+                    # Detect when streamed fragments are the tool schema
+                    # rather than the actual response data.  Opus
+                    # sometimes emits the schema definition instead of
+                    # the tool input; skip it and fall through to the
+                    # final-message fallback.
+                    schema_keys = {"$defs", "properties", "required", "type"}
+                    if schema_keys.issubset(data.keys()):
+                        logger.warning(
+                            "Streamed JSON appears to be tool schema, not "
+                            "response data (keys: %s); falling back to "
+                            "final message",
+                            list(data.keys()),
+                        )
+                    else:
+                        return validate_structured_response(data, response_model)
                 except json.JSONDecodeError:
                     logger.warning(
                         "Failed to parse streamed JSON fragments (%d parts, "

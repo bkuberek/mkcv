@@ -29,7 +29,7 @@ temperature = 0.5
 
 [default.pipeline.stages.structure]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-sonnet-4-20250514"
 temperature = 0.1
 
 [default.pipeline.stages.review]
@@ -97,7 +97,7 @@ page_size = "letterpaper"
 
 # Resume section titles — controls heading style
 # [default.rendering.section_titles]
-# type = "with-full-line"
+# type = "with_full_line"
 # space_above = "0.3cm"
 # space_below = "0.15cm"
 

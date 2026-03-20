@@ -18,6 +18,7 @@ class RenderService:
         *,
         theme: str,
         formats: list[str] | None = None,
+        yaml_content: str | None = None,
     ) -> RenderedOutput:
         """Render a resume YAML file to the requested formats.
 
@@ -27,10 +28,17 @@ class RenderService:
             theme: RenderCV theme name.
             formats: Output formats to generate (e.g. ["pdf", "png"]).
                 When None, all supported formats are generated.
+            yaml_content: Pre-processed YAML content to render instead
+                of reading from yaml_path. When provided, yaml_path is
+                still used for path resolution but its content is ignored.
 
         Returns:
             RenderedOutput with paths to generated files.
         """
         return self._renderer.render(
-            yaml_path, output_dir, theme=theme, formats=formats
+            yaml_path,
+            output_dir,
+            theme=theme,
+            formats=formats,
+            yaml_content=yaml_content,
         )

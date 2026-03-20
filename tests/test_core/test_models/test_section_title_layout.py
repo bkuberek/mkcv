@@ -43,6 +43,6 @@ class TestSectionTitleLayoutToRendercvDict:
         assert SectionTitleLayout().to_rendercv_dict() == {}
 
     def test_non_none_fields_included(self) -> None:
-        layout = SectionTitleLayout(type="with-full-line", space_above="0.4cm")
+        layout = SectionTitleLayout(type="with_full_line", space_above="0.4cm")
         result = layout.to_rendercv_dict()
-        assert result == {"type": "with-full-line", "space_above": "0.4cm"}
+        assert result == {"type": "with_full_line", "space_above": "0.4cm"}

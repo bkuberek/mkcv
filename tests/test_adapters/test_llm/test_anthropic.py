@@ -1,5 +1,6 @@
 """Tests for AnthropicAdapter with mocked SDK."""
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -81,6 +82,44 @@ def _mock_tool_stream(
             return final_message
 
     return MagicMock(return_value=_FakeStream())
+
+
+def _mock_tool_stream_with_events(
+    events: list[Any],
+    final_message: Any,
+) -> MagicMock:
+    """Create a mock for client.messages.stream() that yields arbitrary events."""
+
+    class _FakeStream:
+        async def __aenter__(self) -> "_FakeStream":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        def __aiter__(self) -> "_FakeStream":
+            self._iter = iter(events)
+            return self
+
+        async def __anext__(self) -> Any:
+            try:
+                return next(self._iter)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+        async def get_final_message(self) -> Any:
+            return final_message
+
+    return MagicMock(return_value=_FakeStream())
+
+
+def _make_input_json_delta_event(partial_json: str) -> MagicMock:
+    """Create a fake content_block_delta event with input_json_delta."""
+    event = MagicMock()
+    event.type = "content_block_delta"
+    event.delta.type = "input_json_delta"
+    event.delta.partial_json = partial_json
+    return event
 
 
 def _make_usage(input_tokens: int = 100, output_tokens: int = 50) -> MagicMock:
@@ -248,3 +287,101 @@ class TestAnthropicCompleteStructured:
                 model="claude-sonnet-4-20250514",
                 response_model=JDAnalysis,
             )
+
+    async def test_complete_structured_skips_schema_in_stream(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        """When streamed JSON is the tool schema, fall back to final message."""
+        # The actual tool input data we expect
+        tool_input = {
+            "company": "SchemaCo",
+            "role_title": "Developer",
+            "seniority_level": "Mid",
+            "core_requirements": [
+                {
+                    "skill": "Go",
+                    "importance": "must_have",
+                    "context": "Backend",
+                }
+            ],
+            "technical_stack": ["Go"],
+            "soft_skills": ["Teamwork"],
+            "leadership_signals": [],
+            "culture_keywords": [],
+            "ats_keywords": ["Go"],
+            "hidden_requirements": [],
+            "role_summary": "A mid-level developer role.",
+        }
+
+        # Simulate streamed fragments assembling into a JSON schema
+        schema_data = JDAnalysis.model_json_schema()
+        schema_json = json.dumps(schema_data)
+        events = [_make_input_json_delta_event(schema_json)]
+
+        # Final message contains the correct tool_use block
+        mock_block = MagicMock()
+        mock_block.type = "tool_use"
+        mock_block.name = "extract_jdanalysis"
+        mock_block.input = tool_input
+
+        mock_final = MagicMock()
+        mock_final.content = [mock_block]
+        mock_final.usage = _make_usage()
+
+        anthropic_adapter._client.messages.stream = _mock_tool_stream_with_events(
+            events, mock_final
+        )
+
+        result = await anthropic_adapter.complete_structured(
+            [{"role": "user", "content": "analyze this JD"}],
+            model="claude-opus-4-20250514",
+            response_model=JDAnalysis,
+        )
+
+        assert isinstance(result, JDAnalysis)
+        assert result.company == "SchemaCo"
+        assert result.role_title == "Developer"
+
+    async def test_complete_structured_accepts_valid_streamed_json(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        """When streamed JSON is valid tool input, use it directly."""
+        tool_input = {
+            "company": "StreamCo",
+            "role_title": "Engineer",
+            "seniority_level": "Senior",
+            "core_requirements": [
+                {
+                    "skill": "Python",
+                    "importance": "must_have",
+                    "context": "Backend development",
+                }
+            ],
+            "technical_stack": ["Python"],
+            "soft_skills": ["Communication"],
+            "leadership_signals": [],
+            "culture_keywords": [],
+            "ats_keywords": ["Python"],
+            "hidden_requirements": [],
+            "role_summary": "A senior engineer role.",
+        }
+
+        tool_json = json.dumps(tool_input)
+        events = [_make_input_json_delta_event(tool_json)]
+
+        mock_final = MagicMock()
+        mock_final.content = []
+        mock_final.usage = _make_usage()
+
+        anthropic_adapter._client.messages.stream = _mock_tool_stream_with_events(
+            events, mock_final
+        )
+
+        result = await anthropic_adapter.complete_structured(
+            [{"role": "user", "content": "analyze this JD"}],
+            model="claude-opus-4-20250514",
+            response_model=JDAnalysis,
+        )
+
+        assert isinstance(result, JDAnalysis)
+        assert result.company == "StreamCo"

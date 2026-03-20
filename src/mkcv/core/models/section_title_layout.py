@@ -5,10 +5,10 @@ from pydantic import BaseModel, field_validator
 from mkcv.core.models.validators import validate_dimension
 
 VALID_SECTION_TITLE_TYPES = (
-    "with-parial-line",
-    "with-full-line",
+    "with_partial_line",
+    "with_full_line",
+    "without_line",
     "moderncv",
-    "no-line",
 )
 
 
@@ -25,13 +25,20 @@ class SectionTitleLayout(BaseModel):
     @field_validator("type", mode="before")
     @classmethod
     def check_type(cls, v: str | None) -> str | None:
-        """Validate section title type."""
-        if v is not None and v not in VALID_SECTION_TITLE_TYPES:
+        """Validate and normalize section title type.
+
+        Accepts both hyphenated (``with-full-line``) and underscored
+        (``with_full_line``) forms for user convenience.
+        """
+        if v is None:
+            return v
+        normalized = v.replace("-", "_")
+        if normalized not in VALID_SECTION_TITLE_TYPES:
             raise ValueError(
                 f"Invalid section title type '{v}'. "
                 f"Supported: {', '.join(VALID_SECTION_TITLE_TYPES)}"
             )
-        return v
+        return normalized
 
     @field_validator("space_above", "space_below", mode="before")
     @classmethod

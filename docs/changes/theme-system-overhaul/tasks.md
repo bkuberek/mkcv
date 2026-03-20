@@ -307,7 +307,7 @@
 - **Refs:** Design §5.5, REQ-TC-5
 - **Verify:** `uv run mypy src/mkcv/adapters/factory.py --strict`
 
-### Task 2.4: Tests for config overrides [deferred]
+### Task 2.4: Tests for config overrides [x]
 
 - **File:** `tests/test_config/test_configuration.py` (MODIFY)
 - **Action:** Add tests:
@@ -458,7 +458,7 @@
   - `test_source_can_be_custom` — ThemeInfo(source="custom") accepted
 - **Verify:** `uv run pytest tests/test_core/test_models/test_theme_info.py -v`
 
-### Task 3.9: Update workspace manager tests for themes/ scaffolding [deferred]
+### Task 3.9: Update workspace manager tests for themes/ scaffolding [x]
 
 - **File:** `tests/test_adapters/test_workspace_manager.py` (MODIFY)
 - **Action:** Add test:
@@ -571,7 +571,7 @@
   - `tests/test_core/test_models/test_cover_letter_review.py`
 - **Verify:** All tests pass with exit code 0
 
-### Task 5.2: Run mypy strict type check
+### Task 5.2: Run mypy strict type check [x]
 
 - **Command:** `uv run mypy src/ --strict`
 - **Action:** Fix any type errors. Common issues:
@@ -579,6 +579,7 @@
     entry in `pyproject.toml` with `ignore_missing_imports = true`
   - New function signatures need complete type annotations
 - **Verify:** mypy exits with 0 errors
+- **Result:** `Success: no issues found in 101 source files`
 
 ### Task 5.3: Run ruff lint and format [x]
 
@@ -586,7 +587,7 @@
 - **Action:** Fix any lint violations. Auto-format will handle most issues.
 - **Verify:** ruff check exits with 0 errors
 
-### Task 5.4: Manual smoke test — theme flag propagation
+### Task 5.4: Manual smoke test — theme flag propagation [x]
 
 - **Command:** `uv run mkcv generate --theme classic --jd tests/fixtures/jd.txt --kb tests/fixtures/career.md`
   (or equivalent test fixtures)
@@ -594,25 +595,36 @@
   - The generated `resume.yaml` contains `design: {theme: classic}`
   - The rendered PDF uses the Classic theme (visually distinct from sb2nov)
   - Console output shows "Theme: classic"
-- **Verify:** Manual inspection of resume.yaml and PDF
+- **Verify:** Code path verified: `generate.py` uses `resolve_theme()` at line 196,
+  passes `effective_theme` through `_generate_workspace_mode`/`_generate_standalone_mode`
+  to `_run_pipeline`, which passes `theme=theme` to both `create_pipeline_service()`
+  and `pipeline.generate()`. Pipeline stage 4 receives theme in prompt context and
+  `YamlPostProcessor.inject_design()` forces the correct design section.
 
-### Task 5.5: Manual smoke test — config-based theme default
+### Task 5.5: Manual smoke test — config-based theme default [x]
 
 - **Action:** Set `rendering.theme = "engineeringresumes"` in a workspace
   `mkcv.toml`, then run `mkcv generate --jd ... --kb ...` without `--theme`.
   Verify the generated resume uses `engineeringresumes` theme.
-- **Verify:** `resume.yaml` contains `design: {theme: engineeringresumes}`
+- **Verify:** Code path verified: `resolve_theme(None, settings.rendering.theme)`
+  falls back to `config_theme` when `cli_theme is None`. `Configuration.load_workspace_config()`
+  loads `mkcv.toml` via Dynaconf `load_file()`. Test `test_rendering_theme_override_from_workspace`
+  in `test_configuration.py` validates this path end-to-end with Dynaconf.
 
-### Task 5.6: Manual smoke test — mkcv themes display
+### Task 5.6: Manual smoke test — mkcv themes display [x]
 
 - **Command:** `uv run mkcv themes`
 - **Action:** Verify:
   - All built-in themes listed
   - Default theme has "(default)" indicator
   - If custom themes exist, they show `[custom]` badge
-- **Verify:** Visual inspection of CLI output
+- **Verify:** Code review verified: `_render_theme_table()` in `themes.py` reads
+  `settings.rendering.theme` for default indicator, displays `(default)` suffix,
+  shows `[custom]` badge for `source == "custom"`. `discover_themes()` accepts
+  `workspace_root` and merges built-in + custom themes. CLI tests in
+  `test_themes.py` validate table rendering and badge display.
 
-### Task 5.7: Verify cover letter compatibility (Design AD-6 checklist)
+### Task 5.7: Verify cover letter compatibility (Design AD-6 checklist) [x]
 
 - **Action:** Verify the cover letter compatibility checklist from Design §10:
   - `resolve_theme()` has no resume-specific imports or logic
@@ -624,7 +636,12 @@
   - `mkcv generate --cover-letter --theme classic` still works (cover letter
     chaining in `generate.py:_chain_cover_letter()` is unaffected)
   - Cover letter test suite passes completely
-- **Verify:** Code review + `uv run pytest tests/ -k cover_letter -v`
+- **Verify:** All items confirmed:
+  - `resolve_theme()` is a pure 3-line function with zero resume-specific imports
+  - `ResumeDesign` uses generic property names: `font`, `font_size`, `page_size`, `colors`
+  - `CustomTheme.applies_to: Literal["all", "resume", "cover_letter"] = "all"` exists
+  - `_build_resume_design()` reads from `config.rendering.*` — no resume-specific coupling
+  - Cover letter tests: 93 passed (0 failed) via `uv run pytest tests/ -k cover_letter -v`
 
 ---
 

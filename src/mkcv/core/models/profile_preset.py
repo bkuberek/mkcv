@@ -81,7 +81,7 @@ _SMART_MIXED_STAGE_CONFIGS: dict[int, StageConfig] = {
         provider="anthropic", model="claude-opus-4-20250514", temperature=0.5
     ),
     4: StageConfig(
-        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.1
+        provider="anthropic", model="claude-sonnet-4-20250514", temperature=0.1
     ),
     5: StageConfig(
         provider="anthropic", model="claude-opus-4-20250514", temperature=0.3

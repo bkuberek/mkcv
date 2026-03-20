@@ -1,15 +1,22 @@
 """Pipeline orchestration service."""
 
+import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar, cast
 
 from pydantic import BaseModel
 
+from mkcv.core.exceptions.authentication import AuthenticationError
+from mkcv.core.exceptions.context_length import ContextLengthError
 from mkcv.core.exceptions.pipeline_stage import PipelineStageError
+from mkcv.core.exceptions.provider import ProviderError
+from mkcv.core.exceptions.rate_limit import RateLimitError
+from mkcv.core.exceptions.validation import ValidationError
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.jd_frontmatter import JDFrontmatter
@@ -34,6 +41,7 @@ DEFAULT_MAX_TOKENS = 4096
 STAGE_MAX_TOKENS_YAML = 8192
 
 _T = TypeVar("_T", bound=BaseModel)
+_R = TypeVar("_R")
 
 STAGE_NAMES: dict[int, str] = {
     1: "analyze_jd",
@@ -329,22 +337,39 @@ class PipelineService:
             {"jd_text": jd_text},
         )
 
-        try:
-            result = await llm.complete_structured(
-                [{"role": "user", "content": prompt}],
-                model=config.model,
-                response_model=JDFrontmatter,
-                temperature=0.1,
-                max_tokens=1024,
-            )
-        except Exception as exc:
-            raise PipelineStageError(
-                f"JD metadata extraction failed: {exc}",
-                stage="extract_jd_metadata",
-                stage_number=0,
-            ) from exc
+        async def _do_extract() -> JDFrontmatter:
+            try:
+                result = await llm.complete_structured(
+                    [{"role": "user", "content": prompt}],
+                    model=config.model,
+                    response_model=JDFrontmatter,
+                    temperature=0.1,
+                    max_tokens=1024,
+                )
+            except (ValidationError, ValueError):
+                raise
+            except (
+                RateLimitError,
+                AuthenticationError,
+                ContextLengthError,
+                ProviderError,
+            ):
+                raise
+            except PipelineStageError:
+                raise
+            except Exception as exc:
+                raise PipelineStageError(
+                    f"JD metadata extraction failed: {exc}",
+                    stage="extract_jd_metadata",
+                    stage_number=0,
+                ) from exc
+            return cast("JDFrontmatter", result)
 
-        return cast("JDFrontmatter", result)
+        return await self._call_with_retry(
+            _do_extract,
+            stage_name="extract_jd_metadata",
+            stage_number=0,
+        )
 
     # ------------------------------------------------------------------
     # Stage implementations
@@ -368,12 +393,16 @@ class PipelineService:
             {"jd_text": jd_text},
         )
 
-        result = await self._call_structured(
-            prompt,
-            llm=llm,
-            response_model=JDAnalysis,
-            model=config.model,
-            temperature=config.temperature,
+        result = await self._call_with_retry(
+            lambda: self._call_structured(
+                prompt,
+                llm=llm,
+                response_model=JDAnalysis,
+                model=config.model,
+                temperature=config.temperature,
+                stage_number=stage_number,
+            ),
+            stage_name=STAGE_NAMES[stage_number],
             stage_number=stage_number,
         )
 
@@ -420,12 +449,16 @@ class PipelineService:
             },
         )
 
-        result = await self._call_structured(
-            prompt,
-            llm=llm,
-            response_model=ExperienceSelection,
-            model=config.model,
-            temperature=config.temperature,
+        result = await self._call_with_retry(
+            lambda: self._call_structured(
+                prompt,
+                llm=llm,
+                response_model=ExperienceSelection,
+                model=config.model,
+                temperature=config.temperature,
+                stage_number=stage_number,
+            ),
+            stage_name=STAGE_NAMES[stage_number],
             stage_number=stage_number,
         )
 
@@ -474,14 +507,18 @@ class PipelineService:
             },
         )
 
-        result = await self._call_structured(
-            prompt,
-            llm=llm,
-            response_model=TailoredContent,
-            model=config.model,
-            temperature=config.temperature,
+        result = await self._call_with_retry(
+            lambda: self._call_structured(
+                prompt,
+                llm=llm,
+                response_model=TailoredContent,
+                model=config.model,
+                temperature=config.temperature,
+                stage_number=stage_number,
+                max_tokens=self._max_tokens_yaml,
+            ),
+            stage_name=STAGE_NAMES[stage_number],
             stage_number=stage_number,
-            max_tokens=self._max_tokens_yaml,
         )
 
         usage = llm.get_last_usage()
@@ -536,19 +573,37 @@ class PipelineService:
             {"role": "user", "content": prompt},
         ]
 
-        try:
-            resume_yaml = await llm.complete(
-                messages,
-                model=config.model,
-                temperature=config.temperature,
-                max_tokens=self._max_tokens_yaml,
-            )
-        except Exception as exc:
-            raise PipelineStageError(
-                f"Stage {stage_number} (structure_yaml) failed: {exc}",
-                stage=STAGE_NAMES[stage_number],
-                stage_number=stage_number,
-            ) from exc
+        async def _do_complete() -> str:
+            try:
+                return await llm.complete(
+                    messages,
+                    model=config.model,
+                    temperature=config.temperature,
+                    max_tokens=self._max_tokens_yaml,
+                )
+            except PipelineStageError:
+                raise
+            except (ValidationError, ValueError):
+                raise
+            except (
+                RateLimitError,
+                AuthenticationError,
+                ContextLengthError,
+                ProviderError,
+            ):
+                raise
+            except Exception as exc:
+                raise PipelineStageError(
+                    f"Stage {stage_number} (structure_yaml) failed: {exc}",
+                    stage=STAGE_NAMES[stage_number],
+                    stage_number=stage_number,
+                ) from exc
+
+        resume_yaml = await self._call_with_retry(
+            _do_complete,
+            stage_name=STAGE_NAMES[stage_number],
+            stage_number=stage_number,
+        )
 
         # Strip markdown code fences if the LLM wraps output
         resume_yaml = _strip_code_fences(resume_yaml)
@@ -620,14 +675,18 @@ class PipelineService:
             },
         )
 
-        result = await self._call_structured(
-            prompt,
-            llm=llm,
-            response_model=ReviewReport,
-            model=config.model,
-            temperature=config.temperature,
+        result = await self._call_with_retry(
+            lambda: self._call_structured(
+                prompt,
+                llm=llm,
+                response_model=ReviewReport,
+                model=config.model,
+                temperature=config.temperature,
+                stage_number=stage_number,
+                max_tokens=self._max_tokens_yaml,
+            ),
+            stage_name=STAGE_NAMES[stage_number],
             stage_number=stage_number,
-            max_tokens=self._max_tokens_yaml,
         )
 
         usage = llm.get_last_usage()
@@ -684,6 +743,69 @@ class PipelineService:
         if callback is None:
             return True
         return callback.on_stage_complete(meta.stage_number, meta.stage_name, meta)
+
+    async def _call_with_retry(
+        self,
+        coro_fn: Callable[[], Awaitable[_R]],
+        *,
+        stage_name: str,
+        stage_number: int,
+        max_retries: int = 3,
+    ) -> _R:
+        """Call an async function with retries on output quality errors.
+
+        Retries on ``ValidationError`` and ``ValueError`` (transient LLM
+        output quality issues).  Non-retryable provider errors
+        (``RateLimitError``, ``AuthenticationError``, ``ContextLengthError``,
+        ``ProviderError``) are raised immediately.
+
+        Args:
+            coro_fn: Zero-argument async callable that produces the result.
+            stage_name: Human-readable stage name for log messages.
+            stage_number: Numeric pipeline stage identifier.
+            max_retries: Maximum number of attempts (default 3).
+
+        Returns:
+            The value produced by *coro_fn*.
+
+        Raises:
+            PipelineStageError: After all retries are exhausted.
+            RateLimitError: Immediately on rate-limit errors.
+            AuthenticationError: Immediately on auth errors.
+            ContextLengthError: Immediately on context-length errors.
+            ProviderError: Immediately on other provider errors.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                return await coro_fn()
+            except (
+                RateLimitError,
+                AuthenticationError,
+                ContextLengthError,
+                ProviderError,
+            ):
+                raise
+            except (ValidationError, ValueError) as exc:
+                last_error = exc
+                if attempt < max_retries:
+                    logger.warning(
+                        "Stage %d (%s) attempt %d/%d failed: %s. Retrying...",
+                        stage_number,
+                        stage_name,
+                        attempt,
+                        max_retries,
+                        exc,
+                    )
+                    await asyncio.sleep(1.0 * attempt)
+
+        raise PipelineStageError(
+            f"Stage {stage_number} ({stage_name}) failed after "
+            f"{max_retries} attempts: {last_error}",
+            stage=stage_name,
+            stage_number=stage_number,
+        ) from last_error
 
     async def _call_structured(
         self,
