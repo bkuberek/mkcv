@@ -164,6 +164,7 @@ def generate_command(
     interactive: Annotated[
         bool,
         cyclopts.Parameter(
+            name=["--interactive", "-i"],
             help="Review and edit resume sections interactively after AI tailoring.",
         ),
     ] = False,
