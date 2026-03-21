@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from mkcv.config.configuration import Configuration
     from mkcv.core.ports.llm import LLMPort
     from mkcv.core.services.batch_render import BatchRenderService
+    from mkcv.core.services.kb_generation_service import KBGenerationService
     from mkcv.core.services.regeneration import RegenerationService
 
 from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
@@ -708,3 +709,69 @@ def _create_prompt_loader(config: Configuration) -> FileSystemPromptLoader:
             override_dir = templates_dir
 
     return FileSystemPromptLoader(override_dir=override_dir)
+
+
+def create_kb_generation_service(
+    config: Configuration,
+    *,
+    provider_override: str | None = None,
+    model_override: str | None = None,
+) -> KBGenerationService:
+    """Create a fully-wired KBGenerationService.
+
+    Reads KB-specific LLM settings from ``[kb]`` config section and
+    creates a ``KBGenerationService`` with a ``MultiFormatDocumentReader``,
+    LLM adapter, and prompt loader.
+
+    Args:
+        config: Application configuration.
+        provider_override: When set, override the LLM provider.
+        model_override: When set, override the LLM model.
+
+    Returns:
+        KBGenerationService with all dependencies wired.
+    """
+    from mkcv.adapters.filesystem.document_reader import MultiFormatDocumentReader
+    from mkcv.core.services.kb_generation_service import KBGenerationService
+
+    # Read KB config section with defaults
+    _default_model = "claude-sonnet-4-20250514"
+    try:
+        kb_section = getattr(config, "kb", None)
+        if kb_section is not None:
+            provider = str(getattr(kb_section, "provider", "anthropic"))
+            model = str(getattr(kb_section, "model", _default_model))
+            temperature = float(getattr(kb_section, "temperature", 0.3))
+            max_tokens = int(getattr(kb_section, "max_tokens", 8192))
+            chunk_threshold = int(getattr(kb_section, "chunk_threshold", 100000))
+        else:
+            provider = "anthropic"
+            model = _default_model
+            temperature = 0.3
+            max_tokens = 8192
+            chunk_threshold = 100000
+    except (AttributeError, TypeError, ValueError):
+        provider = "anthropic"
+        model = _default_model
+        temperature = 0.3
+        max_tokens = 8192
+        chunk_threshold = 100000
+
+    if provider_override is not None:
+        provider = provider_override
+    if model_override is not None:
+        model = model_override
+
+    llm = _create_llm_adapter(provider, config)
+    prompts = _create_prompt_loader(config)
+    document_reader = MultiFormatDocumentReader()
+
+    return KBGenerationService(
+        document_reader=document_reader,
+        llm=llm,
+        prompts=prompts,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        chunk_threshold=chunk_threshold,
+    )

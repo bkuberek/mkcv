@@ -10,6 +10,7 @@ from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.exceptions.context_length import ContextLengthError
 from mkcv.core.exceptions.cover_letter import CoverLetterError
 from mkcv.core.exceptions.jd_read import JDReadError
+from mkcv.core.exceptions.kb_generation import DocumentReadError, KBGenerationError
 from mkcv.core.exceptions.pipeline_stage import PipelineStageError
 from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.rate_limit import RateLimitError
@@ -26,7 +27,9 @@ __all__ = [
     "AuthenticationError",
     "ContextLengthError",
     "CoverLetterError",
+    "DocumentReadError",
     "JDReadError",
+    "KBGenerationError",
     "MkcvError",
     "PipelineStageError",
     "ProviderError",
