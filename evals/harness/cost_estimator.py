@@ -27,12 +27,22 @@ def estimate_matrix_cost(
     matrix: MatrixConfig,
     cases: Sequence[EvalCase],
     catalog: ModelCatalog,
+    *,
+    judge_skipped: str | None = None,
 ) -> CostEstimate:
     """Estimate the cost of running ``matrix`` over ``cases``.
 
     Each model is charged the stage requirements' token estimates for every
     (case, stage, repeat) it runs; judge calls are charged at the judge
     model's price. A model without a catalog price costs None.
+
+    Args:
+        matrix: The models, stages, and judge to price.
+        cases: The cases to run.
+        catalog: Where prices come from.
+        judge_skipped: Why the judge will not run (no API key). Its calls are
+            then left out; the reason is kept only if the run would have made
+            judge calls.
     """
     runs = [
         (case, stage)
@@ -57,9 +67,11 @@ def estimate_matrix_cost(
         for model in matrix.models
     }
 
-    judge_calls = (
+    planned_judge_calls = (
         len(matrix.models) * repeats * sum(_judge_calls(c, s) for c, s in runs)
     )
+    skipped = judge_skipped if planned_judge_calls else None
+    judge_calls = 0 if skipped else planned_judge_calls
     judge_cost = _judge_cost(
         catalog.price_for(matrix.judge.model, provider=matrix.judge.provider),
         judge_calls,
@@ -74,6 +86,7 @@ def estimate_matrix_cost(
         judge_cost_usd=judge_cost,
         total_usd=total,
         is_partial=is_partial,
+        judge_skipped=skipped,
     )
 
 

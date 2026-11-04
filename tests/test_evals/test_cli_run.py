@@ -3,6 +3,7 @@
 import builtins
 import io
 import json
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,8 +16,12 @@ from evals.harness.case_loader import load_cases
 from evals.models.eval_record import EvalRecord
 from evals.models.run_manifest import RunManifest
 from mkcv.adapters.llm.stub import StubLLMAdapter
+from mkcv.core.models.experience_selection import ExperienceSelection
+from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.stage_key import StageKey
 from mkcv.core.ports.llm import LLMPort
+from tests.test_evals.conftest import recorded
+from tests.test_evals.grading_support import judging_stub
 
 STUB_MATRIX = """
 [run]
@@ -324,8 +329,13 @@ class TestCredentials:
         assert not out_dir.exists()
 
     def test_strict_is_fine_when_every_provider_has_credentials(
-        self, run: Callable[..., int]
+        self,
+        run: Callable[..., int],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        install_adapter(judging_stub())
         assert run("--strict") == 0
 
     def test_every_model_skipped_still_writes_empty_results(
@@ -570,3 +580,169 @@ def test_the_run_id_default_uses_the_current_time(
 def test_run_json_is_valid_json(run: Callable[..., int], out_dir: Path) -> None:
     run()
     assert json.loads((out_dir / "run.json").read_text())["run_id"]
+
+
+class TestJudge:
+    """The judge needs a key like any other provider; a run without one goes on."""
+
+    def test_a_judge_without_a_key_is_warned_about(
+        self, run: Callable[..., int], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert run() == 0
+        err = capsys.readouterr().err
+        assert "warning: judge anthropic/claude-opus-5-5" in err
+        assert "no API key for provider 'anthropic'" in err
+
+    def test_the_estimate_does_not_price_a_judge_that_will_not_run(
+        self, run: Callable[..., int], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run()
+        out = capsys.readouterr().out
+        assert "(skipped)" in out
+        assert "0 calls" in out
+
+    def test_the_manifest_records_why_the_judge_was_skipped(
+        self, run: Callable[..., int], out_dir: Path
+    ) -> None:
+        run()
+        reason = _manifest(out_dir).judge_skipped
+        assert reason is not None
+        assert "ANTHROPIC_API_KEY" in reason
+
+    def test_the_records_have_no_judge_grades(
+        self, run: Callable[..., int], out_dir: Path
+    ) -> None:
+        run()
+        assert all(r.judge is None for r in _records(out_dir))
+
+    def test_with_the_key_the_judge_is_priced_and_not_warned_about(
+        self,
+        run: Callable[..., int],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        install_adapter(judging_stub())
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        run()
+        captured = capsys.readouterr()
+        assert "1 calls" in captured.out
+        assert "(skipped)" not in captured.out
+        assert "judge" not in captured.err
+
+    def test_a_run_without_judged_stages_does_not_mention_the_judge(
+        self, run: Callable[..., int], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run("--stages", "analyze")
+        captured = capsys.readouterr()
+        assert "judge" not in captured.err
+        assert "(skipped)" not in captured.out
+
+    def test_the_judge_flag_names_the_judge_that_grades(
+        self,
+        run: Callable[..., int],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        out_dir: Path,
+    ) -> None:
+        install_adapter(judging_stub())
+        assert run("--judge", "stub:stub-model") == 0
+        select = next(r for r in _records(out_dir) if r.stage is StageKey.SELECT)
+        assert select.judge == "stub/stub-model"
+        assert "selection_judge" in [g.name for g in select.grades]
+        assert _manifest(out_dir).judge_skipped is None
+
+    def test_strict_refuses_a_judge_without_a_key_before_any_call(
+        self,
+        run: Callable[..., int],
+        canned_stub: StubLLMAdapter,
+        out_dir: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert run("--strict") == 2
+        assert "judge" in capsys.readouterr().err
+        assert canned_stub.call_log == []
+        assert not out_dir.exists()
+
+    def test_strict_does_not_ask_for_a_judge_key_when_no_stage_needs_one(
+        self, run: Callable[..., int]
+    ) -> None:
+        assert run("--strict", "--stages", "analyze") == 0
+
+    def test_a_judge_flag_without_a_colon_exits_two(
+        self, run: Callable[..., int], canned_stub: StubLLMAdapter
+    ) -> None:
+        assert run("--judge", "gpt-6.1-sol") == 2
+        assert canned_stub.call_log == []
+
+    def test_an_unknown_judge_provider_exits_two_before_any_call(
+        self,
+        run: Callable[..., int],
+        canned_stub: StubLLMAdapter,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert run("--judge", "nope:model") == 2
+        assert "Unknown LLM provider 'nope'" in capsys.readouterr().err
+        assert canned_stub.call_log == []
+
+
+class TestLogging:
+    """mkcv's own warnings are shown on stderr once, in one format."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_loggers(self) -> object:
+        saved = {
+            name: (
+                logging.getLogger(name).level,
+                list(logging.getLogger(name).handlers),
+            )
+            for name in ("mkcv", "evals")
+        }
+        yield
+        for name, (level, handlers) in saved.items():
+            logging.getLogger(name).setLevel(level)
+            logging.getLogger(name).handlers[:] = handlers
+
+    @pytest.fixture
+    def noisy(self, install_adapter: Callable[[LLMPort], LLMPort]) -> None:
+        class Noisy(StubLLMAdapter):
+            async def complete_structured(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def, override]
+                logging.getLogger("mkcv.adapters.llm.retry").warning("slow down")
+                return await super().complete_structured(*args, **kwargs)  # type: ignore[arg-type]
+
+        install_adapter(
+            Noisy(
+                responses={
+                    JDAnalysis: recorded(JDAnalysis),
+                    ExperienceSelection: recorded(ExperienceSelection),
+                }
+            )
+        )
+
+    def test_a_warning_from_mkcv_is_printed_once_per_event(
+        self,
+        run: Callable[..., int],
+        noisy: None,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        run()
+        err = capsys.readouterr().err
+        assert err.count("WARNING mkcv.adapters.llm.retry: slow down") == 2
+
+    def test_progress_messages_are_hidden_unless_verbose(
+        self, run: Callable[..., int], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run()
+        assert "Running alpha-match" not in capsys.readouterr().err
+
+    def test_verbose_shows_each_stage_run_starting(
+        self, run: Callable[..., int], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run("--verbose")
+        assert "Running alpha-match" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("command", ["run", "bootstrap-reference"])
+    def test_both_long_commands_take_verbose(
+        self, command: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main([command, "--help"]) == 0
+        assert "--verbose" in capsys.readouterr().out

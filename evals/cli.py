@@ -19,6 +19,8 @@ from rich.console import Console
 from evals.harness.case_loader import load_cases, load_matrix, select_cases
 from evals.harness.cost_estimator import estimate_matrix_cost
 from evals.harness.credentials import split_by_credentials
+from evals.harness.judge_factory import judge_unavailable_reason
+from evals.harness.logging_setup import configure_logging
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import DEFAULT_FIXTURES_DIR, REFERENCE_FILES, EvalCase
 from evals.models.eval_record import EvalRecord
@@ -170,12 +172,22 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="exit instead of skipping models whose provider has no credentials",
+        help="exit instead of skipping models (or the judge) with no credentials",
+    )
+    _add_verbose_argument(parser)
+
+
+def _add_verbose_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="also log each stage run as it starts (warnings always show)",
     )
 
 
 def _add_bootstrap_arguments(parser: argparse.ArgumentParser) -> None:
     _add_fixtures_argument(parser)
+    _add_verbose_argument(parser)
     parser.add_argument(
         "--matrix", type=Path, default=DEFAULT_MATRIX, help="matrix TOML file"
     )
@@ -214,6 +226,7 @@ def _run(args: argparse.Namespace, config: "Configuration") -> int:
         new_run_id,
     )
 
+    configure_logging(verbose=args.verbose)
     matrix, cases, registry = _load_plan(args, config)
     runnable, skipped = split_by_credentials(registry, matrix.models)
     for reason in skipped:
@@ -222,7 +235,19 @@ def _run(args: argparse.Namespace, config: "Configuration") -> int:
         return _fail("--strict: some models have no credentials (see warnings above)")
 
     effective = matrix.model_copy(update={"models": runnable})
-    estimate = estimate_matrix_cost(effective, cases, registry.catalog)
+    estimate = estimate_matrix_cost(
+        effective,
+        cases,
+        registry.catalog,
+        judge_skipped=judge_unavailable_reason(registry, effective.judge),
+    )
+    if estimate.judge_skipped:
+        _err(
+            f"warning: judge {effective.judge.label} skipped "
+            f"({estimate.judge_skipped}); scores that need a judge will be missing"
+        )
+        if args.strict:
+            return _fail("--strict: the judge has no credentials (see warning above)")
     for line in _estimate_lines(estimate, case_count=len(cases)):
         _out(line)
     if not args.yes and not _confirmed():
@@ -240,6 +265,7 @@ def _bootstrap_reference(args: argparse.Namespace, config: "Configuration") -> i
     from evals.harness.reference_bootstrapper import ReferenceBootstrapper
     from mkcv.adapters.factory import create_provider_registry
 
+    configure_logging(verbose=args.verbose)
     matrix = load_matrix(args.matrix)
     reference = _reference_model(args, matrix)
     known = load_cases(args.fixtures)
@@ -326,9 +352,10 @@ def _estimate_lines(estimate: CostEstimate, *, case_count: int) -> list[str]:
         (label, str(estimate.runs_per_model), _usd(cost))
         for label, cost in estimate.model_costs.items()
     )
+    skipped = " (skipped)" if estimate.judge_skipped else ""
     rows.append(
         (
-            f"Judge {estimate.judge}",
+            f"Judge {estimate.judge}{skipped}",
             f"{estimate.judge_calls} calls",
             _usd(estimate.judge_cost_usd),
         )

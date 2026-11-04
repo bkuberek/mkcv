@@ -14,6 +14,11 @@ class Grader(Protocol):
         """The grade name this grader produces (``schema``, ``ats_rules``, ...)."""
         ...
 
-    async def grade(self, ctx: GradingContext) -> Grade:
-        """Score ``ctx.output``; ``score`` is None when it cannot be scored."""
+    async def grade(self, ctx: GradingContext) -> Grade | None:
+        """Score ``ctx.output``.
+
+        The grade's ``score`` is None when the output cannot be scored; the
+        grader returns None when it does not apply (a judge grader without a
+        judge, or the review defect grader on a case with no seeded defects).
+        """
         ...

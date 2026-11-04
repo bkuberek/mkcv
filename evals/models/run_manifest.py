@@ -27,3 +27,7 @@ class RunManifest(BaseModel):
         default_factory=list,
         description="'provider/model: reason' for models that did not run",
     )
+    judge_skipped: str | None = Field(
+        default=None,
+        description="Why the judge did not run (no API key), if it did not",
+    )

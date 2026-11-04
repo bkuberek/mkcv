@@ -23,6 +23,7 @@ from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.run_manifest import RunManifest
 from evals.models.run_settings import RunSettings
+from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.adapters.llm.stub import StubLLMAdapter
 from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.models.jd_analysis import JDAnalysis
@@ -30,6 +31,7 @@ from mkcv.core.models.stage_key import StageKey
 from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.ports.llm import LLMPort
 from tests.test_evals.conftest import FailingStub, UsageStub, recorded
+from tests.test_evals.grading_support import judging_stub
 
 STUB = MatrixModel(provider="stub", model="stub-model")
 HAIKU = MatrixModel(provider="anthropic", model="claude-haiku-5-5")
@@ -208,8 +210,11 @@ class RecordingGrader:
 class ExplodingGrader:
     name = "exploding"
 
+    def __init__(self, error: Exception | None = None) -> None:
+        self._error = error or ProviderError("judge is down")
+
     async def grade(self, ctx: GradingContext) -> Grade:
-        raise ProviderError("judge is down")
+        raise self._error
 
 
 class TestGrading:
@@ -348,6 +353,25 @@ class TestGrading:
         assert recorded_grade.name == "recording"
         assert record.status == "ok"
 
+    @pytest.mark.parametrize(
+        "error",
+        [OSError("disk full"), ValueError("bad verdict")],
+        ids=["os-error", "value-error"],
+    )
+    async def test_other_expected_grader_errors_are_recorded_too(
+        self,
+        error: Exception,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        install_adapter(canned_stub)
+        runner = make_runner(graders={StageKey.ANALYZE: [ExplodingGrader(error)]})
+        [record] = await runner.run(_matrix([STUB], [StageKey.ANALYZE]), cases[:1])
+        [failed] = record.grades
+        assert str(error) in failed.details["error"]
+
     async def test_grades_are_written_to_results_jsonl(
         self,
         make_runner: Callable[..., EvalRunner],
@@ -361,6 +385,185 @@ class TestGrading:
         line = (tmp_path / "out" / "results.jsonl").read_text().splitlines()[0]
         written = EvalRecord.model_validate_json(line)
         assert [g.name for g in written.grades] == ["schema", "jd_keyword_recall"]
+
+
+class TestJudge:
+    """T16: the judge is created once per run and grades the judged stages."""
+
+    @pytest.fixture
+    def with_judge_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+
+    @pytest.fixture
+    def judged_cases(
+        self, cases: list[EvalCase], add_reference: Callable[..., None]
+    ) -> list[EvalCase]:
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT])
+        return cases[:1]
+
+    async def test_a_tailor_record_carries_the_judge_grades_and_the_judge(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        with_judge_key: None,
+    ) -> None:
+        install_adapter(judging_stub())
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.TAILOR]), judged_cases
+        )
+        names = [g.name for g in record.grades]
+        assert names == [
+            "schema",
+            "faithfulness_extraction",
+            "faithfulness_judge",
+            "tailoring_judge",
+        ]
+        assert record.judge == "anthropic/claude-opus-5-5"
+
+    async def test_a_select_record_carries_the_selection_judge_grade(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        with_judge_key: None,
+    ) -> None:
+        install_adapter(judging_stub())
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.SELECT]), judged_cases
+        )
+        assert [g.name for g in record.grades][-1] == "selection_judge"
+
+    async def test_the_judge_is_created_once_for_the_whole_run(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        monkeypatch: pytest.MonkeyPatch,
+        with_judge_key: None,
+    ) -> None:
+        stub = judging_stub()
+        asked: list[str] = []
+
+        def create(self: ProviderRegistry, name: str, **_: object) -> LLMPort:
+            asked.append(name)
+            return stub
+
+        monkeypatch.setattr(ProviderRegistry, "create_adapter", create)
+        matrix = _matrix([STUB], [StageKey.TAILOR], repeats=3)
+        records = await make_runner().run(matrix, judged_cases)
+        assert asked.count("anthropic") == 1
+        assert [r.judge for r in records] == ["anthropic/claude-opus-5-5"] * 3
+
+    async def test_the_judge_is_the_one_the_matrix_names(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        install_adapter(judging_stub())
+        matrix = _matrix([STUB], [StageKey.TAILOR]).model_copy(
+            update={"judge": JudgeConfig(provider="openai", model="gpt-6.1-sol")}
+        )
+        [record] = await make_runner().run(matrix, judged_cases)
+        assert record.judge == "openai/gpt-6.1-sol"
+
+    async def test_a_judge_grade_says_when_the_model_judged_itself(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        with_judge_key: None,
+    ) -> None:
+        install_adapter(judging_stub())
+        records = await make_runner().run(
+            _matrix([STUB, HAIKU], [StageKey.TAILOR]), judged_cases
+        )
+        flags = {
+            r.provider: {
+                g.details["self_judged"] for g in r.grades if "self_judged" in g.details
+            }
+            for r in records
+        }
+        assert flags == {"stub": {False}, "anthropic": {True}}
+
+    async def test_without_judge_credentials_only_deterministic_grades_remain(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        install_adapter(judging_stub())
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.TAILOR]), judged_cases
+        )
+        assert [g.name for g in record.grades] == ["schema", "faithfulness_extraction"]
+        assert record.judge is None
+
+    async def test_the_manifest_says_why_the_judge_did_not_run(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        install_adapter(judging_stub())
+        await make_runner().run(_matrix([STUB], [StageKey.TAILOR]), judged_cases)
+        manifest = RunManifest.model_validate_json(
+            (tmp_path / "out" / "run.json").read_text()
+        )
+        assert manifest.judge_skipped is not None
+        assert "no API key for provider 'anthropic'" in manifest.judge_skipped
+
+    async def test_the_manifest_has_no_skip_reason_when_the_judge_ran(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        with_judge_key: None,
+        tmp_path: Path,
+    ) -> None:
+        install_adapter(judging_stub())
+        await make_runner().run(_matrix([STUB], [StageKey.TAILOR]), judged_cases)
+        manifest = RunManifest.model_validate_json(
+            (tmp_path / "out" / "run.json").read_text()
+        )
+        assert manifest.judge_skipped is None
+
+    async def test_a_judge_failure_is_recorded_on_the_grade_and_the_run_goes_on(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        monkeypatch: pytest.MonkeyPatch,
+        with_judge_key: None,
+    ) -> None:
+        pipeline = judging_stub()
+        rate_limited = FailingStub()
+
+        def create(self: ProviderRegistry, name: str, **_: object) -> LLMPort:
+            return rate_limited if name == "anthropic" else pipeline
+
+        monkeypatch.setattr(ProviderRegistry, "create_adapter", create)
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.TAILOR]), judged_cases
+        )
+        failed = {g.name: g for g in record.grades}["tailoring_judge"]
+        assert record.status == "ok"
+        assert failed.score is None
+        assert "boom" in failed.details["error"]
+
+    async def test_stages_without_judge_graders_do_not_need_the_judge(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        with_judge_key: None,
+    ) -> None:
+        stub = judging_stub()
+        install_adapter(stub)
+        await make_runner().run(_matrix([STUB], [StageKey.ANALYZE]), judged_cases)
+        assert [c["response_model"] for c in stub.call_log] == ["JDAnalysis"]
 
 
 class TestFiles:

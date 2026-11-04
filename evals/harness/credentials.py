@@ -25,18 +25,26 @@ def split_by_credentials(
     runnable: list[MatrixModel] = []
     skipped: list[str] = []
     for model in models:
-        if registry.has_credentials(model.provider):
+        reason = missing_key_reason(registry, model.provider)
+        if reason is None:
             runnable.append(model)
         else:
-            skipped.append(f"{model.label}: {_missing_key_reason(registry, model)}")
+            skipped.append(f"{model.label}: {reason}")
     return runnable, skipped
 
 
-def _missing_key_reason(registry: ProviderRegistry, model: MatrixModel) -> str:
-    variables = registry.get(model.provider).api_key_env
+def missing_key_reason(registry: ProviderRegistry, provider: str) -> str | None:
+    """Return why ``provider`` cannot be called, or None if it can.
+
+    Raises:
+        ConfigurationError: If mkcv does not know the provider.
+    """
+    if registry.has_credentials(provider):
+        return None
+    variables = registry.get(provider).api_key_env
     where = (
         " or ".join(variables)
         if variables
-        else f"api_key in [default.providers.{model.provider}]"
+        else f"api_key in [default.providers.{provider}]"
     )
-    return f"no API key for provider '{model.provider}' (set {where})"
+    return f"no API key for provider '{provider}' (set {where})"

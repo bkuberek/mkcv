@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
@@ -12,6 +13,7 @@ import mkcv
 from evals.graders.grader import Grader
 from evals.graders.grading_context import GradingContext
 from evals.graders.stage_graders import STAGE_GRADERS
+from evals.harness.judge_factory import create_judge, judge_unavailable_reason
 from evals.harness.stage_run import StageRun
 from evals.harness.stage_runner import StageRunner, work_dir_for
 from evals.models.eval_case import REFERENCE_FILES, EvalCase
@@ -21,10 +23,12 @@ from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.run_manifest import RunManifest
 from mkcv.adapters.factory import create_provider_registry
+from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.config.configuration import Configuration
 from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.stage_key import PIPELINE_STAGE_NUMBERS, PIPELINE_STAGES, StageKey
+from mkcv.core.ports.llm import LLMPort
 
 if TYPE_CHECKING:
     from evals.models.judge_config import JudgeConfig
@@ -54,12 +58,34 @@ def current_git_sha(directory: Path) -> str | None:
     return completed.stdout.strip() or None
 
 
+@dataclass(frozen=True)
+class _Judge:
+    """The judge adapter a run created once, with who it is."""
+
+    adapter: LLMPort
+    provider: str
+    model: str
+
+
+@dataclass(frozen=True)
+class _RunTools:
+    """What every job of one run shares."""
+
+    runner: StageRunner
+    gate: asyncio.Semaphore
+    sink: TextIO
+    judge: _Judge | None
+
+
 class EvalRunner:
     """Runs every (model, case, stage, repeat) of a matrix, one record each.
 
     ``results.jsonl`` grows by one flushed line per finished record and
     ``run.json`` exists from the start, so an interrupted run still leaves
     its results and manifest on disk.
+
+    The judge is created once per run. Without credentials for its provider
+    the run goes on without judge grades and the manifest says why.
     """
 
     def __init__(
@@ -92,18 +118,23 @@ class EvalRunner:
             skipped_models: ``provider/model: reason`` for models left out,
                 recorded in the manifest.
         """
+        registry = create_provider_registry(self._config)
+        judge_skipped = judge_unavailable_reason(registry, matrix.judge)
+        judge = None if judge_skipped else _create_judge(registry, matrix.judge)
+
         self._out_dir.mkdir(parents=True, exist_ok=True)
-        manifest = self._manifest(matrix, cases, skipped_models)
+        manifest = self._manifest(
+            matrix, cases, skipped_models, registry.catalog, judge_skipped
+        )
         self._write_manifest(manifest)
 
         runner = StageRunner(self._config, preset=matrix.run.preset)
         gate = asyncio.Semaphore(matrix.run.concurrency)
         with (self._out_dir / RESULTS_FILE).open("w", encoding="utf-8") as sink:
+            tools = _RunTools(runner, gate, sink, judge)
             async with asyncio.TaskGroup() as group:
                 tasks = [
-                    group.create_task(
-                        self._run_job(runner, gate, sink, case, stage, model, repeat)
-                    )
+                    group.create_task(self._run_job(tools, case, stage, model, repeat))
                     for model in matrix.models
                     for case in cases
                     for stage in matrix.run.stages
@@ -118,21 +149,19 @@ class EvalRunner:
 
     async def _run_job(
         self,
-        runner: StageRunner,
-        gate: asyncio.Semaphore,
-        sink: TextIO,
+        tools: _RunTools,
         case: EvalCase,
         stage: StageKey,
         model: MatrixModel,
         repeat: int,
     ) -> EvalRecord:
-        async with gate:
+        async with tools.gate:
             work_dir = work_dir_for(self._out_dir, case.id, stage, model, repeat)
-            result = await runner.run(case, stage, model, repeat, work_dir)
-            grades = await self._grade(case, stage, model, result)
+            result = await tools.runner.run(case, stage, model, repeat, work_dir)
+            grades = await self._grade(case, stage, model, result, tools.judge)
             record = self._record(case, stage, model, repeat, result, grades)
-            sink.write(record.model_dump_json() + "\n")
-            sink.flush()
+            tools.sink.write(record.model_dump_json() + "\n")
+            tools.sink.flush()
         if self._on_record is not None:
             self._on_record(record)
         return record
@@ -143,11 +172,14 @@ class EvalRunner:
         stage: StageKey,
         model: MatrixModel,
         result: StageRun,
+        judge: _Judge | None,
     ) -> list[Grade]:
         """Run the stage's graders on an ``ok`` output; other results have none.
 
-        A grader that fails with an mkcv error (a judge call, say) leaves a
-        grade without a score that names the error, so the run goes on.
+        A grader that fails with an mkcv, OS, or value error (a judge call, say)
+        leaves a grade without a score that names the error, so the run goes
+        on. A grader that does not apply (no judge, no seeded defects) adds
+        nothing.
         """
         if result.status != "ok":
             return []
@@ -158,14 +190,19 @@ class EvalRunner:
             jd_text=case.jd_text,
             output=result.payload,
             reference=_upstream_reference(case, stage),
+            judge=judge.adapter if judge else None,
+            judge_model=judge.model if judge else None,
+            judge_provider=judge.provider if judge else None,
             evaluated_provider=model.provider,
         )
         grades: list[Grade] = []
         for grader in self._graders.get(stage, ()):
             try:
-                grades.append(await grader.grade(context))
-            except MkcvError as error:
-                grades.append(Grade(name=grader.name, details={"error": str(error)}))
+                grade = await grader.grade(context)
+            except (MkcvError, OSError, ValueError) as error:
+                grade = Grade(name=grader.name, details={"error": str(error)})
+            if grade is not None:
+                grades.append(grade)
         return grades
 
     def _record(
@@ -192,6 +229,9 @@ class EvalRunner:
             cost_usd=metadata.cost_usd if metadata else 0.0,
             latency_s=metadata.duration_seconds if metadata else 0.0,
             grades=grades,
+            judge=next(
+                (g.details["judge"] for g in grades if "judge" in g.details), None
+            ),
         )
 
     def _manifest(
@@ -199,8 +239,9 @@ class EvalRunner:
         matrix: MatrixConfig,
         cases: Sequence[EvalCase],
         skipped_models: Sequence[str],
+        catalog: ModelCatalog,
+        judge_skipped: str | None,
     ) -> RunManifest:
-        catalog = create_provider_registry(self._config).catalog
         return RunManifest(
             run_id=self._run_id,
             started_at=datetime.now(UTC),
@@ -211,12 +252,18 @@ class EvalRunner:
             catalog_prices=_catalog_prices(matrix, catalog),
             cases=[case.id for case in cases],
             skipped_models=list(skipped_models),
+            judge_skipped=judge_skipped,
         )
 
     def _write_manifest(self, manifest: RunManifest) -> None:
         (self._out_dir / MANIFEST_FILE).write_text(
             manifest.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
+
+
+def _create_judge(registry: ProviderRegistry, config: "JudgeConfig") -> _Judge:
+    adapter, model = create_judge(registry, config)
+    return _Judge(adapter=adapter, provider=config.provider, model=model)
 
 
 def _upstream_reference(case: EvalCase, stage: StageKey) -> dict[str, Any]:

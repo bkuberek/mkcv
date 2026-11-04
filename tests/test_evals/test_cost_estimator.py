@@ -213,3 +213,40 @@ class TestJudgeCost:
         assert self._estimate(StageKey.SELECT, [_case()]).judge == (
             "anthropic/claude-opus-5-5"
         )
+
+
+class TestJudgeSkipped:
+    """A judge without credentials makes no calls, so it costs nothing."""
+
+    REASON = "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY)"
+
+    def _estimate(self, stages: list[StageKey], reason: str | None) -> object:
+        return estimate_matrix_cost(
+            _matrix(stages),
+            [_case()],
+            ModelCatalog.builtin(),
+            judge_skipped=reason,
+        )
+
+    def test_a_skipped_judge_makes_no_calls_and_costs_nothing(self) -> None:
+        estimate = self._estimate([StageKey.TAILOR], self.REASON)
+        assert (estimate.judge_calls, estimate.judge_cost_usd) == (0, 0.0)  # type: ignore[attr-defined]
+
+    def test_the_reason_is_reported(self) -> None:
+        estimate = self._estimate([StageKey.TAILOR], self.REASON)
+        assert estimate.judge_skipped == self.REASON  # type: ignore[attr-defined]
+
+    def test_the_total_leaves_the_judge_out(self) -> None:
+        skipped = self._estimate([StageKey.TAILOR], self.REASON)
+        priced = self._estimate([StageKey.TAILOR], None)
+        assert skipped.total_usd < priced.total_usd  # type: ignore[attr-defined]
+        assert skipped.total_usd == skipped.model_costs[HAIKU]  # type: ignore[attr-defined]
+
+    def test_a_stage_without_judge_calls_has_nothing_to_skip(self) -> None:
+        estimate = self._estimate([StageKey.ANALYZE], self.REASON)
+        assert estimate.judge_skipped is None  # type: ignore[attr-defined]
+
+    def test_an_available_judge_is_priced_as_before(self) -> None:
+        estimate = self._estimate([StageKey.TAILOR], None)
+        assert estimate.judge_calls == 2  # type: ignore[attr-defined]
+        assert estimate.judge_skipped is None  # type: ignore[attr-defined]

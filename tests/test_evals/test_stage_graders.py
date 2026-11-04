@@ -31,6 +31,29 @@ def test_each_stage_registers_its_deterministic_graders_in_order(
     assert names[: len(DETERMINISTIC[stage])] == DETERMINISTIC[stage]
 
 
+def test_the_judge_graders_follow_the_deterministic_ones() -> None:
+    names = {
+        stage: [g.name for g in graders] for stage, graders in STAGE_GRADERS.items()
+    }
+    assert names == {
+        StageKey.ANALYZE: ["schema", "jd_keyword_recall"],
+        StageKey.SELECT: ["schema", "faithfulness_extraction", "selection_judge"],
+        StageKey.TAILOR: [
+            "schema",
+            "faithfulness_extraction",
+            "faithfulness_judge",
+            "tailoring_judge",
+        ],
+        StageKey.STRUCTURE: [
+            "schema",
+            "ats_rules",
+            "structure",
+            "faithfulness_extraction",
+        ],
+        StageKey.REVIEW: ["schema", "review_defect_recall"],
+    }
+
+
 def test_no_stage_lists_a_grader_twice() -> None:
     for graders in STAGE_GRADERS.values():
         names = [grader.name for grader in graders]
