@@ -46,7 +46,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 
 ### P3: Profiles, resolution, `mkcv models`, warnings, docs
 
-- [ ] T07: Stage keys, stage requirements, and built-in model profiles (route: delegated; 6 new core modules)
+- [x] T07: Stage keys, stage requirements, and built-in model profiles (route: delegated; 6 new core modules) - `07f5a3b`
 - [ ] T08: Stage resolver, preset split, and settings migration (route: delegated; resolver, presets, settings, factory, validation)
 - [ ] T09: Model advisor, generation warnings, and `--model-profile` (route: delegated; core service + CLI)
 - [ ] T10: `mkcv models` command (route: delegated; new command + app registration + tests)
@@ -101,6 +101,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T04 | `9333892` | `TypeError: AnthropicAdapter.__init__() got an unexpected keyword argument 'resolver'` | 68 focused (test_anthropic), 2184 full | pending (parent runs `gentle-ai review assess`) |
 | T05 | `03914d0` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.model_catalog_loader'` (registry test imports it first; `provider_registry` is missing too) | 866 focused (tests/test_adapters + pipeline + cover letter), 2289 full | pending (parent runs `gentle-ai review assess`) |
 | T06 | `1c550ce` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.google'` (both new test files import it) | 156 focused (test_google + test_provider_registry), 2385 full | pending (parent runs `gentle-ai review assess`) |
+| T07 | `07f5a3b` | `ModuleNotFoundError: No module named 'mkcv.core.models.stage_key'` (all four test files import it; `builtin_model_profiles` is reached after it) | 281 focused (test_core/test_catalog + stage_assignment + stage_key), 2580 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -156,6 +157,16 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Truncation follows design §7.6 literally: the `MAX_TOKENS` error is raised only when the reply is empty. A truncated but non-empty reply goes through the repair path like any invalid JSON.
 - Registry tests replaced the placeholder with `TestGoogleAdapterCreation` (builder, retry wrapping, `GEMINI_API_KEY` over `GOOGLE_API_KEY`, stub fallback, `base_url` from config reaching both a patched and the real SDK client, a user-defined `type = "google"` provider) and `TestLazyImports` (subprocess checks that importing the factory or registry, or creating a non-Google adapter, leaves `google.genai` out of `sys.modules`).
 
+**T07** (route: delegated writer, trigger: 6 new core modules plus 4 test files).
+
+- Verification: `uv run pytest -q tests/test_core/test_catalog tests/test_core/test_models/test_stage_assignment.py tests/test_core/test_models/test_stage_key.py`: 281 passed; ruff check/format and `uv run mypy src/` (155 files): clean; `uv run pytest`: 2580 passed, exit 0.
+- Test strength: 24 one-line mutations of the helpers, profile cells, requirement cells, `StageAssignment.to_stage_config`, and the stage numbering were caught; the only survivors were an equivalent mutation (a `None` base lookup also returns `None`) and a no-op placeholder row.
+- Extra file: `tests/test_core/test_models/test_stage_key.py` covers `StageKey` and its constants (the task lists no test for the new `stage_key.py` module; tests mirror source layout).
+- Data-consistency tests beyond REQ-MP-1: every profile model has a price for its provider, none is deprecated, and every non-economy cloud profile meets each stage's `min_tier` according to the catalog (`local` and the economy profiles intentionally do not). They pass with the shipped data, so no profile cell was changed from the design table.
+- `profile_stage_model` follows the `extends` link recursively through built-in profiles; the tests assert every `extends` target exists and is itself a base profile, so a chain cannot loop.
+- `StageAssignment.temperature` is unconstrained (as in the design); `to_stage_config()` raises a Pydantic `ValidationError` for a value outside 0..2. T08 must turn a bad configured temperature into a `ConfigurationError` before it builds assignments.
+- `core/models/__init__.py` now exports `ModelProfile`, `StageAssignment`, `StageKey`, and `StageRequirement`. `STAGE_REQUIREMENTS` and the profile helpers are imported from `mkcv.core.catalog.*` (same as `BUILTIN_MODEL_CAPABILITIES`). A subprocess test confirms the catalog modules import first in a fresh interpreter and pull in nothing from `adapters`, `config`, or `cli`.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -180,4 +191,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-Phase 1 (T01-T05) and T06 are implemented and committed on `feat/multi-provider-support`. Next: T07 (stage keys, requirements, built-in profiles), then T08.
+T01-T07 are implemented and committed on `feat/multi-provider-support`. Next: T08 (stage resolver, preset split, settings migration), then T09-T11.
