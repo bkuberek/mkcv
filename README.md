@@ -31,8 +31,13 @@ mkcv takes your career knowledge base and a job description, then produces a pol
 # Install (macOS on Apple silicon, or Linux)
 brew install bkuberek/tap/mkcv
 
-# Set up an API key (at least one provider)
-export ANTHROPIC_API_KEY=sk-ant-...
+# Set up an API key (at least one provider) in your user config file
+mkdir -p ~/.config/mkcv
+cat > ~/.config/mkcv/settings.toml <<'EOF'
+[default.providers.anthropic]
+api_key = "sk-ant-..."
+EOF
+chmod 600 ~/.config/mkcv/settings.toml
 
 # Create a workspace
 mkcv init ~/Documents/cv
@@ -100,31 +105,44 @@ mkcv --help
 
 ### Set Up API Credentials
 
-mkcv needs at least one AI provider configured:
+mkcv needs at least one AI provider configured. The recommended place for API
+keys is your user config file, `~/.config/mkcv/settings.toml`. It applies to
+every workspace, keeps keys out of your repositories and shell environment, and
+survives upgrades:
 
-```bash
+```toml
 # Anthropic (default provider -- recommended)
-export ANTHROPIC_API_KEY=sk-ant-...
+[default.providers.anthropic]
+api_key = "sk-ant-..."
 
 # OpenAI
-export OPENAI_API_KEY=sk-...
+[default.providers.openai]
+api_key = "sk-..."
 
-# Google Gemini (GOOGLE_API_KEY also works; GEMINI_API_KEY wins if both are set)
-export GEMINI_API_KEY=...
-
-# Google Gemini without an API key (Vertex AI + Application Default Credentials):
-# run `gcloud auth application-default login`, then in mkcv.toml set
-#   [default.providers.google]
-#   vertexai = true
-#   project = "my-gcp-project"
+# Google Gemini
+[default.providers.google]
+api_key = "..."
 
 # OpenRouter (access 200+ models with one key)
-export OPENROUTER_API_KEY=sk-or-...
-
-# Ollama (free, local -- no key needed, just have Ollama running)
+[default.providers.openrouter]
+api_key = "sk-or-..."
 ```
 
-Add these to your shell profile (`~/.zshrc`, `~/.bashrc`) so they persist.
+Add only the providers you use, then run `chmod 600 ~/.config/mkcv/settings.toml`.
+Never put `api_key` in a workspace `mkcv.toml` that you commit to git.
+
+Environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+`OPENROUTER_API_KEY`, or `MKCV_PROVIDERS__<NAME>__API_KEY`) also work and suit CI
+and one-off overrides. A key in config takes precedence over the environment
+variable. Details: [docs/models.md](docs/models.md#api-keys).
+
+Two providers need no key:
+
+- **Google Gemini via Vertex AI + Application Default Credentials:** run
+  `gcloud auth application-default login`, then in `mkcv.toml` set
+  `[default.providers.google]` with `vertexai = true` and
+  `project = "my-gcp-project"`.
+- **Ollama** (free, local): just have Ollama running.
 
 ### Create a Workspace
 
@@ -328,11 +346,11 @@ export MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5
 
 | Provider | Setup | Notes |
 |----------|-------|-------|
-| **Anthropic** | `export ANTHROPIC_API_KEY=sk-ant-...` | Default provider, Claude models |
-| **OpenAI** | `export OPENAI_API_KEY=sk-...` | GPT models, strict structured output |
-| **Google Gemini** | `export GEMINI_API_KEY=...`, or Vertex AI with ADC (below) | Gemini models (`GOOGLE_API_KEY` also works) |
+| **Anthropic** | `api_key` in `~/.config/mkcv/settings.toml` (or `ANTHROPIC_API_KEY`) | Default provider, Claude models |
+| **OpenAI** | `api_key` in `~/.config/mkcv/settings.toml` (or `OPENAI_API_KEY`) | GPT models, strict structured output |
+| **Google Gemini** | `api_key` in `~/.config/mkcv/settings.toml` (or `GEMINI_API_KEY` / `GOOGLE_API_KEY`), or Vertex AI with ADC (below) | Gemini models |
 | **Ollama** | [Install Ollama](https://ollama.ai), run `ollama serve` | Free, local, no API key |
-| **OpenRouter** | `export OPENROUTER_API_KEY=sk-or-...` | 200+ models via single API key; name a model per stage |
+| **OpenRouter** | `api_key` in `~/.config/mkcv/settings.toml` (or `OPENROUTER_API_KEY`) | 200+ models via single API key; name a model per stage |
 | **Any OpenAI-compatible endpoint** | Define it in `mkcv.toml` | Groq, Together, vLLM, LM Studio, a company gateway |
 
 If your Google organization disallows API keys, use Vertex AI with Application

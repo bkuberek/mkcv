@@ -15,7 +15,7 @@ or an API key to check.
 
 ## Providers
 
-| Provider | Kind | API key | Notes |
+| Provider | Kind | Key variable (alternative to config) | Notes |
 |----------|------|---------|-------|
 | `anthropic` | Anthropic | `ANTHROPIC_API_KEY` | Default. Claude models. |
 | `openai` | OpenAI | `OPENAI_API_KEY` | GPT models through the Chat Completions API with strict JSON-schema output. |
@@ -24,14 +24,54 @@ or an API key to check.
 | `ollama` | OpenAI-compatible | none | Local models at `http://localhost:11434/v1`. |
 | `stub` | offline | none | Deterministic placeholder for tests and dry runs. |
 
-If a provider needs a key and none is found, mkcv warns first
-(`openai: no API key found ...`) and then stops with exit code 3, naming the
-variable to set. Use the `stub` provider (`--provider stub`) for an offline
-dry run.
+### API keys
 
-When both `GEMINI_API_KEY` and `GOOGLE_API_KEY` are set, mkcv uses
-`GEMINI_API_KEY`. The Google SDK on its own prefers `GOOGLE_API_KEY`, but mkcv
-passes the key it chose explicitly.
+Put your keys in your user config file, `~/.config/mkcv/settings.toml`. It is
+read for every workspace, lives outside every repository and your shell
+environment, and survives upgrades (including Homebrew):
+
+```toml
+[default.providers.anthropic]
+api_key = "sk-ant-..."
+
+[default.providers.openai]
+api_key = "sk-..."
+
+[default.providers.google]
+api_key = "..."
+
+[default.providers.openrouter]
+api_key = "sk-or-..."
+```
+
+Add only the providers you use, then make the file private:
+
+```bash
+chmod 600 ~/.config/mkcv/settings.toml
+```
+
+> **Never put `api_key` in a workspace `mkcv.toml` that is committed to git.**
+> Keep keys in the user config file above.
+
+Environment variables work as an alternative, which suits CI and one-off
+overrides. Use the provider's own variable (the table above lists them), or
+`MKCV_PROVIDERS__<NAME>__API_KEY`, for example
+`MKCV_PROVIDERS__ANTHROPIC__API_KEY`. The provider name is case-insensitive.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+A key set in config takes precedence over the provider's own environment
+variable. mkcv reads the environment variable only when no `api_key` is
+configured for that provider. When both `GEMINI_API_KEY` and `GOOGLE_API_KEY`
+are set, mkcv uses `GEMINI_API_KEY`. The Google SDK on its own prefers
+`GOOGLE_API_KEY`, but mkcv passes the key it chose explicitly.
+
+If a provider needs a key and none is found, mkcv warns first
+(`openai: no API key found ...`) and then stops with exit code 3, naming where
+to set it. It does not continue without the key. Use the `stub` provider
+(`--provider stub`) for an offline dry run. Vertex AI needs no key; see below.
 
 ### Google Gemini on Vertex AI
 
@@ -311,7 +351,7 @@ Any endpoint that speaks the OpenAI Chat Completions API is a provider:
 type = "openai-compatible"
 base_url = "https://api.groq.com/openai/v1"
 api_key_env = "GROQ_API_KEY"      # a name or a list of names
-# api_key = "..."                 # a literal key; prefer the environment
+# api_key = "..."                 # a literal key; keep it in ~/.config/mkcv/settings.toml, not a committed mkcv.toml
 # requires_api_key = true
 ```
 

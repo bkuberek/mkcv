@@ -13,11 +13,14 @@
 # Every section header needs the [default.] prefix (mkcv uses Dynaconf
 # environments). Without it the setting is silently ignored.
 #
-# API keys are always set via environment variables:
-#   export ANTHROPIC_API_KEY=sk-ant-...
-#   export OPENAI_API_KEY=sk-...
-#   export GEMINI_API_KEY=...          (GOOGLE_API_KEY also works)
-#   export OPENROUTER_API_KEY=sk-or-...
+# API keys belong in your user config file, ~/.config/mkcv/settings.toml
+# (run: chmod 600 ~/.config/mkcv/settings.toml), not in this workspace file.
+# Never commit an api_key to git. Use the same table names there:
+#   [default.providers.anthropic]
+#   api_key = "sk-ant-..."
+# Environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or
+# GOOGLE_API_KEY, OPENROUTER_API_KEY) also work, for example in CI. A key in
+# config takes precedence over the environment variable.
 #
 # Run `mkcv models` to see which model every stage will use, what mkcv
 # recommends, and an estimated cost. See docs/models.md for the details.

@@ -50,9 +50,12 @@ class Mkcv < Formula
 
   def caveats
     <<~EOS
-      mkcv needs an API key for at least one AI provider, for example:
-        export ANTHROPIC_API_KEY=sk-ant-...
-      Add it to your shell profile so it persists. Ollama runs locally and needs no key.
+      mkcv needs an API key for at least one AI provider. Put it in your user
+      config file, ~/.config/mkcv/settings.toml, then run chmod 600 on it:
+        [default.providers.anthropic]
+        api_key = "sk-ant-..."
+      Environment variables such as ANTHROPIC_API_KEY also work. Ollama runs
+      locally and needs no key.
 
       Create a workspace and fill in your career knowledge base:
         mkcv init ~/Documents/cv
