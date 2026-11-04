@@ -54,7 +54,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 
 ### P4: Eval harness
 
-- [ ] T12: Eval package scaffolding, models, case loading, and cost estimate (route: delegated)
+- [x] T12: Eval package scaffolding, models, case loading, and cost estimate (route: delegated; new `evals/` package, 10 models, 2 harness modules, CLI, tool config, 5 test files) - `378d9c5`
 - [ ] T13: Stage-isolated runner and `run` / `bootstrap-reference` commands (route: delegated)
 - [ ] T14: Synthetic eval fixtures (route: delegated)
 - [ ] T15: Deterministic graders (route: delegated)
@@ -106,6 +106,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T09 | `5cfb69e` (+ `9d141c0`) | `ModuleNotFoundError: No module named 'mkcv.core.models.model_report'` (advisor/report/warnings tests); `AttributeError: module 'mkcv.cli.commands.generate' does not have the attribute 'create_model_report'` (95 CLI errors); markup fix: `assert '[default.pipeline.stages.select]' in "...set model in  or choose a --model-profile."` (15 failed) | 129 added over the fix commit (2787 to 2916 full); focused: 442 CLI + 156 factory/advisor | pending (parent runs `gentle-ai review assess`) |
 | T10 | `6044761` | `ModuleNotFoundError: No module named 'mkcv.cli.commands.models'` (63 failed, incl. the subprocess help tests) | 66 focused (test_models_command), 2987 full | pending (parent runs `gentle-ai review assess`) |
 | T11 | `4ba61b9` (+ `bbd29b9`) | `assert '# model_profile = "anthropic"' in <workspace mkcv.toml>` and the README assertions (14 failed in `test_workspace_manager.py`); advisor fix: `--model-profile anthropic-economy` produced tier warnings (2 failed against the previous advisor) | 70 focused (test_workspace_manager), 3010 full | pending (parent runs `gentle-ai review assess`) |
+| T12 | `378d9c5` | `ModuleNotFoundError: No module named 'evals'` (3 test modules fail to collect) and 7 `test_tooling.py` assertions on pyproject, CI, and `.gitignore` | 97 focused (tests/test_evals), 3107 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -231,6 +232,18 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - `docs/models.md` describes the eval harness as planned (its "Evidence" section). T17 adds "How recommendations are made" and should replace that paragraph with the real process.
 - Follow-up (not in this feature): `[default.defaults] profile = "standard"` in the workspace template is read by nothing.
 
+**T12** (route: delegated writer, trigger: new `evals/` package of 18 modules, CLI, tool config, and 6 test files).
+
+- Verification: `uv run pytest tests/test_evals`: 97 passed; `uv run ruff check src/ tests/ evals/` and `uv run ruff format --check src/ tests/ evals/`: clean; `uv run mypy src/ evals/` (181 files): clean; `uv run pytest`: 3107 passed; `uv lock --check`: consistent. `uv build --wheel`: 185 entries, 0 under `evals/` (`dist/` deleted). `uv run python -m evals --help` lists the five commands.
+- Test strength: 29 one-line mutations of `cost_estimator.py`, `case_loader.py`, `eval_case.py`, `run_settings.py`, `matrix_config.py`, `cli.py`, and the `pytest` `pythonpath`; 24 were caught at first, the five survivors (an empty `cases = []` list, duplicate matrix models, the partial-total note, and two patterns reformatted by ruff) were killed by 5 added tests, so every mutation is caught.
+- Tooling: `[tool.pytest.ini_options] pythonpath = ["."]`; ruff `known-first-party = ["mkcv", "evals"]` (otherwise isort sorts `evals` with third-party packages); `[tool.mypy] files = ["src", "evals"]` so a bare `uv run mypy` checks both (mkcv ships no `py.typed`, so `mypy evals/` alone cannot see mkcv types; the CI command is `mypy src/ evals/`); CI lint job runs ruff and mypy on `evals/`; `.gitignore` gains `evals/results/*` and `!evals/results/published/`. `tests/test_evals/test_tooling.py` (extra file) pins these settings and the wheel `packages = ["src/mkcv"]`.
+- Decision: expected failures in the harness use stdlib exceptions (`FileNotFoundError` for a missing file, `ValueError` for invalid contents; Pydantic's `ValidationError` is a `ValueError`). `main` turns `OSError`, `ValueError`, and `MkcvError` into `error: ...` on stderr and exit 2. Argparse usage errors also exit 2 and `main` returns the code instead of raising `SystemExit`.
+- Decision: `main(argv=None, *, config=None)` takes the mkcv configuration as a parameter (default: the real `mkcv.config.settings`, imported lazily), so tests pass real Dynaconf built from the bundled `settings.toml` plus a temp layer. `evals.cli` imports `mkcv.adapters.factory` lazily inside `estimate`, so `--help` does not load RenderCV.
+- Additions beyond the file list: `evals/models/cost_estimate.py` (the estimate result, one class per file), `--fixtures PATH` on `list-cases` and `estimate` (the test seam; defaults to `evals/fixtures`), `RunManifest.skipped_models` (T13 fills it; T17's report caveats need it), `EvalCase.applies_to` and `reference_stages()` plus the `REFERENCE_FILES` constant (stage to reference file names; T13's runner copies from it), `MatrixConfig` rejects the same `provider/model` twice, and `EvalCase.stages` and `RunSettings.stages` accept only the five resume pipeline stages.
+- Decision: `load_matrix` and `select_cases` live in `case_loader.py` (the task's test file `test_case_loader.py` covers "loader, matrix parsing"). `load_cases` fails fast on a missing or blank persona or job description file; REQ-EV-2's other checks arrive with the fixtures in T14.
+- Estimate: the judge makes 1 call for `select`, 2 for `tailor`, and 1 for `review` only on cases with seeded defects (the grader table of design 9.6), at 6000 in / 1500 out tokens each, charged at the judge's catalog price. A judge with no calls costs 0.0 (REQ-EV-21); a model without a catalog price costs None and prints `n/a`, and the total notes that some prices are unknown. The shipped matrix prices every model from the built-in catalog.
+- The `run`, `report`, and `bootstrap-reference` subcommands are registered with no options and print `not implemented yet` (exit 2); T13 gives `run` and `bootstrap-reference` their options, T17 gives `report` its.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -255,4 +268,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-T01-T11 are implemented and committed on `feat/multi-provider-support` (P1-P3 complete). Next: T12 (eval package scaffolding, models, case loading, and cost estimate); it builds on `STAGE_REQUIREMENTS`, `StageKey`, `load_model_catalog`, and the factory (`create_provider_registry` gives access to the catalog with the user's overrides). P4 (T12-T17) is the remaining work, then the owner actions at the end of `tasks.md`.
+T01-T12 are implemented and committed on `feat/multi-provider-support`. Next: T13 (stage-isolated runner and the `run` / `bootstrap-reference` commands); it needs `create_pipeline_service_for_stage_configs` in the factory, `REFERENCE_FILES` and `EvalCase.reference_stages()` from T12, and `RunManifest`/`EvalRecord`. Then T14-T17, then the owner actions at the end of `tasks.md`.
