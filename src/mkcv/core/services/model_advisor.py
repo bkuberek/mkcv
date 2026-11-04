@@ -71,7 +71,9 @@ class ModelAdvisor:
                 price models the catalog has no price for (e.g. local models).
         """
         defaults = provider_defaults or {}
-        advice = [self._advise_stage(a, profile, defaults) for a in assignments]
+        advice = [
+            self._advise_stage(a, profile, preset_name, defaults) for a in assignments
+        ]
         total, is_partial = summarize_costs(item.estimated_cost_usd for item in advice)
         return ModelReport(
             profile_name=profile.name if profile else None,
@@ -91,6 +93,7 @@ class ModelAdvisor:
         self,
         assignment: StageAssignment,
         profile: ModelProfile | None,
+        preset_name: str,
         defaults: Mapping[str, CapabilityOverlay],
     ) -> StageAdvice:
         requirement = self._requirements[assignment.stage]
@@ -108,15 +111,20 @@ class ModelAdvisor:
             min_tier=requirement.min_tier,
             known=entry is not None,
             estimated_cost_usd=self._cost(assignment, requirement, canonical, defaults),
-            warnings=_stage_warnings(
-                assignment,
-                requirement,
-                entry,
-                recommended=_describe(recommended_provider, recommended_model),
-                mkcv_choice=_is_mkcv_choice(
-                    assignment, profile, (recommended_provider, recommended_model)
+            warnings=[
+                *_config_override_warnings(
+                    assignment, requirement, profile, preset_name
                 ),
-            ),
+                *_stage_warnings(
+                    assignment,
+                    requirement,
+                    entry,
+                    recommended=_describe(recommended_provider, recommended_model),
+                    mkcv_choice=_is_mkcv_choice(
+                        assignment, profile, (recommended_provider, recommended_model)
+                    ),
+                ),
+            ],
         )
 
     def _recommendation(
@@ -189,6 +197,64 @@ def _is_mkcv_choice(
         and profile.provider == assignment.provider
         and profile_stage_model(profile, assignment.stage) == assignment.model
     )
+
+
+def _config_override_warnings(
+    assignment: StageAssignment,
+    requirement: StageRequirement,
+    profile: ModelProfile | None,
+    preset_name: str,
+) -> list[ModelWarning]:
+    """Warn when per-stage config replaces what the active profile would run.
+
+    Per-stage ``provider`` and ``model`` beat the model profile, so a preset
+    or profile the user chose can quietly stop applying to a stage. Two cases
+    are worth saying out loud: the stage moves to another provider than the
+    profile's, or an economy profile's cheaper model is replaced.
+    """
+    if (
+        profile is None
+        or assignment.source != "config"
+        or assignment.provider_kind is ProviderKind.STUB
+    ):
+        return []
+
+    section = f"[default.{requirement.config_path}]"
+    stage = assignment.stage.value
+    subject = f"{assignment.provider}/{assignment.model}"
+    profile_model = profile_stage_model(profile, assignment.stage)
+
+    if assignment.provider != profile.provider:
+        kind = ModelWarningKind.CONFIG_OVERRIDES_PROVIDER
+        message = (
+            f"{stage}: {section} sets provider '{assignment.provider}' "
+            f"({subject}), but the '{profile.name}' profile (preset "
+            f"'{preset_name}') runs on '{profile.provider}'. Per-stage "
+            "config wins over the profile; remove provider and model from that "
+            f"section, or pass --model-profile {profile.name} to run every stage "
+            "on the profile."
+        )
+    elif profile.economy and profile_model and profile_model != assignment.model:
+        kind = ModelWarningKind.CONFIG_OVERRIDES_MODEL
+        message = (
+            f"{stage}: {section} sets {subject}, replacing "
+            f"{assignment.provider}/{profile_model} that the '{profile.name}' "
+            f"profile (preset '{preset_name}') would use. Per-stage config wins "
+            "over the profile; remove model from that section, or pass "
+            f"--model-profile {profile.name} to run every stage on the profile."
+        )
+    else:
+        return []
+
+    return [
+        ModelWarning(
+            kind=kind,
+            stage=assignment.stage,
+            provider=assignment.provider,
+            model=assignment.model,
+            message=message,
+        )
+    ]
 
 
 def _default_price(overlay: CapabilityOverlay | None) -> tuple[float, float] | None:

@@ -205,7 +205,7 @@ class TestWarningsSection:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
         output = run(_WEAK_TAILOR)
         assert (
-            "Warnings:\n  tailor: openai/gpt-6.1-terra is tier 'efficient'; mkcv "
+            "  tailor: openai/gpt-6.1-terra is tier 'efficient'; mkcv "
             "recommends at least 'strong' for this stage "
             "(recommended: openai/gpt-6-astra).\n" in output
         )

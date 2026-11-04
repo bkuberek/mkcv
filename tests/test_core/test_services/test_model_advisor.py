@@ -13,6 +13,7 @@ from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.models.capability_overlay import CapabilityOverlay
 from mkcv.core.models.model_capability import ModelCapability
 from mkcv.core.models.model_catalog import ModelCatalog
+from mkcv.core.models.model_profile import ModelProfile
 from mkcv.core.models.model_report import ModelReport
 from mkcv.core.models.model_tier import ModelTier
 from mkcv.core.models.model_warning import ModelWarning
@@ -70,13 +71,39 @@ def _advise(
     provider_defaults: dict[str, CapabilityOverlay] | None = None,
 ) -> ModelReport:
     advisor = ModelAdvisor(catalog or ModelCatalog.builtin())
-    return advisor.advise(
+    report = advisor.advise(
         assignments,
         profile=_ANTHROPIC_PROFILE,
         profile_source="default",
         preset_name="standard",
         provider_warnings=provider_warnings,
         provider_defaults=provider_defaults,
+    )
+    return _without_override_warnings(report)
+
+
+_OVERRIDE_KINDS = frozenset(
+    {
+        ModelWarningKind.CONFIG_OVERRIDES_MODEL,
+        ModelWarningKind.CONFIG_OVERRIDES_PROVIDER,
+    }
+)
+
+
+def _without_override_warnings(report: ModelReport) -> ModelReport:
+    """Drop the config-override warnings, which these tests do not examine."""
+
+    def keep(warnings: list[ModelWarning]) -> list[ModelWarning]:
+        return [w for w in warnings if w.kind not in _OVERRIDE_KINDS]
+
+    return report.model_copy(
+        update={
+            "warnings": keep(report.warnings),
+            "stages": [
+                item.model_copy(update={"warnings": keep(item.warnings)})
+                for item in report.stages
+            ],
+        }
     )
 
 
@@ -562,7 +589,10 @@ class TestRunningTheActiveProfilesModel:
         report = ModelAdvisor(ModelCatalog.builtin()).advise(
             assignments, profile=economy, profile_source="cli", preset_name="standard"
         )
-        assert _warning_kinds(report) == [ModelWarningKind.BELOW_RECOMMENDED_TIER]
+        assert _warning_kinds(report) == [
+            ModelWarningKind.CONFIG_OVERRIDES_PROVIDER,
+            ModelWarningKind.BELOW_RECOMMENDED_TIER,
+        ]
 
     def test_a_profile_from_another_provider_does_not_excuse_the_model(self) -> None:
         catalog = ModelCatalog.builtin().with_overrides(
@@ -579,7 +609,10 @@ class TestRunningTheActiveProfilesModel:
             profile_source="config",
             preset_name="standard",
         )
-        assert _warning_kinds(report) == [ModelWarningKind.BELOW_RECOMMENDED_TIER]
+        assert _warning_kinds(report) == [
+            ModelWarningKind.CONFIG_OVERRIDES_PROVIDER,
+            ModelWarningKind.BELOW_RECOMMENDED_TIER,
+        ]
 
 
 class TestRunningTheRecommendedModel:
@@ -614,3 +647,172 @@ class TestRunningTheRecommendedModel:
             catalog=catalog,
         )
         assert _warning_kinds(report) == [ModelWarningKind.DEPRECATED_MODEL]
+
+
+_ECONOMY_PROFILE = BUILTIN_MODEL_PROFILES["anthropic-economy"]
+
+
+def _advise_with(
+    assignments: Sequence[StageAssignment],
+    *,
+    profile: ModelProfile = _ANTHROPIC_PROFILE,
+    preset_name: str = "standard",
+) -> ModelReport:
+    return ModelAdvisor(ModelCatalog.builtin()).advise(
+        assignments,
+        profile=profile,
+        profile_source="default",
+        preset_name=preset_name,
+    )
+
+
+def _override_warnings(report: ModelReport) -> list[ModelWarning]:
+    return [w for w in report.warnings if w.kind in _OVERRIDE_KINDS]
+
+
+class TestConfigOverridesTheEconomyProfile:
+    """A per-stage model replaces what the economy preset would have chosen."""
+
+    def test_a_configured_model_is_reported_under_an_economy_preset(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.ANALYZE, "anthropic", "claude-opus-5", "config")],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        assert [w.kind for w in _override_warnings(report)] == [
+            ModelWarningKind.CONFIG_OVERRIDES_MODEL
+        ]
+
+    def test_the_warning_names_the_stage_the_config_section_and_the_profile(
+        self,
+    ) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.ANALYZE, "anthropic", "claude-opus-5", "config")],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        message = _override_warnings(report)[0].message
+        expected = _ECONOMY_PROFILE.stages[StageKey.ANALYZE]
+        assert message.startswith("analyze: [default.pipeline.stages.analyze]")
+        assert "anthropic/claude-opus-5" in message
+        assert f"anthropic/{expected}" in message
+        assert "anthropic-economy" in message
+
+    def test_the_warning_says_how_to_remove_or_override_the_config(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.ANALYZE, "anthropic", "claude-opus-5", "config")],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        message = _override_warnings(report)[0].message
+        assert "remove" in message
+        assert "--model-profile anthropic-economy" in message
+
+    def test_the_warning_belongs_to_the_stage(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.ANALYZE, "anthropic", "claude-opus-5", "config")],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        warning = _override_warnings(report)[0]
+        assert (warning.stage, warning.provider, warning.model) == (
+            StageKey.ANALYZE,
+            "anthropic",
+            "claude-opus-5",
+        )
+
+    def test_config_that_matches_the_economy_model_is_not_reported(self) -> None:
+        model = _ECONOMY_PROFILE.stages[StageKey.ANALYZE]
+        report = _advise_with(
+            [_assignment(StageKey.ANALYZE, "anthropic", model, "config")],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        assert _override_warnings(report) == []
+
+    def test_a_standard_preset_does_not_report_a_configured_model(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.ANALYZE, "anthropic", "claude-opus-5", "config")]
+        )
+        assert _override_warnings(report) == []
+
+    def test_profile_assignments_are_never_reported(self) -> None:
+        report = _advise_with(
+            [
+                _assignment(
+                    stage,
+                    "anthropic",
+                    _ECONOMY_PROFILE.stages.get(stage)
+                    or _ANTHROPIC_PROFILE.stages[stage],
+                    "profile",
+                )
+                for stage in PIPELINE_STAGES
+            ],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        assert _override_warnings(report) == []
+
+    def test_command_line_assignments_are_never_reported(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.ANALYZE, "anthropic", "claude-opus-5", "cli")],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        assert _override_warnings(report) == []
+
+
+class TestConfigProviderDiffersFromTheProfile:
+    def test_a_stage_on_another_provider_is_reported(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.TAILOR, "openai", "gpt-6-astra", "config")]
+        )
+        assert [w.kind for w in _override_warnings(report)] == [
+            ModelWarningKind.CONFIG_OVERRIDES_PROVIDER
+        ]
+
+    def test_the_warning_names_the_stage_the_section_and_both_providers(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.TAILOR, "openai", "gpt-6-astra", "config")]
+        )
+        message = _override_warnings(report)[0].message
+        assert message.startswith("tailor: [default.pipeline.stages.tailor]")
+        assert "'openai'" in message
+        assert "'anthropic'" in message
+
+    def test_the_warning_says_how_to_remove_or_override_the_config(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.TAILOR, "openai", "gpt-6-astra", "config")]
+        )
+        message = _override_warnings(report)[0].message
+        assert "remove" in message
+        assert "--model-profile anthropic" in message
+
+    def test_one_warning_covers_a_stage_that_changes_provider_and_model(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.TAILOR, "openai", "gpt-6-astra", "config")],
+            profile=_ECONOMY_PROFILE,
+            preset_name="concise",
+        )
+        assert len(_override_warnings(report)) == 1
+
+    def test_the_offline_stub_is_not_reported(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.TAILOR, "stub", "stub-model", "config")]
+        )
+        assert _override_warnings(report) == []
+
+    def test_a_stage_on_the_profile_provider_is_not_reported(self) -> None:
+        report = _advise_with(
+            [_assignment(StageKey.TAILOR, "anthropic", "claude-opus-5", "config")]
+        )
+        assert _override_warnings(report) == []
+
+    def test_stages_without_a_profile_are_not_reported(self) -> None:
+        report = ModelAdvisor(ModelCatalog.builtin()).advise(
+            [_assignment(StageKey.TAILOR, "openai", "gpt-6-astra", "config")],
+            profile=None,
+            profile_source="default",
+            preset_name="standard",
+        )
+        assert _override_warnings(report) == []

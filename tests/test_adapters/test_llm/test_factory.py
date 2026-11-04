@@ -907,13 +907,17 @@ class TestCreateModelReport:
         config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
         assert create_model_report(config, preset_name="concise").warnings == []
 
-    def test_a_weak_configured_model_gives_exactly_one_warning(
+    def test_a_weak_configured_model_gives_exactly_one_tier_warning(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
         config = _real_config(tmp_path, _TERRA_TAILOR)
         report = create_model_report(config, preset_name="standard")
-        assert [(w.kind, w.stage, w.message) for w in report.warnings] == [
+        assert [
+            (w.kind, w.stage, w.message)
+            for w in report.warnings
+            if w.kind is ModelWarningKind.BELOW_RECOMMENDED_TIER
+        ] == [
             (
                 ModelWarningKind.BELOW_RECOMMENDED_TIER,
                 StageKey.TAILOR,
@@ -922,6 +926,64 @@ class TestCreateModelReport:
                 "(recommended: openai/gpt-6-astra).",
             )
         ]
+
+    def test_a_weak_configured_model_on_another_provider_also_names_the_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        config = _real_config(tmp_path, _TERRA_TAILOR)
+        report = create_model_report(config, preset_name="standard")
+        assert [w.kind for w in report.warnings] == [
+            ModelWarningKind.CONFIG_OVERRIDES_PROVIDER,
+            ModelWarningKind.BELOW_RECOMMENDED_TIER,
+        ]
+
+    def test_the_concise_preset_reports_a_per_stage_model_that_beats_it(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.analyze]
+model = "claude-opus-5"
+""",
+        )
+        report = create_model_report(config, preset_name="concise")
+        assert [w.kind for w in report.warnings] == [
+            ModelWarningKind.CONFIG_OVERRIDES_MODEL
+        ]
+
+    def test_a_stage_provider_that_differs_from_the_profile_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.tailor]
+provider = "openai"
+model = "gpt-6-astra"
+""",
+        )
+        report = create_model_report(config, preset_name="standard")
+        assert [w.kind for w in report.warnings] == [
+            ModelWarningKind.CONFIG_OVERRIDES_PROVIDER
+        ]
+
+    def test_a_model_profile_flag_removes_the_override_warnings(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.analyze]
+model = "claude-opus-5"
+""",
+        )
+        report = create_model_report(
+            config, preset_name="concise", model_profile="anthropic-economy"
+        )
+        assert report.warnings == []
 
     def test_an_unknown_model_is_reported_for_its_stage(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -935,7 +997,11 @@ provider = "openai"
 model = "gpt-7-nova"
 """,
         )
-        warning = create_model_report(config).warnings[0]
+        warning = next(
+            w
+            for w in create_model_report(config).warnings
+            if w.kind is ModelWarningKind.UNKNOWN_MODEL
+        )
         assert (warning.kind, warning.stage) == (
             ModelWarningKind.UNKNOWN_MODEL,
             StageKey.ANALYZE,
@@ -966,9 +1032,11 @@ model = "m"
 """,
         )
         report = create_model_report(config)
-        assert [(w.kind, w.stage) for w in report.warnings] == [
-            (ModelWarningKind.TIER_UNKNOWN, StageKey.SELECT)
-        ]
+        assert [
+            (w.kind, w.stage)
+            for w in report.warnings
+            if w.kind is ModelWarningKind.TIER_UNKNOWN
+        ] == [(ModelWarningKind.TIER_UNKNOWN, StageKey.SELECT)]
 
     def test_a_deprecated_model_is_reported_with_its_replacement(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
