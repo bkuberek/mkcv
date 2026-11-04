@@ -42,7 +42,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 
 ### P2: Google Gemini
 
-- [ ] T06: Google Gemini adapter (route: delegated; dependency + adapter + registry)
+- [x] T06: Google Gemini adapter (route: delegated; dependency + adapter + registry) - `1c550ce`
 
 ### P3: Profiles, resolution, `mkcv models`, warnings, docs
 
@@ -100,6 +100,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T03 | `baecd67` | `KeyError: 'max_completion_tokens'` (request still sent json_object, temperature, max_tokens) | 82 focused (test_openai + test_factory), 2148 full | pending (parent runs `gentle-ai review assess`) |
 | T04 | `9333892` | `TypeError: AnthropicAdapter.__init__() got an unexpected keyword argument 'resolver'` | 68 focused (test_anthropic), 2184 full | pending (parent runs `gentle-ai review assess`) |
 | T05 | `03914d0` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.model_catalog_loader'` (registry test imports it first; `provider_registry` is missing too) | 866 focused (tests/test_adapters + pipeline + cover letter), 2289 full | pending (parent runs `gentle-ai review assess`) |
+| T06 | `1c550ce` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.google'` (both new test files import it) | 156 focused (test_google + test_provider_registry), 2385 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -143,6 +144,18 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - `OllamaAdapter` behaviours were ported to `test_openai_compatible.py` (schema augmentation helper, connection error naming, parse and validation failures); its `model or default_model` fallback was dropped because every caller passes a model. `test_ollama.py` and `ollama.py` are deleted.
 - The `GOOGLE` builder raises `ConfigurationError("The google provider is not available yet")` as planned; `test_google_is_not_available_before_its_adapter_lands` in `test_provider_registry.py` is replaced in T06.
 
+**T06** (route: delegated writer, trigger: dependency, new adapter module, registry builder, two test files).
+
+- Verification: `uv run pytest -q tests/test_adapters/test_llm/test_google.py tests/test_adapters/test_llm/test_provider_registry.py`: 156 passed; `uv run ruff check src/ tests/` and `uv run ruff format --check src/ tests/`: clean; `uv run mypy src/` (149 files): clean, so no `google`/`google.*` mypy override was added (the SDK ships types); `uv run pytest`: 2385 passed, exit 0; `uv lock --check`: consistent.
+- Test strength: 25 one-line mutations of `google.py` (role mapping, system joining, thinking tokens, usage summing, temperature handling, adaptation guards, error codes, context-length words, block/finish reasons, array guard, transport mapping, base URL) were all caught. The first run of the mutation harness stripped indentation, so its "caught" results were syntax errors; it was fixed and rerun, and the one real survivor (the non-object JSON guard) gained `test_a_json_array_is_repaired_instead_of_crashing`.
+- SDK facts confirmed locally against `google-genai` 2.34.0: `errors.ClientError(code, response_json)` sets `.code`, `.status`, and `.message` from `response_json["error"]`, while `str(error)` is `"<code> <STATUS>. {payload}"`; `GenerateContentResponse.usage_metadata` is `GenerateContentResponseUsageMetadata` (has `candidates_token_count`); `block_reason` and `finish_reason` are enums (`.name` gives `SAFETY`/`MAX_TOKENS`); `client.aio` is a stable attribute, so tests can assign `adapter._client.aio.models.generate_content`.
+- Decision: error classification (rejected `temperature`, `token`/`context` in a 400) reads `error.message`, falling back to `str(error)`. `str(error)` carries the HTTP status name (`INVALID_ARGUMENT`), which contains `invalid` and would make any 400 that merely mentions temperature look like a rejection of it. The text put into the raised mkcv error is still `str(error)`, so users see code, status, and payload. Pinned by `test_the_status_name_alone_does_not_trigger_adaptation`.
+- Decision: `complete` applies the same empty-reply handling as `complete_structured` (blocked prompt, truncation, no text raise `ProviderError`) rather than returning an empty string. Design §7.6 words the handling generically; an empty plain completion is never a usable stage result.
+- Addition (not in the spec): `httpx.TransportError` maps to `ProviderError("Cannot connect to <provider>: ...")`, matching the OpenAI-compatible adapter and the Anthropic adapter's `APIError` catch; without it a network failure surfaced as a traceback. An empty reply whose first candidate finished for an unusual reason (e.g. `SAFETY`) reports `Gemini returned no text (finish reason: SAFETY)`; the plain `Gemini returned no text` text is kept when there is no such signal.
+- Decision: `REPAIR_PROMPT` is defined again in `google.py` (identical text, guarded by `test_repair_prompt_matches_the_openai_compatible_adapter`) instead of importing it from `openai_compatible.py` (which would pull the OpenAI SDK into Google runs) or moving it into `_utils.py` (outside T06's file list). If a later cleanup moves it to `_utils.py`, delete the copy and the guard test.
+- Truncation follows design §7.6 literally: the `MAX_TOKENS` error is raised only when the reply is empty. A truncated but non-empty reply goes through the repair path like any invalid JSON.
+- Registry tests replaced the placeholder with `TestGoogleAdapterCreation` (builder, retry wrapping, `GEMINI_API_KEY` over `GOOGLE_API_KEY`, stub fallback, `base_url` from config reaching both a patched and the real SDK client, a user-defined `type = "google"` provider) and `TestLazyImports` (subprocess checks that importing the factory or registry, or creating a non-Google adapter, leaves `google.genai` out of `sys.modules`).
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -167,4 +180,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-Phase 1 (T01-T05) is implemented and committed on `feat/multi-provider-support`. Next: T06 (Google Gemini adapter; locks `google-genai`, replaces the registry's `GOOGLE` builder stub and its placeholder test).
+Phase 1 (T01-T05) and T06 are implemented and committed on `feat/multi-provider-support`. Next: T07 (stage keys, requirements, built-in profiles), then T08.
