@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from rich.markup import escape
 from rich.prompt import Prompt
 
 from mkcv.cli.interactive.commands import CommandKind, ParsedCommand, parse
@@ -615,7 +616,7 @@ class InteractiveSession:
                 ),
             )
         except Exception as exc:
-            self._console.print(f"[red]Regeneration failed: {exc}[/red]")
+            self._console.print(f"[red]Regeneration failed: {escape(str(exc))}[/red]")
             return
 
         self._content = updated
@@ -648,7 +649,7 @@ class InteractiveSession:
                 ),
             )
         except Exception as exc:
-            self._console.print(f"[red]Regeneration failed: {exc}[/red]")
+            self._console.print(f"[red]Regeneration failed: {escape(str(exc))}[/red]")
             return
 
         self._content = updated

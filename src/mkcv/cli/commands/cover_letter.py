@@ -10,6 +10,7 @@ from typing import Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.markup import escape
 
 from mkcv.adapters.factory import (
     create_cover_letter_service,
@@ -121,7 +122,7 @@ def cover_letter_command(
     try:
         jd_doc = read_jd(jd)
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     jd_text = jd_doc.body
@@ -208,7 +209,7 @@ def cover_letter_command(
     try:
         service = create_cover_letter_service(settings, provider_override=provider)
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     try:
@@ -224,7 +225,7 @@ def cover_letter_command(
             )
         )
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     # Deferred placement: now we know company/role from the LLM result
@@ -375,7 +376,7 @@ def _place_in_application_dir(
     except MkcvError as exc:
         console.print(
             f"  [yellow]\u26a0[/yellow] Could not create app dir: "
-            f"{exc} — files remain in: {temp_dir}"
+            f"{escape(str(exc))} — files remain in: {temp_dir}"
         )
         return temp_dir
 

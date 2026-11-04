@@ -8,6 +8,7 @@ from typing import Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -83,7 +84,7 @@ def validate_command(
     try:
         report = asyncio.run(service.validate(file, jd_path=jd))
     except MkcvError as exc:
-        console.print(f"  [red]Error:[/red] {exc}")
+        console.print(f"  [red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     _display_report(report)

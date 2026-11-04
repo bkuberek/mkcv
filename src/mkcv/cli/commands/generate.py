@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.markup import escape
 
 if TYPE_CHECKING:
     from rich.status import Status
@@ -509,7 +510,7 @@ def _resolve_jd(source: str) -> tuple[str, str]:
     try:
         jd_doc = read_jd(source)
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     jd_text = jd_doc.body
@@ -847,7 +848,7 @@ def _generate_workspace_mode(
                 preset_name=preset,
             )
         except MkcvError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
+            console.print(f"[red]Error:[/red] {escape(str(exc))}")
             sys.exit(exc.exit_code)
     finally:
         # Clean up temp JD file
@@ -1046,7 +1047,7 @@ def _run_standard_pipeline(
             )
         )
     except MkcvError as exc:
-        console.print(f"  [red]Error:[/red] {exc}")
+        console.print(f"  [red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     _finalize_pipeline(
@@ -1116,7 +1117,7 @@ def _run_interactive_pipeline(
             )
         )
     except MkcvError as exc:
-        console.print(f"  [red]Error:[/red] {exc}")
+        console.print(f"  [red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     # -- Phase 2: load stage-3 content and run interactive session --
@@ -1228,7 +1229,7 @@ def _run_interactive_pipeline(
             )
         )
     except MkcvError as exc:
-        console.print(f"  [red]Error:[/red] {exc}")
+        console.print(f"  [red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     # Merge stage metadata from both runs for accurate summaries
@@ -1458,7 +1459,7 @@ def _auto_render(
         )
         return True, str(rendered.pdf_path)
     except Exception as exc:
-        console.print(f"  [yellow]\u26a0[/yellow] Render failed: {exc}")
+        console.print(f"  [yellow]\u26a0[/yellow] Render failed: {escape(str(exc))}")
         logger.warning("Auto-render failed", exc_info=True)
         return False, None
 
@@ -1538,7 +1539,9 @@ def _chain_cover_letter(
             settings, provider_override=provider_override
         )
     except MkcvError as exc:
-        console.print(f"  [yellow]\u26a0[/yellow] Cover letter setup failed: {exc}")
+        console.print(
+            f"  [yellow]\u26a0[/yellow] Cover letter setup failed: {escape(str(exc))}"
+        )
         return
 
     try:
@@ -1553,7 +1556,8 @@ def _chain_cover_letter(
         )
     except MkcvError as exc:
         console.print(
-            f"  [yellow]\u26a0[/yellow] Cover letter generation failed: {exc}"
+            "  [yellow]\u26a0[/yellow] Cover letter generation failed: "
+            f"{escape(str(exc))}"
         )
         return
 

@@ -11,6 +11,7 @@ from typing import Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.markup import escape
 
 from mkcv import __version__
 from mkcv.config import find_workspace_root, settings
@@ -99,7 +100,7 @@ def meta_handler(
     try:
         app(tokens)
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
