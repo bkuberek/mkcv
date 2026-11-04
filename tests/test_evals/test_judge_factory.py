@@ -100,7 +100,9 @@ class TestSplitJudges:
         assert runnable == [STUB]
         assert skipped == {
             "anthropic/claude-opus-5-5": (
-                "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY)"
+                "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY, "
+                "or api_key in [default.providers.anthropic] in "
+                "~/.config/mkcv/settings.toml)"
             )
         }
 
