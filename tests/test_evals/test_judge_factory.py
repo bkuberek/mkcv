@@ -27,7 +27,8 @@ class TestAvailability:
         self, registry: ProviderRegistry
     ) -> None:
         assert judge_unavailable_reason(registry, CLAUDE) == (
-            "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY)"
+            "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY, or api_key in "
+            "[default.providers.anthropic] in ~/.config/mkcv/settings.toml)"
         )
 
     def test_a_key_in_the_environment_makes_it_available(

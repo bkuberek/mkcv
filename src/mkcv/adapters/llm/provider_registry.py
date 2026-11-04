@@ -29,6 +29,7 @@ from mkcv.adapters.llm.builtin_providers import (
 from mkcv.adapters.llm.provider_spec import ProviderSpec
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.llm.vertex_target import VertexTarget
+from mkcv.config.user_config_path import USER_CONFIG_DISPLAY_PATH
 from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.models.capability_overlay import CapabilityOverlay
 from mkcv.core.models.provider_kind import ProviderKind
@@ -174,8 +175,7 @@ class ProviderRegistry:
         spec = self.get(name)
         if self.uses_vertex(name):
             return f"run '{LOGIN_COMMAND}'"
-        variables = " or ".join(spec.api_key_env)
-        where = variables or f"api_key in [default.providers.{name}]"
+        where = _key_sources(spec)
         if spec.kind is ProviderKind.GOOGLE:
             where += f", or {_VERTEX_ALTERNATIVE.format(name=name)}"
         return where
@@ -262,15 +262,18 @@ def _vertex_target(spec: ProviderSpec) -> VertexTarget:
     return VertexTarget(project=project, location=location, credentials=credentials)
 
 
-def _missing_key_message(spec: ProviderSpec) -> str:
-    variables = " or ".join(spec.api_key_env)
-    sources = (
-        f"{variables}, or api_key in [default.providers.{spec.name}]"
-        if variables
-        else f"api_key in [default.providers.{spec.name}]"
+def _key_sources(spec: ProviderSpec) -> str:
+    """Say where an API key for ``spec`` can be set: the variable, or the user file."""
+    in_config = (
+        f"api_key in [default.providers.{spec.name}] in {USER_CONFIG_DISPLAY_PATH}"
     )
+    variables = " or ".join(spec.api_key_env)
+    return f"{variables}, or {in_config}" if variables else in_config
+
+
+def _missing_key_message(spec: ProviderSpec) -> str:
     message = (
-        f"No API key for provider '{spec.name}': set {sources}. "
+        f"No API key for provider '{spec.name}': set {_key_sources(spec)}. "
         'For an offline dry run use the "stub" provider.'
     )
     if spec.kind is ProviderKind.GOOGLE:

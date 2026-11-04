@@ -1071,8 +1071,9 @@ model = "gemini-2.5-flash"
                 None,
                 "openai",
                 None,
-                "openai: no API key found (set OPENAI_API_KEY); a run that uses "
-                "it stops with a configuration error.",
+                "openai: no API key found (set OPENAI_API_KEY, or api_key in "
+                "[default.providers.openai] in ~/.config/mkcv/settings.toml); "
+                "a run that uses it stops with a configuration error.",
             )
         ]
 
@@ -1081,8 +1082,10 @@ model = "gemini-2.5-flash"
         report = create_model_report(config, model_profile="google")
         assert report.warnings[0].message == (
             "google: no API key found (set GEMINI_API_KEY or GOOGLE_API_KEY, or "
-            "use Vertex AI with Application Default Credentials: set "
-            "vertexai = true in [default.providers.google] and run "
+            "api_key in [default.providers.google] in "
+            "~/.config/mkcv/settings.toml, or use Vertex AI with Application "
+            "Default Credentials: set vertexai = true in "
+            "[default.providers.google] and run "
             "'gcloud auth application-default login'); "
             "a run that uses it stops with a configuration error."
         )
@@ -1131,7 +1134,9 @@ model = "m"
             for w in create_model_report(config).warnings
             if w.kind is ModelWarningKind.MISSING_API_KEY
         )
-        assert "(set api_key in [default.providers.keyed])" in warning.message
+        assert (
+            "(set api_key in [default.providers.keyed] in ~/.config/mkcv/settings.toml)"
+        ) in warning.message
 
     def test_an_economy_profile_chosen_by_flag_has_no_tier_warnings(
         self, tmp_path: Path

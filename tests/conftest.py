@@ -7,6 +7,22 @@ import pytest
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Point HOME at a temp dir and stop mkcv from creating its config files.
+
+    No test may read or write the real ``~/.config``. Tests of the first-run
+    bootstrap remove ``MKCV_NO_USER_CONFIG`` themselves.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("MKCV_NO_USER_CONFIG", "1")
+    return home
+
+
 @pytest.fixture
 def sample_jd_text() -> str:
     """Sample job description text for testing."""

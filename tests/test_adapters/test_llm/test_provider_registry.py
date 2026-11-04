@@ -860,3 +860,62 @@ class TestProviderNameCase:
         registry = _registry(tmp_path)
 
         assert registry.get("Anthropic") is registry.get("anthropic")
+
+
+class TestEmptyApiKeyPlaceholder:
+    """The user config file ships ``api_key = ""``; it must count as unset."""
+
+    EMPTY_KEY = '[default.providers.anthropic]\napi_key = ""\n'
+
+    def test_an_empty_key_falls_back_to_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
+        registry = _registry(tmp_path, self.EMPTY_KEY)
+        assert registry.resolve_api_key("anthropic") == "from-env"
+
+    def test_an_empty_key_without_the_environment_is_unset(
+        self, tmp_path: Path
+    ) -> None:
+        assert _registry(tmp_path, self.EMPTY_KEY).resolve_api_key("anthropic") is None
+
+    def test_an_empty_key_without_the_environment_gives_the_missing_key_error(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ConfigurationError, match="No API key for provider"):
+            _registry(tmp_path, self.EMPTY_KEY).create_adapter("anthropic")
+
+    def test_an_empty_key_has_no_credentials(self, tmp_path: Path) -> None:
+        assert _registry(tmp_path, self.EMPTY_KEY).has_credentials("anthropic") is False
+
+
+class TestMissingKeyPointsAtTheUserConfig:
+    def test_the_error_names_the_variable_and_the_user_config_file(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ConfigurationError) as caught:
+            _registry(tmp_path).create_adapter("anthropic")
+        message = str(caught.value)
+        assert "ANTHROPIC_API_KEY" in message
+        assert "[default.providers.anthropic]" in message
+        assert "~/.config/mkcv/settings.toml" in message
+
+    def test_the_hint_names_the_variable_and_the_user_config_file(
+        self, tmp_path: Path
+    ) -> None:
+        hint = _registry(tmp_path).credential_hint("openai")
+        assert hint == (
+            "OPENAI_API_KEY, or api_key in [default.providers.openai] "
+            "in ~/.config/mkcv/settings.toml"
+        )
+
+    def test_a_provider_without_a_variable_still_names_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        config = (
+            '[default.providers.nokey]\ntype = "openai-compatible"\n'
+            'base_url = "https://example.test/v1"\n'
+        )
+        assert _registry(tmp_path, config).credential_hint("nokey") == (
+            "api_key in [default.providers.nokey] in ~/.config/mkcv/settings.toml"
+        )

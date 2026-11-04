@@ -18,10 +18,11 @@ uv tool install mkcv
 
 ### 2. Set up an API key
 
-You need at least one AI provider. Put the key in your user config file,
-`~/.config/mkcv/settings.toml`. It applies to every workspace and keeps keys out
-of this repository. Add the provider you use, then run
-`chmod 600 ~/.config/mkcv/settings.toml`:
+You need at least one AI provider. mkcv creates your user config file,
+`~/.config/mkcv/settings.toml`, the first time you run any command (set
+`MKCV_NO_USER_CONFIG=1` to turn that off). It applies to every workspace and
+keeps keys out of this repository. Open it and fill in the key of the provider
+you use (the file is created private, mode 600):
 
 ```toml
 # Anthropic (recommended)
@@ -193,6 +194,11 @@ Configuration is resolved in layers (highest priority wins):
 | 3 | Workspace config | `mkcv.toml` (this file) |
 | 4 | Environment variables | `MKCV_` prefix (e.g. `MKCV_RENDERING__THEME`) |
 | 5 | CLI flags | `--theme`, `--preset`, `--model-profile`, etc. |
+
+Any option can live in either file. Put what applies everywhere (API keys,
+your usual theme or model profile) in the user config, and what is specific to
+this workspace in `mkcv.toml`, which overrides the user config. Both files list
+the same options, commented out.
 
 ### Section reference
 

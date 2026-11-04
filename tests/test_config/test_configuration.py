@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from mkcv.config.configuration import Configuration
 
 
@@ -139,3 +141,42 @@ primary_color = "FF0000"
         assert config.rendering.overrides.primary_color == "FF0000"
         # Theme should still be the default since we didn't override it
         assert config.rendering.theme == "sb2nov"
+
+
+class TestUserConfigFile:
+    """The user config path and loading it after it was created mid-run."""
+
+    def test_the_path_is_under_the_home_directory(self, tmp_path: Path) -> None:
+        from mkcv.config.user_config_path import user_config_path
+
+        assert user_config_path() == (
+            Path.home() / ".config" / "mkcv" / "settings.toml"
+        )
+
+    def test_a_file_created_after_startup_is_loaded_on_request(self) -> None:
+        from mkcv.config.user_config_path import user_config_path
+
+        config = Configuration()
+        path = user_config_path()
+        path.parent.mkdir(parents=True)
+        path.write_text('[default.rendering]\ntheme = "classic"\n')
+        config.load_user_config()
+        assert config.rendering.theme == "classic"
+
+    def test_loading_without_a_file_changes_nothing(self) -> None:
+        config = Configuration()
+        config.load_user_config()
+        assert config.rendering.theme == "sb2nov"
+
+    def test_environment_variables_still_beat_a_file_loaded_mid_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from mkcv.config.user_config_path import user_config_path
+
+        monkeypatch.setenv("MKCV_PROVIDERS__ANTHROPIC__API_KEY", "from-env")
+        config = Configuration()
+        path = user_config_path()
+        path.parent.mkdir(parents=True)
+        path.write_text('[default.providers.anthropic]\napi_key = ""\n')
+        config.load_user_config()
+        assert config.providers.anthropic.api_key == "from-env"

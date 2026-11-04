@@ -3,6 +3,9 @@
 from pathlib import Path
 
 from dynaconf import Dynaconf, Validator
+from dynaconf.loaders import env_loader  # type: ignore[import-untyped]
+
+from mkcv.config.user_config_path import user_config_path
 
 _CONFIG_DIR = Path(__file__).parent
 
@@ -29,7 +32,7 @@ class Configuration(Dynaconf):  # type: ignore[misc]  # Dynaconf has no type stu
         ]
 
         # Add global user config if it exists
-        global_config = Path.home() / ".config" / "mkcv" / "settings.toml"
+        global_config = user_config_path()
         if global_config.is_file():
             settings_files.append(str(global_config))
 
@@ -52,6 +55,19 @@ class Configuration(Dynaconf):  # type: ignore[misc]  # Dynaconf has no type stu
             Validator("general.log_level", default="WARNING"),
         )
         self.validators.validate()
+
+    def load_user_config(self) -> None:
+        """Load the user config file into the settings chain, if it exists.
+
+        The file is read when the settings are created. Call this after
+        creating the file mid-run, so the same run sees it.
+        """
+        path = user_config_path()
+        if path.is_file():
+            self.load_file(path=str(path))
+            # A file loaded after startup would otherwise sit above the
+            # environment variables, which must stay above every file.
+            self.execute_loaders(loaders=[env_loader])
 
     def load_workspace_config(self, workspace_root: Path) -> None:
         """Load workspace-level mkcv.toml into the settings chain.

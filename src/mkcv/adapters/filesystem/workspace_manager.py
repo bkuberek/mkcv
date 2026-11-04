@@ -12,6 +12,8 @@ import tomli_w
 from ruamel.yaml import YAML
 
 from mkcv import __version__
+from mkcv.adapters.filesystem.config_scope import ConfigScope
+from mkcv.adapters.filesystem.config_template import render_config_template
 from mkcv.adapters.llm.builtin_providers import BUILTIN_PROVIDERS
 from mkcv.core.exceptions.workspace import WorkspaceError, WorkspaceExistsError
 from mkcv.core.models.application_metadata import ApplicationMetadata
@@ -22,196 +24,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Template constants
 # ---------------------------------------------------------------------------
-
-_MKCV_TOML_TEMPLATE = """\
-# mkcv workspace configuration
-# Docs: https://github.com/bkuberek/mkcv
-#
-# All settings are optional — sensible defaults are built in.
-# Uncomment sections below to customise. Values shown are the defaults.
-#
-# All section headers use the [default.] prefix because mkcv uses
-# Dynaconf environments. This prefix is required for settings to
-# take effect.
-
-[default.workspace]
-version = "{__mkcv_version__}"
-
-[default.paths]
-knowledge_base_dir = "knowledge-base"
-applications_dir = "applications"
-templates_dir = "templates"
-
-[default.naming]
-company_slug = true
-application_pattern = "{company}/{position}/{date}"
-
-[default.defaults]
-theme = "sb2nov"
-profile = "standard"
-
-# ── Rendering ───────────────────────────────────────────────────────
-# Theme controls the visual design of your resume PDF. Run
-# `mkcv themes` to list themes, `mkcv themes --preview <name>`
-# to preview one.
-#
-# [default.rendering]
-# theme = "sb2nov"                  # classic, engineeringresumes, moderncv, ...
-# font = "SourceSansPro"            # any system font
-# font_size = "10pt"
-# page_size = "letterpaper"         # letterpaper or a4paper
-#
-# [default.rendering.overrides]
-# primary_color = "003366"          # hex colour without #
-#
-# # Page margins — override RenderCV theme defaults
-# [default.rendering.page]
-# top_margin = "0.7in"
-# bottom_margin = "0.7in"
-# left_margin = "0.5in"
-# right_margin = "0.5in"
-#
-# # Header spacing below name/headline/connections
-# [default.rendering.header]
-# space_below_name = "0.15cm"
-# space_below_headline = "0.15cm"
-# space_below_connections = "0.3cm"
-#
-# # Experience section geometry
-# [default.rendering.entries]
-# date_and_location_width = "3.6cm"
-#
-# # Section heading style
-# [default.rendering.section_titles]
-# type = "with_full_line"
-# space_above = "0.3cm"
-# space_below = "0.15cm"
-#
-# # Line spacing and text alignment
-# [default.rendering.typography]
-# line_spacing = "0.7em"
-# alignment = "justified"
-
-# ── Pipeline ────────────────────────────────────────────────────────
-# Which models run each stage comes from a model profile. The default is
-# the "anthropic" profile: Haiku for mechanical tasks, Opus for decisions
-# and writing. Run `mkcv models` to see what every stage will use, and
-# `mkcv models --profiles` to list the profiles. All profiles are
-# provisional: they are not yet backed by an eval run.
-#
-# [default.pipeline]
-# model_profile = "anthropic"   # anthropic, anthropic-economy, openai,
-#                               # openai-economy, google, google-economy, local
-# provider = "anthropic"        # used when model_profile is not set
-# model_warnings = true         # warn about weak or unknown models
-#
-# Per-stage settings below beat the profile; --model-profile and
-# --provider on the command line beat both. A stage that sets only `model`
-# runs on the provider mkcv finds that model under.
-#
-# [default.pipeline.stages.analyze]
-# provider = "anthropic"
-# model = "claude-haiku-5-5"
-# temperature = 0.2
-#
-# [default.pipeline.stages.select]
-# provider = "anthropic"
-# model = "claude-opus-5-5"
-# temperature = 0.3
-#
-# [default.pipeline.stages.tailor]
-# provider = "anthropic"
-# model = "claude-opus-5-5"
-# temperature = 0.5
-#
-# [default.pipeline.stages.structure]
-# provider = "anthropic"
-# model = "claude-sonnet-5-5"
-# temperature = 0.1
-#
-# [default.pipeline.stages.review]
-# provider = "anthropic"
-# model = "claude-opus-5-5"
-# temperature = 0.3
-
-# ── Cover Letter ────────────────────────────────────────────────────
-# Settings for cover letter generation (used with --cover-letter).
-#
-# [default.cover_letter]
-# auto_render = true
-#
-# [default.cover_letter.stages.generate]
-# provider = "anthropic"
-# model = "claude-opus-5-5"
-# temperature = 0.6
-#
-# [default.cover_letter.stages.review]
-# provider = "anthropic"
-# model = "claude-haiku-5-5"
-# temperature = 0.2
-#
-# # Cover letter page layout
-# [default.cover_letter.design]
-# page_size = "us-letter"
-# margin_top = "1.2in"
-# margin_bottom = "1in"
-# margin_left = "1in"
-# margin_right = "1in"
-# font = "Source Sans Pro"
-# font_size = "11pt"
-# name_size = "16pt"
-# line_spacing = "0.7em"
-# default_salutation = "Dear Hiring Manager,"
-
-# ── Voice ───────────────────────────────────────────────────────────
-# Writing-style guidelines applied during content generation.
-# For detailed control, edit knowledge-base/voice.md instead.
-#
-# [default.voice]
-# guidelines = ""
-
-# ── Providers ───────────────────────────────────────────────────────
-# API keys belong in your user config file, ~/.config/mkcv/settings.toml
-# (run: chmod 600 ~/.config/mkcv/settings.toml), not in this workspace file.
-# Never commit an api_key to git. Use the same table names there:
-#
-#   [default.providers.anthropic]
-#   api_key = "sk-ant-..."
-#
-# Environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
-# OPENROUTER_API_KEY) also work, for example in CI. A key in config takes
-# precedence over the environment variable.
-#
-# [default.providers.google]
-# # No API key? Use Vertex AI with Application Default Credentials
-# # (run: gcloud auth application-default login):
-# vertexai = true
-# project = "my-gcp-project"
-# location = "global"
-# # Several Google accounts? Pin one ADC file for this workspace:
-# credentials_file = "~/.config/gcloud-mkcv/application_default_credentials.json"
-#
-# Any OpenAI-compatible endpoint (Groq, Together, vLLM, LM Studio, ...) is
-# a provider too. Name it, then use it in a stage or with --provider.
-#
-# [default.providers.groq]
-# type = "openai-compatible"
-# base_url = "https://api.groq.com/openai/v1"
-# api_key_env = "GROQ_API_KEY"
-
-# ── Model catalog ───────────────────────────────────────────────────
-# Tell mkcv about a model it does not know: its quality tier, prices (USD
-# per 1M tokens), and how it returns structured output. Unknown models
-# still run, with conservative defaults and a warning.
-#
-# [[default.model_catalog]]
-# provider = "groq"
-# match = "llama-3.3-70b-versatile"
-# tier = "efficient"                # minimal, efficient, strong, frontier
-# structured_output = "json_object" # json_schema, tool, json_object, prompt
-# input_price_per_mtok = 0.59
-# output_price_per_mtok = 0.79
-"""
 
 _CAREER_MD_TEMPLATE = """\
 # {name} -- Career Knowledge Base
@@ -410,10 +222,11 @@ uv tool install mkcv
 
 ### 2. Set up an API key
 
-You need at least one AI provider. Put the key in your user config file,
-`~/.config/mkcv/settings.toml`. It applies to every workspace and keeps keys out
-of this repository. Add the provider you use, then run
-`chmod 600 ~/.config/mkcv/settings.toml`:
+You need at least one AI provider. mkcv creates your user config file,
+`~/.config/mkcv/settings.toml`, the first time you run any command (set
+`MKCV_NO_USER_CONFIG=1` to turn that off). It applies to every workspace and
+keeps keys out of this repository. Open it and fill in the key of the provider
+you use (the file is created private, mode 600):
 
 ```toml
 {credential_lines}
@@ -560,6 +373,11 @@ Configuration is resolved in layers (highest priority wins):
 | 3 | Workspace config | `mkcv.toml` (this file) |
 | 4 | Environment variables | `MKCV_` prefix (e.g. `MKCV_RENDERING__THEME`) |
 | 5 | CLI flags | `--theme`, `--preset`, `--model-profile`, etc. |
+
+Any option can live in either file. Put what applies everywhere (API keys,
+your usual theme or model profile) in the user config, and what is specific to
+this workspace in `mkcv.toml`, which overrides the user config. Both files list
+the same options, commented out.
 
 ### Section reference
 
@@ -927,7 +745,9 @@ class WorkspaceManager:
             ) from exc
 
         # Write mkcv.toml with commented configuration guidance
-        toml_content = _MKCV_TOML_TEMPLATE.replace("{__mkcv_version__}", __version__)
+        toml_content = render_config_template(
+            ConfigScope.WORKSPACE, version=__version__
+        )
         toml_path.write_text(toml_content, encoding="utf-8")
         logger.info("Created %s", toml_path)
 
