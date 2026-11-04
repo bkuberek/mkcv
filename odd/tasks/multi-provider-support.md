@@ -35,7 +35,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 ### P1: Registry, capability data, OpenAI-compatible, OpenAI structured outputs
 
 - [x] T01: Model capability catalog and catalog-derived pricing (route: delegated; 11 new core modules + pricing) - `dc5a0ad`
-- [ ] T02: OpenAI-compatible adapter with structured-output fallback chain (route: delegated; 6 new adapter modules)
+- [x] T02: OpenAI-compatible adapter with structured-output fallback chain (route: delegated; 6 new adapter modules) - `703caff`
 - [ ] T03: Native OpenAI adapter with strict structured outputs (route: delegated; adapter rewrite + test rewrite)
 - [ ] T04: Capability-driven Anthropic request shaping (route: delegated; adapter + tests)
 - [ ] T05: Provider registry, catalog overrides, and factory dispatch (route: delegated; registry, loader, factory, services, workspace README)
@@ -96,6 +96,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | Task | Commit | RED observed | GREEN observed | Review tier / outcome |
 |---|---|---|---|---|
 | T01 | `dc5a0ad` | `ModuleNotFoundError: No module named 'mkcv.core.models.capability_overlay'` | 269 focused, 1799 full | pending (parent runs `gentle-ai review assess`) |
+| T02 | `703caff` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.strict_schema'` | 311 focused, 2110 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -106,6 +107,15 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Decision: `core/catalog/__init__.py` imports `mkcv.core.models` first. `pricing.py` (imported by `core/models/__init__.py`) derives `MODEL_PRICING` from `core/catalog/builtin_models.py`, which imports from `mkcv.core.models`; importing the data module first in a fresh interpreter raised `ImportError ... partially initialized module`. `TestImportOrder` guards every entry order in a subprocess.
 - Decision: `MODEL_PRICING` per-1K values are `round(price_per_mtok / 1000, 12)` so every legacy key stays bit-identical (plain division gave `0.00014000000000000001` for `deepseek/deepseek-chat-v3`). `calculate_cost` itself uses the per-1M prices.
 - `docs/specs/cli-interface.md` exit-code row for `ConfigurationError` is left to T11 (its file list owns that doc).
+
+**T02** (route: delegated writer, trigger: 6 new adapter modules plus 4 test files).
+
+- Verification: `uv run pytest -q tests/test_adapters/test_llm/test_strict_schema.py tests/test_adapters/test_llm/test_request_adaptation.py tests/test_adapters/test_llm/test_openai_compatible.py tests/test_adapters/test_llm/test_builtin_providers.py`: 311 passed; ruff check/format, `uv run mypy src/` (147 files): clean; `uv run pytest -q`: 2110 passed, exit 0.
+- Test strength: 21 one-line mutations of `openai_compatible.py`, `strict_schema.py`, and `request_adaptation.py` (adaptation, degradation, repair, usage summing, nullable rules, format whitelist) were all caught by the new tests.
+- Decision: when `_make_nullable` widens a property that has an `enum`, it appends `None` to the enum. Design §7.5 step 5 only widens `type`; without the enum change `type: ["string", "null"]` plus an enum without `null` would still forbid `null`. Covered by `test_defaulted_enum_gains_a_null_value`.
+- Decision: a response with `usage is None` records `TokenUsage()` (zero) instead of keeping the previous call's usage, so `get_last_usage()` always describes the latest call.
+- Decision: the strict-schema walker treats `properties` as a name-to-schema mapping, so a property called `title`, `default`, or `format` is not mistaken for a keyword (`test_properties_named_like_keywords_are_not_filtered`).
+- The parent adapter checks `message.refusal` with an `isinstance(str)` guard so a mocked message (truthy `MagicMock`) cannot masquerade as a refusal. `ollama.py` and its tests are untouched until T05.
 
 ## Decisions (rationale in `design.md` §1 and §15)
 
