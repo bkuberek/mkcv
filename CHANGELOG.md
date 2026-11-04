@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- version list -->
 
+## v1.8.0 (2026-11-04)
+
+### Features
+
+- **evals**: Quality-first model recommendations with datasets, judge panel, tournament, and batch
+  APIs ([#14](https://github.com/bkuberek/mkcv/pull/14),
+  [`7be991b`](https://github.com/bkuberek/mkcv/commit/7be991b994d58225360964222618bc6a4d041344))
+
+
 ## v1.7.0 (2026-11-04)
 
 ### Continuous Integration
