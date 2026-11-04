@@ -20,6 +20,20 @@ class ProviderSpec(BaseModel):
         description="Literal key from config; prefer the environment variable",
     )
     requires_api_key: bool = True
+    vertexai: bool | None = Field(
+        default=None,
+        description="Google only: use Vertex AI with ADC; None defers to the env",
+    )
+    project: str | None = Field(
+        default=None, description="Google Cloud project for Vertex AI"
+    )
+    location: str | None = Field(
+        default=None, description="Google Cloud location for Vertex AI"
+    )
+    credentials_file: str | None = Field(
+        default=None,
+        description="Google only: credentials file to use instead of ADC lookup",
+    )
     defaults: CapabilityOverlay = Field(
         default_factory=CapabilityOverlay,
         description="Provider-level overlay on the kind defaults",

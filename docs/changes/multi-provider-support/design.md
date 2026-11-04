@@ -446,7 +446,7 @@ Rules (`ProviderRegistry.from_config(config)`):
    - A new `openai-compatible` provider without `base_url` raises `ConfigurationError(f"Provider '{name}' needs base_url")`.
    - Build the spec: `base_url`, `api_key_env` (a string becomes a one-item tuple), `api_key`, `requires_api_key` (default `True` for new providers), and `defaults` = a `CapabilityOverlay` built from the overlay field names present in the section. For built-ins, given values overlay the built-in spec (`defaults` overlays `builtin.defaults`).
    - Keys other than `type`, `base_url`, `api_key_env`, `api_key`, `requires_api_key`, and the overlay fields raise `ConfigurationError(f"Unknown key '{key}' in [default.providers.{name}]")`.
-3. Provider names are matched case-sensitively as written.
+3. Provider names and their keys are case-insensitive (lowercased when loaded), because Dynaconf env-var layers such as `MKCV_PROVIDERS__GOOGLE__PROJECT` arrive uppercase. Sections that differ only by case merge.
 
 Existing configs keep working: `[default.providers.anthropic] api_key = "..."` still takes precedence over the env var.
 

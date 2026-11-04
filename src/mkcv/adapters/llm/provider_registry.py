@@ -15,6 +15,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import ValidationError
 
+from mkcv.adapters.llm.application_default_credentials import (
+    LOGIN_COMMAND,
+    application_default_project,
+    credentials_from_file,
+    has_vertex_credentials,
+)
 from mkcv.adapters.llm.builtin_providers import (
     BUILTIN_PROVIDERS,
     CANONICAL_PROVIDER,
@@ -22,6 +28,7 @@ from mkcv.adapters.llm.builtin_providers import (
 )
 from mkcv.adapters.llm.provider_spec import ProviderSpec
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
+from mkcv.adapters.llm.vertex_target import VertexTarget
 from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.models.capability_overlay import CapabilityOverlay
 from mkcv.core.models.provider_kind import ProviderKind
@@ -37,12 +44,33 @@ logger = logging.getLogger(__name__)
 # Placeholder for providers that need no key but whose SDK requires a value.
 _KEYLESS_API_KEY = "not-needed"
 
+_VERTEX_ENV_FLAG = "GOOGLE_GENAI_USE_VERTEXAI"
+_VERTEX_ENV_PROJECT = "GOOGLE_CLOUD_PROJECT"
+_VERTEX_ENV_LOCATION = "GOOGLE_CLOUD_LOCATION"
+_VERTEX_DEFAULT_LOCATION = "global"
+_TRUTHY = frozenset({"true", "1"})
+
 _PROVIDER_SETTING_KEYS = frozenset(
-    {"type", "base_url", "api_key_env", "api_key", "requires_api_key"}
+    {
+        "type",
+        "base_url",
+        "api_key_env",
+        "api_key",
+        "requires_api_key",
+        "vertexai",
+        "project",
+        "location",
+        "credentials_file",
+    }
 )
 _CAPABILITY_KEYS = frozenset(CapabilityOverlay.model_fields)
 _OPENAI_COMPATIBLE_PATH = "/v1"
 _ALLOWED_SECTION_KEYS = _PROVIDER_SETTING_KEYS | _CAPABILITY_KEYS
+
+_VERTEX_ALTERNATIVE = (
+    "use Vertex AI with Application Default Credentials: set vertexai = true in "
+    f"[default.providers.{{name}}] and run '{LOGIN_COMMAND}'"
+)
 
 _USER_PROVIDER_KINDS = (
     ProviderKind.ANTHROPIC,
@@ -73,7 +101,7 @@ class ProviderRegistry:
                 "providers must be a table of provider definitions "
                 "([default.providers.<name>])"
             )
-        for name, body in section.items():
+        for name, body in _normalize_sections(section).items():
             specs[name] = _spec_from_section(name, body, BUILTIN_PROVIDERS.get(name))
         return cls(specs, catalog)
 
@@ -93,7 +121,7 @@ class ProviderRegistry:
             ConfigurationError: If no provider has that name.
         """
         try:
-            return self._specs[name]
+            return self._specs[name.lower()]
         except KeyError:
             raise ConfigurationError(
                 f"Unknown LLM provider '{name}'. "
@@ -112,10 +140,45 @@ class ProviderRegistry:
                 return value
         return None
 
-    def has_credentials(self, name: str) -> bool:
-        """Return True if the provider needs no key or one can be resolved."""
+    def uses_vertex(self, name: str) -> bool:
+        """Return True if Google provider ``name`` runs on Vertex AI with ADC.
+
+        ``vertexai`` in the provider's config wins; otherwise the
+        ``GOOGLE_GENAI_USE_VERTEXAI`` variable decides (``true`` or ``1``).
+        """
         spec = self.get(name)
+        if spec.kind is not ProviderKind.GOOGLE:
+            return False
+        if spec.vertexai is not None:
+            return spec.vertexai
+        return os.environ.get(_VERTEX_ENV_FLAG, "").lower() in _TRUTHY
+
+    def has_credentials(self, name: str) -> bool:
+        """Return True if the provider's credentials can be found locally.
+
+        A provider on Vertex AI needs Application Default Credentials;
+        otherwise it needs no key or one that resolves. No API call is made.
+        """
+        spec = self.get(name)
+        if self.uses_vertex(name):
+            return has_vertex_credentials(spec.credentials_file)
         return not spec.requires_api_key or self.resolve_api_key(name) is not None
+
+    def credential_hint(self, name: str) -> str:
+        """Say where to put the credentials ``name`` is missing.
+
+        The text completes ``(set ...)`` for an API-key provider; for a provider
+        on Vertex AI it is the command that creates Application Default
+        Credentials.
+        """
+        spec = self.get(name)
+        if self.uses_vertex(name):
+            return f"run '{LOGIN_COMMAND}'"
+        variables = " or ".join(spec.api_key_env)
+        where = variables or f"api_key in [default.providers.{name}]"
+        if spec.kind is ProviderKind.GOOGLE:
+            where += f", or {_VERTEX_ALTERNATIVE.format(name=name)}"
+        return where
 
     def defaults_for(self, name: str) -> CapabilityOverlay:
         """Return the provider-kind defaults overlaid with the provider's own."""
@@ -143,6 +206,9 @@ class ProviderRegistry:
         if spec.kind is ProviderKind.STUB:
             return _create_stub()
 
+        if self.uses_vertex(name):
+            return self._create_vertex_adapter(spec, with_retry)
+
         api_key = self.resolve_api_key(name)
         if not api_key:
             if spec.requires_api_key:
@@ -154,6 +220,47 @@ class ProviderRegistry:
             return RetryingLLMAdapter(adapter)
         return adapter
 
+    def _create_vertex_adapter(self, spec: ProviderSpec, with_retry: bool) -> LLMPort:
+        if self.resolve_api_key(spec.name):
+            logger.debug(
+                "Provider '%s' is in Vertex AI mode; ignoring its API key "
+                "and using Application Default Credentials.",
+                spec.name,
+            )
+        from mkcv.adapters.llm.google import GoogleGeminiAdapter
+
+        adapter = GoogleGeminiAdapter(
+            vertex=_vertex_target(spec),
+            base_url=spec.base_url,
+            resolver=self.resolve_model,
+            provider_name=spec.name,
+        )
+        if with_retry:
+            return RetryingLLMAdapter(adapter)
+        return adapter
+
+
+def _vertex_target(spec: ProviderSpec) -> VertexTarget:
+    """Resolve project and location: config, then environment, then ADC."""
+    credentials: Any = None
+    if spec.credentials_file:
+        credentials, found_project = credentials_from_file(spec.credentials_file)
+    else:
+        found_project = application_default_project()
+    project = spec.project or os.environ.get(_VERTEX_ENV_PROJECT) or found_project
+    if not project:
+        raise ConfigurationError(
+            f"Vertex AI mode for provider '{spec.name}' could not determine a "
+            f"Google Cloud project: set project in [default.providers.{spec.name}] "
+            f"or {_VERTEX_ENV_PROJECT}, or run 'gcloud config set project <id>'."
+        )
+    location = (
+        spec.location
+        or os.environ.get(_VERTEX_ENV_LOCATION)
+        or _VERTEX_DEFAULT_LOCATION
+    )
+    return VertexTarget(project=project, location=location, credentials=credentials)
+
 
 def _missing_key_message(spec: ProviderSpec) -> str:
     variables = " or ".join(spec.api_key_env)
@@ -162,10 +269,13 @@ def _missing_key_message(spec: ProviderSpec) -> str:
         if variables
         else f"api_key in [default.providers.{spec.name}]"
     )
-    return (
+    message = (
         f"No API key for provider '{spec.name}': set {sources}. "
         'For an offline dry run use the "stub" provider.'
     )
+    if spec.kind is ProviderKind.GOOGLE:
+        message += f" Or {_VERTEX_ALTERNATIVE.format(name=spec.name)}."
+    return message
 
 
 def _create_stub() -> LLMPort:
@@ -236,6 +346,26 @@ _BUILDERS: dict[
 }
 
 
+def _normalize_sections(section: Mapping[str, object]) -> dict[str, object]:
+    """Lowercase provider names and keys, merging sections that differ by case.
+
+    Env-var layers (``MKCV_PROVIDERS__GOOGLE__PROJECT``) arrive uppercase,
+    while TOML sections are usually lowercase; both must configure the same
+    provider.
+    """
+    merged: dict[str, object] = {}
+    for name, body in section.items():
+        key = str(name).lower()
+        if not isinstance(body, Mapping):
+            merged[key] = body
+            continue
+        existing = merged.get(key)
+        combined = dict(existing) if isinstance(existing, Mapping) else {}
+        combined.update({str(field).lower(): value for field, value in body.items()})
+        merged[key] = combined
+    return merged
+
+
 def _spec_from_section(
     name: str, body: object, builtin: ProviderSpec | None
 ) -> ProviderSpec:
@@ -277,6 +407,21 @@ def _spec_from_section(
             body,
             "requires_api_key",
             builtin.requires_api_key if builtin else True,
+        ),
+        vertexai=_optional_flag(
+            name, body, "vertexai", builtin.vertexai if builtin else None
+        ),
+        project=_optional_text(
+            name, body, "project", builtin.project if builtin else None
+        ),
+        location=_optional_text(
+            name, body, "location", builtin.location if builtin else None
+        ),
+        credentials_file=_optional_text(
+            name,
+            body,
+            "credentials_file",
+            builtin.credentials_file if builtin else None,
         ),
         defaults=_capability_defaults(name, body, builtin),
         builtin=builtin is not None,
@@ -357,6 +502,14 @@ def _flag(name: str, body: Mapping[str, Any], key: str, fallback: bool) -> bool:
             f"{key} in [default.providers.{name}] must be true or false"
         )
     return value
+
+
+def _optional_flag(
+    name: str, body: Mapping[str, Any], key: str, fallback: bool | None
+) -> bool | None:
+    if key not in body:
+        return fallback
+    return _flag(name, body, key, bool(fallback))
 
 
 def _key_variables(name: str, value: object) -> tuple[str, ...]:

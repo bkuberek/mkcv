@@ -408,6 +408,32 @@ prefix:
 | `GEMINI_API_KEY`, `GOOGLE_API_KEY` | Google Gemini (`GEMINI_API_KEY` wins when both are set) |
 | `OPENROUTER_API_KEY` | OpenRouter |
 
+Google Gemini can also run on Vertex AI with Application Default Credentials
+instead of a key (run `gcloud auth application-default login` once):
+
+```toml
+[default.providers.google]
+vertexai = true
+project = "my-gcp-project"
+location = "global"
+```
+
+| Variable | Meaning |
+|----------|---------|
+| `GOOGLE_GENAI_USE_VERTEXAI` | `true` or `1` turns Vertex mode on (`vertexai` in config wins) |
+| `GOOGLE_CLOUD_PROJECT` | Project for Vertex AI (`project` in config wins; falls back to the ADC project) |
+| `GOOGLE_CLOUD_LOCATION` | Location for Vertex AI (`location` in config wins; default `global`) |
+
+To pin one account for a workspace, set `credentials_file` in the same table
+(for example `"~/.config/gcloud-mkcv/application_default_credentials.json"`,
+created with `CLOUDSDK_CONFIG=~/.config/gcloud-mkcv gcloud auth
+application-default login`). It takes precedence over ADC lookup, including
+`GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG`; a missing file is a
+configuration error naming the path.
+
+In Vertex mode an API key is ignored. Missing ADC or an unknown project stops
+the command with a configuration error (exit code 3).
+
 A provider you define under `[default.providers.<name>]` names its own
 variable with `api_key_env`. Ollama needs no key. A missing key stops the command
 with a configuration error (exit code 3); use `--provider stub` for offline runs.

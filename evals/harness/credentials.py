@@ -41,10 +41,7 @@ def missing_key_reason(registry: ProviderRegistry, provider: str) -> str | None:
     """
     if registry.has_credentials(provider):
         return None
-    variables = registry.get(provider).api_key_env
-    where = (
-        " or ".join(variables)
-        if variables
-        else f"api_key in [default.providers.{provider}]"
-    )
-    return f"no API key for provider '{provider}' (set {where})"
+    hint = registry.credential_hint(provider)
+    if registry.uses_vertex(provider):
+        return f"no Application Default Credentials for provider '{provider}' ({hint})"
+    return f"no API key for provider '{provider}' (set {hint})"

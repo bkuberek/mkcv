@@ -182,6 +182,13 @@ profile = "standard"
 #
 # [default.providers.google]
 # api_key = ""           # prefer: export GEMINI_API_KEY=... (or GOOGLE_API_KEY)
+# # No API key? Use Vertex AI with Application Default Credentials
+# # (run: gcloud auth application-default login):
+# vertexai = true
+# project = "my-gcp-project"
+# location = "global"
+# # Several Google accounts? Pin one ADC file for this workspace:
+# credentials_file = "~/.config/gcloud-mkcv/application_default_credentials.json"
 #
 # [default.providers.openrouter]
 # api_key = ""           # prefer: export OPENROUTER_API_KEY=sk-or-...

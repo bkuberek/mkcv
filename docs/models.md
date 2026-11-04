@@ -19,7 +19,7 @@ or an API key to check.
 |----------|------|---------|-------|
 | `anthropic` | Anthropic | `ANTHROPIC_API_KEY` | Default. Claude models. |
 | `openai` | OpenAI | `OPENAI_API_KEY` | GPT models through the Chat Completions API with strict JSON-schema output. |
-| `google` | Google Gemini | `GEMINI_API_KEY`, else `GOOGLE_API_KEY` | Gemini models through the `google-genai` SDK. |
+| `google` | Google Gemini | `GEMINI_API_KEY`, else `GOOGLE_API_KEY`; or none with [Vertex AI](#google-gemini-on-vertex-ai) | Gemini models through the `google-genai` SDK. |
 | `openrouter` | OpenAI-compatible | `OPENROUTER_API_KEY` | One key for many vendors. No model profile: name a model for each stage. |
 | `ollama` | OpenAI-compatible | none | Local models at `http://localhost:11434/v1`. |
 | `stub` | offline | none | Deterministic placeholder for tests and dry runs. |
@@ -32,6 +32,67 @@ dry run.
 When both `GEMINI_API_KEY` and `GOOGLE_API_KEY` are set, mkcv uses
 `GEMINI_API_KEY`. The Google SDK on its own prefers `GOOGLE_API_KEY`, but mkcv
 passes the key it chose explicitly.
+
+### Google Gemini on Vertex AI
+
+Some Google Cloud organizations disallow API keys. The `google` provider can
+instead call Gemini on Vertex AI with Application Default Credentials (ADC), so
+no key is involved. Log in once:
+
+```bash
+gcloud auth application-default login
+```
+
+Then turn Vertex mode on:
+
+```toml
+[default.providers.google]
+vertexai = true
+project = "my-gcp-project"
+location = "global"
+```
+
+| Setting | Config key | Environment variable | Default |
+|---------|------------|----------------------|---------|
+| Vertex mode | `vertexai` | `GOOGLE_GENAI_USE_VERTEXAI` (`true` or `1`) | off |
+| Project | `project` | `GOOGLE_CLOUD_PROJECT` | the project ADC or `gcloud` reports |
+| Location | `location` | `GOOGLE_CLOUD_LOCATION` | `global` |
+| Credentials file | `credentials_file` | none | Application Default Credentials lookup |
+
+The config key wins over the environment variable. Vertex mode beats an API
+key: when both are set, mkcv ignores the key. mkcv checks ADC locally without
+calling Google. If ADC is missing, or no project can be found, the command stops
+with exit code 3 and says to run `gcloud auth application-default login` and to
+set `project` or `GOOGLE_CLOUD_PROJECT`. `mkcv models` shows no key warning for
+a Vertex provider that has ADC. Model IDs, profiles, and prices are the same as
+with an API key; check Vertex AI pricing and regional availability for your
+project.
+
+#### Several Google accounts
+
+Pin which credentials a workspace uses without touching the machine-wide gcloud
+ADC file. Create a separate ADC file in its own gcloud config directory:
+
+```bash
+CLOUDSDK_CONFIG=~/.config/gcloud-mkcv gcloud auth application-default login
+CLOUDSDK_CONFIG=~/.config/gcloud-mkcv gcloud auth application-default set-quota-project <project>
+```
+
+Then point the workspace at that file:
+
+```toml
+[default.providers.google]
+vertexai = true
+project = "<project>"
+credentials_file = "~/.config/gcloud-mkcv/application_default_credentials.json"
+```
+
+mkcv looks for credentials in this order: `credentials_file` (with `~`
+expanded), then Application Default Credentials, which honour
+`GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG`. The project falls back
+to the one the credentials report, after `project` and `GOOGLE_CLOUD_PROJECT`. A
+missing or unreadable `credentials_file` stops the command with exit code 3 and
+names the path.
 
 Any other OpenAI-compatible endpoint (Groq, Together, vLLM, LM Studio, a
 company gateway) becomes a provider with a few lines of configuration. See
@@ -375,6 +436,7 @@ Retrieved 2026-11-03. Prices are USD per 1M input / output tokens.
 | Deprecations | `gemini-2.5-flash` and `gemini-2.5-pro` are deprecated; from 2026-12-01 they route to `gemini-3.5-flash-lite` and `gemini-3.8-flash` | [Gemini models](https://aistudio.google.com/docs/models) |
 | Structured output | A JSON Schema subset; unsupported keywords are dropped, and a very large schema returns a 400 | [Structured output](https://aistudio.google.com/docs/structured-output) |
 | SDK | `google-genai` 2.34.0 (2026-10-29), Python 3.11 or newer | [PyPI](https://pypi.org/project/google-genai/) |
+| Vertex AI | Same Gemini model names, authenticated with Application Default Credentials; see [Google Gemini on Vertex AI](#google-gemini-on-vertex-ai) | [Google Gen AI SDK](https://googleapis.github.io/python-genai/) |
 
 ### Anthropic
 
