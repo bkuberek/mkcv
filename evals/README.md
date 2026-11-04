@@ -103,8 +103,13 @@ must_not = ["describe her as an account executive"]
 | `min_words`, `max_words` | The letter's word bounds (250 to 400 by default, as the prompt asks) |
 | `review_defects` | Makes the case a cover letter review probe: its `reference/<case>/cover_letter_content.json` is written by hand with these defects planted, and `cover_letter.review` is graded by how many the review catches. Set `stages = ["cover_letter.review"]` on such a case. |
 
-No case is a cover letter review probe yet, so `cover_letter.review` gets no
-quality score until one is added.
+Two cases are cover letter review probes: `cover-letter-probe-customer-success`
+and `cover-letter-probe-security`. Each hand-written letter plants six
+documented defects: an invented metric, a claim of a skill the knowledge base
+lacks, a wrong company name, generic filler, a `[Company]` placeholder or an
+"I" overload, and a length well past 400 words. `cover_letter.review` is scored
+by how many of them the review catches. Bootstrapping never writes their
+letters.
 
 ## How a model is chosen
 
@@ -223,7 +228,7 @@ before any call is made. Google batches need Vertex AI.
    model of each provider (the survivors are unknown until screening ends),
    and a worst case with no model eliminated, each by provider and with the
    online price beside the batched one. For the shipped matrix and fixtures it
-   is about $195 (worst case about $378), against about $703 for the same
+   is about $199 (worst case about $385), against about $714 for the same
    panel and repeats run online in a single round
    (`estimate --single-round --no-batch --no-cache`). These are planning token
    counts, not measurements; `report.md` shows what the run used.

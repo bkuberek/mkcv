@@ -1,0 +1,15 @@
+{
+  "company": "Kelvara Systems",
+  "role_title": "Senior Cloud Security Engineer",
+  "salutation": "Dear Hiring Manager,",
+  "opening_paragraph": "I am writing to apply for the Senior Cloud Security Engineer position at Fernhill Payments. I have spent my career in cloud security and detection engineering. I build guardrails that let engineers move quickly. I lead incidents calmly and I write the postmortems that follow. I would like to bring that work to your security engineering team.",
+  "body_paragraphs": [
+    "I led an IAM hardening program that replaced long-lived access keys with SSO and role-based access. I reduced the IAM users with active keys from 214 to 9. I built the detection engineering pipeline with detections written in Sigma, unit-tested in CI, and deployed to Splunk. I wrote 65 detections and cut the alert false-positive rate from 70% to 22%. I eliminated security incidents entirely across 400 AWS accounts. I was the incident commander for 4 high-severity incidents. I contained a leaked third-party API key within 40 minutes. I wrote the incident response playbooks used by the on-call rotation. I ran 6 tabletop exercises, two of them for the executive team. I worked closely with engineering teams on every one of those incidents and their fixes.",
+    "I have years of hands-on Kubernetes security experience on EKS. I have hardened clusters, written admission policies, and locked down workloads. I own AWS guardrails in Terraform, including SCPs, Config rules, and Conftest checks in CI. I scoped the cardholder data environment for the 2025 PCI DSS 4.0 assessment. I ran STRIDE threat modeling sessions for 11 new services. I started a security champions program of 14 engineers across 8 teams. I mentored 2 junior security engineers. I automate security workflows in Python, from Lambda functions to detection tooling. I use Okta and CrowdStrike Falcon every day. I support audits with evidence collection and control improvements.",
+    "I am a passionate, detail-oriented professional who thrives in fast-paced environments. I believe security is everyone's job. I am a lifelong learner who loves solving hard problems. I always bring a positive attitude and a can-do spirit. I go above and beyond for my team. I think outside the box. I am a natural leader and a true team player. I am confident that I would be a great fit for any security organization. I am a strong communicator and a quick learner. I enjoy wearing many hats. I believe in continuous improvement. I bring passion and energy to everything I do."
+  ],
+  "closing_paragraph": "I would be thrilled to join Kelvara Systems and help your team grow its detection and response program. I look forward to hearing from you. I am available at your convenience. I thank you for your time and consideration. I would welcome the chance to talk about how I can help Kelvara Systems keep its cloud secure as it grows.",
+  "sign_off": "Sincerely,",
+  "candidate_name": "Priya Raman",
+  "tone_notes": "Hand-written review probe with planted defects."
+}

@@ -11,7 +11,11 @@ from tests.test_evals.grading_support import CASE_BY_ID, FIXTURES
 
 SPEC = (FIXTURES / "cover_letter_cases.md").read_text(encoding="utf-8")
 SPEC_IDS = re.findall(r"(?m)^## ([a-z0-9-]+)$", SPEC)
-LETTER_CASES = [case for case in CASE_BY_ID.values() if case.cover_letter is not None]
+LETTER_CASES = [
+    case
+    for case in CASE_BY_ID.values()
+    if case.cover_letter is not None and not case.is_cover_letter_probe
+]
 
 
 def test_the_spec_lists_thirteen_cases() -> None:
@@ -47,6 +51,10 @@ def test_each_case_runs_both_cover_letter_stages(case: EvalCase) -> None:
 
 
 def test_cases_without_a_table_write_no_letter() -> None:
-    others = [case for case in CASE_BY_ID.values() if case.cover_letter is None]
+    others = [
+        case
+        for case in CASE_BY_ID.values()
+        if case.cover_letter is None and case.stages is None
+    ]
     assert others
     assert not any(case.applies_to(StageKey.COVER_LETTER_GENERATE) for case in others)

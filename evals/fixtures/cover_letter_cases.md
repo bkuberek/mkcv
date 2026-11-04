@@ -110,3 +110,20 @@ Rules that apply to every case:
 - Must: choose two or three stories at most, such as the Teradata to lakehouse migration, the streaming claims platform, or data contracts.
 - Should connect: the migration to the JD's legacy warehouse migration requirement; the streaming FNOL fraud pipeline to Sablecrest's streaming fraud data; governance in insurance to a regulated lender.
 - Must not: claim Snowflake, Iceberg, or Flink; claim people management or direct reports.
+
+## Review probes
+
+Two more cases test `cover_letter.review` rather than letter writing. Each has
+a hand-written `reference/<case>/cover_letter_content.json` with six planted
+defects, listed as `review_defects` in `cases.toml`. The review sees only the
+letter and the job description, so every defect can be found from those two.
+
+- `cover-letter-probe-customer-success` (Nadia Haddad, Plumline Software): churn
+  "fell by 130%" (an impossible, invented metric); advanced SQL written daily
+  (the knowledge base has none); the closing asks to join Vantorra; a paragraph
+  of stock phrases; `[Company]` left in the opening; 491 words.
+- `cover-letter-probe-security` (Priya Raman, Kelvara Systems): incidents
+  "eliminated across 400 AWS accounts" (she had 62); years of Kubernetes
+  security on EKS (the knowledge base has none); the opening applies to
+  Fernhill Payments, her former employer; a paragraph of stock phrases; nearly
+  every sentence starts with "I"; 451 words.

@@ -531,3 +531,35 @@ review_probe_defects = [
   "the skill 'SQL' is claimed although the knowledge base does not support it",
 ]
 stages = ["review"]
+
+[[cases]]
+id = "cover-letter-probe-customer-success"
+persona = "personas/customer-success-manager.md"
+jd = "jds/customer-success-match.md"
+stages = ["cover_letter.review"]
+
+[cases.cover_letter]
+review_defects = [
+    "an invented metric: churn fell by 130%, an impossible figure that appears nowhere in her record",
+    "a claim of a skill she lacks: advanced SQL she writes herself every day",
+    "the wrong company name: the closing asks to join Vantorra instead of Plumline Software",
+    "generic filler: a paragraph of stock phrases (passionate, results-driven, team player, outside the box) with no specifics",
+    "a placeholder left in the letter: [Company]",
+    "over-length: the letter runs well past the 400-word limit",
+]
+
+[[cases]]
+id = "cover-letter-probe-security"
+persona = "personas/security-engineer.md"
+jd = "jds/security-cloud-match.md"
+stages = ["cover_letter.review"]
+
+[cases.cover_letter]
+review_defects = [
+    "an invented metric: security incidents eliminated across 400 AWS accounts, a scale that appears nowhere in her record",
+    "a claim of a skill she lacks: years of hands-on Kubernetes security on EKS",
+    "the wrong company name: the opening applies to Fernhill Payments, her former employer, instead of Kelvara Systems",
+    "generic filler: a paragraph of stock phrases (passionate, can-do spirit, team player, outside the box) with no specifics",
+    "an I overload: nearly every sentence starts with I",
+    "over-length: the letter runs well past the 400-word limit",
+]

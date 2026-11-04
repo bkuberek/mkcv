@@ -47,7 +47,13 @@ DIVERSE_CASE_IDS = [
     "data-principal-match",
 ]
 ADDITIONAL_PROBE_IDS = ["review-probe-clinical", "review-probe-customer-success"]
-CASE_IDS = ORIGINAL_CASE_IDS + DIVERSE_CASE_IDS + ADDITIONAL_PROBE_IDS
+COVER_LETTER_PROBE_IDS = [
+    "cover-letter-probe-customer-success",
+    "cover-letter-probe-security",
+]
+CASE_IDS = (
+    ORIGINAL_CASE_IDS + DIVERSE_CASE_IDS + ADDITIONAL_PROBE_IDS + COVER_LETTER_PROBE_IDS
+)
 PROBE_IDS = ["review-probe", *ADDITIONAL_PROBE_IDS]
 FORBIDDEN_CLAIMS = {
     "backend-ml-stretch": ["PyTorch", "model training", "MLflow"],
@@ -244,9 +250,15 @@ class TestCases:
     def test_the_designed_cases_and_probes_load_in_order(self) -> None:
         assert [case.id for case in CASES] == CASE_IDS
 
-    def test_only_the_probes_are_limited_to_the_review_stage(self) -> None:
+    def test_only_the_probes_are_limited_to_their_review_stage(self) -> None:
         limited = {c.id: c.stages for c in CASES if c.stages is not None}
-        assert limited == {probe: [StageKey.REVIEW] for probe in PROBE_IDS}
+        assert limited == {
+            **{probe: [StageKey.REVIEW] for probe in PROBE_IDS},
+            **{
+                probe: [StageKey.COVER_LETTER_REVIEW]
+                for probe in COVER_LETTER_PROBE_IDS
+            },
+        }
 
     def test_the_probe_pairs_the_backend_persona_with_the_platform_job(self) -> None:
         probe = CASE_BY_ID["review-probe"]
@@ -525,7 +537,7 @@ class TestJobDescriptions:
 
 class TestNoRealContactData:
     def test_there_are_fixture_files_to_check(self) -> None:
-        assert len(FIXTURE_FILES) == 44
+        assert len(FIXTURE_FILES) == 46
 
     @pytest.mark.parametrize(
         "path", FIXTURE_FILES, ids=lambda p: str(p.relative_to(FIXTURES))
