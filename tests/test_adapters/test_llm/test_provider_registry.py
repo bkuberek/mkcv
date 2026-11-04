@@ -1,11 +1,15 @@
 """Tests for ProviderRegistry (REQ-PR-1 to PR-6, REQ-CAT-4, REQ-OC-10)."""
 
 import logging
+import subprocess
+import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from dynaconf import Dynaconf
 
+from mkcv.adapters.llm.google import GoogleGeminiAdapter
 from mkcv.adapters.llm.model_catalog_loader import load_model_catalog
 from mkcv.adapters.llm.openai import OpenAIAdapter
 from mkcv.adapters.llm.openai_compatible import OpenAICompatibleAdapter
@@ -545,14 +549,164 @@ tier = "minimal"
         assert isinstance(adapter, OpenAIAdapter)
         assert adapter._client.api_key == "sk-from-config"
 
-    def test_google_is_not_available_before_its_adapter_lands(
+
+class TestGoogleAdapterCreation:
+    """REQ-GG-9."""
+
+    def test_google_adapter_is_built_from_the_registry(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", "g")
-        with pytest.raises(
-            ConfigurationError, match="google provider is not available"
-        ):
-            _registry(tmp_path).create_adapter("google")
+        adapter = _registry(tmp_path).create_adapter("google", with_retry=False)
+        assert isinstance(adapter, GoogleGeminiAdapter)
+
+    def test_google_is_wrapped_with_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "g")
+        adapter = _registry(tmp_path).create_adapter("google")
+        assert isinstance(adapter, RetryingLLMAdapter)
+        assert isinstance(adapter._inner, GoogleGeminiAdapter)
+
+    def test_google_api_key_variable_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GOOGLE_API_KEY", "g2")
+        adapter = _registry(tmp_path).create_adapter("google", with_retry=False)
+        assert isinstance(adapter, GoogleGeminiAdapter)
+
+    def test_key_resolved_by_the_registry_reaches_the_client(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "g1")
+        monkeypatch.setenv("GOOGLE_API_KEY", "g2")
+        with patch("mkcv.adapters.llm.google.genai.Client") as client:
+            _registry(tmp_path).create_adapter("google", with_retry=False)
+        assert client.call_args.kwargs["api_key"] == "g1"
+
+    def test_missing_key_falls_back_to_the_stub(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        adapter = _registry(tmp_path).create_adapter("google")
+        assert isinstance(adapter, StubLLMAdapter)
+        assert "No API key for provider 'google'" in caplog.text
+
+    def test_adapter_resolves_models_through_the_registry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "g")
+        config = """
+[[default.model_catalog]]
+provider = "google"
+match = "gemini-3.8-flash"
+tier = "minimal"
+"""
+        adapter = _registry(tmp_path, config).create_adapter("google", with_retry=False)
+        assert isinstance(adapter, GoogleGeminiAdapter)
+        assert adapter._resolver("google", "gemini-3.8-flash").tier is ModelTier.MINIMAL
+
+    def test_adapter_carries_the_provider_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "g")
+        adapter = _registry(tmp_path).create_adapter("google", with_retry=False)
+        assert isinstance(adapter, GoogleGeminiAdapter)
+        assert adapter._provider_name == "google"
+
+    def test_base_url_from_config_reaches_the_client(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "g")
+        config = '[default.providers.google]\nbase_url = "https://proxy.example.com"\n'
+        with patch("mkcv.adapters.llm.google.genai.Client") as client:
+            _registry(tmp_path, config).create_adapter("google", with_retry=False)
+        options = client.call_args.kwargs["http_options"]
+        assert options.base_url == "https://proxy.example.com"
+
+    def test_base_url_from_config_reaches_the_real_sdk_client(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "g")
+        config = '[default.providers.google]\nbase_url = "https://proxy.example.com"\n'
+        adapter = _registry(tmp_path, config).create_adapter("google", with_retry=False)
+        assert isinstance(adapter, GoogleGeminiAdapter)
+        sdk_options = adapter._client._api_client._http_options
+        assert sdk_options.base_url == "https://proxy.example.com"
+
+    def test_user_defined_google_provider_uses_the_google_adapter(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_PROXY_KEY", "gk")
+        config = """
+[default.providers.gemini-proxy]
+type = "google"
+base_url = "https://proxy.example.com"
+api_key_env = "GEMINI_PROXY_KEY"
+"""
+        adapter = _registry(tmp_path, config).create_adapter(
+            "gemini-proxy", with_retry=False
+        )
+        assert isinstance(adapter, GoogleGeminiAdapter)
+        assert adapter._provider_name == "gemini-proxy"
+
+
+class TestLazyImports:
+    """REQ-GG-9: the Google SDK is imported only when Google is used."""
+
+    CREATE_ADAPTER = """
+import os, sys
+os.environ["{variable}"] = "key"
+from dynaconf import Dynaconf
+from mkcv.adapters.llm.model_catalog_loader import load_model_catalog
+from mkcv.adapters.llm.provider_registry import ProviderRegistry
+
+config = Dynaconf(environments=True, default_env="default")
+registry = ProviderRegistry.from_config(config, load_model_catalog(config))
+registry.create_adapter("{provider}")
+assert ("google.genai" in sys.modules) is {imported}
+"""
+
+    @staticmethod
+    def _run(code: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_importing_the_factory_does_not_import_the_google_sdk(self) -> None:
+        result = self._run(
+            "import sys, mkcv.adapters.factory; "
+            "assert 'google.genai' not in sys.modules"
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_importing_the_registry_does_not_import_the_google_sdk(self) -> None:
+        result = self._run(
+            "import sys, mkcv.adapters.llm.provider_registry; "
+            "assert 'google.genai' not in sys.modules"
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_creating_a_non_google_adapter_does_not_import_the_google_sdk(
+        self,
+    ) -> None:
+        result = self._run(
+            self.CREATE_ADAPTER.format(
+                variable="OPENAI_API_KEY", provider="openai", imported=False
+            )
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_creating_a_google_adapter_imports_the_google_sdk(self) -> None:
+        result = self._run(
+            self.CREATE_ADAPTER.format(
+                variable="GEMINI_API_KEY", provider="google", imported=True
+            )
+        )
+        assert result.returncode == 0, result.stderr
 
 
 class TestModelResolution:

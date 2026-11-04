@@ -203,7 +203,14 @@ def _build_openai_compatible(
 def _build_google(
     spec: ProviderSpec, api_key: str, registry: ProviderRegistry
 ) -> LLMPort:
-    raise ConfigurationError("The google provider is not available yet")
+    from mkcv.adapters.llm.google import GoogleGeminiAdapter
+
+    return GoogleGeminiAdapter(
+        api_key,
+        base_url=spec.base_url,
+        resolver=registry.resolve_model,
+        provider_name=spec.name,
+    )
 
 
 _BUILDERS: dict[
