@@ -28,5 +28,8 @@ class CostEstimate(BaseModel):
         description="Evaluated models plus judges, summed per provider",
     )
     total_usd: float | None
+    online_total_usd: float | None = Field(
+        default=None, description="The total without the batch discount"
+    )
     is_partial: bool
     skipped_judges: dict[str, str] = Field(default_factory=dict)

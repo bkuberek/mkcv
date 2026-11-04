@@ -416,3 +416,59 @@ def _letter_probe(case: EvalCase) -> EvalCase:
             ),
         }
     )
+
+
+class TestBatchedBootstrap:
+    """With batching, each stage level of every case goes out as one batch."""
+
+    async def test_every_case_shares_one_batch_per_stage(
+        self,
+        cases: list[EvalCase],
+        make_settings: Callable[..., Dynaconf],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        import asyncio
+        from types import SimpleNamespace
+
+        from evals.batch.batch_store import BatchStore
+        from evals.batch.eval_adapters import EvalAdapters
+        from evals.batch.usage_ledger import UsageLedger
+        from evals.models.batch_settings import BatchSettings
+        from mkcv.adapters.factory import create_provider_registry
+        from mkcv.adapters.llm.anthropic import AnthropicAdapter
+        from mkcv.adapters.llm.provider_registry import ProviderRegistry
+        from tests.test_evals.test_eval_runner_batch import SchemaBatches
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        fake = SchemaBatches()
+
+        def create(self: ProviderRegistry, name: str, **_: object) -> LLMPort:
+            adapter = AnthropicAdapter(api_key="test-key")
+            adapter._client = SimpleNamespace(messages=SimpleNamespace(batches=fake))  # type: ignore[assignment]
+            return adapter
+
+        monkeypatch.setattr(ProviderRegistry, "create_adapter", create)
+
+        async def yielding(seconds: float) -> None:
+            for _ in range(5):
+                await asyncio.sleep(0)
+
+        settings = make_settings()
+        adapters = EvalAdapters(
+            create_provider_registry(settings),
+            settings=BatchSettings(enabled=True, flush_seconds=0.0, poll_seconds=0.0),
+            store=BatchStore(tmp_path / "state"),
+            ledger=UsageLedger(),
+            run_id="bootstrap",
+            sleep=yielding,
+        )
+        second = cases[0].model_copy(update={"id": "alpha-second"})
+        bootstrapper = ReferenceBootstrapper(
+            settings,
+            reference=JudgeConfig(provider="anthropic", model="claude-opus-5-5"),
+            adapters=adapters,
+        )
+        outcomes = await bootstrapper.bootstrap([cases[0], second], [cases[0], second])
+        assert [o.status for o in outcomes] == ["written", "written"]
+        assert [len(batch) for batch in fake.created] == [2, 2, 2, 2, 2]

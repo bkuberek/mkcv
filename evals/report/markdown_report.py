@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 
 from evals.graders.judge_panel import AGREEMENT_SPREAD
 from evals.graders.stage_graders import JUDGED_GRADES, PRIMARY_METRIC
+from evals.harness.pricing import actual_cost, online_cost
+from evals.models.call_usage import CallUsage
 from evals.models.judge_config import JudgeConfig
 from evals.models.recommendation import OVERALL, Recommendation
 from evals.models.run_manifest import RunManifest
@@ -48,19 +50,22 @@ def render_markdown(
     *,
     screening: Sequence[ScreeningDecision] = (),
     screening_only: bool = False,
+    usage: Sequence[CallUsage] = (),
 ) -> str:
     """Return the report for one run (design 9.9), ending with a newline.
 
     ``summaries`` and ``recommendations`` come from the finals (or the single
     round); ``screening`` holds the screening round's decisions, if any, and
-    ``screening_only`` says the summaries are the screening's own.
+    ``screening_only`` says the summaries are the screening's own. ``usage``
+    lists every call of the run (``usage.jsonl``); with it the cost section
+    sets what the calls cost as sent beside their online price.
     """
     sections = [
         [f"# mkcv eval report: {manifest.run_id}"],
         _run_section(manifest),
         _caveats_section(manifest, summaries, screening_only=screening_only),
         _judge_panel_section(manifest, summaries),
-        _cost_section(summaries),
+        _usage_cost_section(manifest, usage) if usage else _cost_section(summaries),
         *([_tournament_section(screening)] if screening else []),
         *_stage_sections(summaries, recommendations),
         _recommendations_section(manifest, summaries, recommendations),
@@ -219,6 +224,63 @@ def _tournament_section(decisions: Sequence[ScreeningDecision]) -> list[str]:
             ("Stage", "Provider", "Model", "Screening quality", "Finals", "Why"),
             rows,
         ),
+    ]
+
+
+def _usage_cost_section(manifest: RunManifest, usage: Sequence[CallUsage]) -> list[str]:
+    groups: dict[tuple[str, str, str], list[CallUsage]] = {}
+    for call in usage:
+        role = "judge" if "/judge/" in (call.scope or "") else "evaluated"
+        groups.setdefault((call.provider, call.model, role), []).append(call)
+    rows: list[tuple[str, ...]] = []
+    online_total = actual_total = 0.0
+    unpriced = False
+    for (provider, model, role), calls in sorted(groups.items()):
+        price = manifest.catalog_prices.get(f"{provider}/{model}")
+        if price is None:
+            unpriced = True
+            online = actual = None
+        else:
+            online = sum(online_cost(call, price) for call in calls)
+            actual = sum(
+                actual_cost(call, price, manifest.matrix.pricing) for call in calls
+            )
+            online_total += online
+            actual_total += actual
+        rows.append(
+            (
+                provider,
+                model,
+                role,
+                str(len(calls)),
+                str(sum(call.batched for call in calls)),
+                str(sum(call.cache_read_tokens for call in calls)),
+                _usd(online),
+                _usd(actual),
+            )
+        )
+    saved = online_total - actual_total
+    share = saved / online_total if online_total else 0.0
+    columns = (
+        "Provider",
+        "Model",
+        "Role",
+        "Calls",
+        "Batched",
+        "Cache read tokens",
+        "Online cost",
+        "Actual cost",
+    )
+    return [
+        "## Cost",
+        "",
+        *_table(columns, rows),
+        "",
+        f"Online: {_usd(online_total)}; as sent: {_usd(actual_total)} "
+        f"(saved {_usd(saved)}, {share:.0%}). Every stage and judge call is "
+        "counted at catalog prices, with the batch discount and cache prices of "
+        "`[pricing]`."
+        + (" Some models have no catalog price and are left out." if unpriced else ""),
     ]
 
 

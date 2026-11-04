@@ -19,6 +19,16 @@ class TournamentEstimate(BaseModel):
     assumed_survivors: list[str] = Field(default_factory=list)
 
     @property
+    def online_total_usd(self) -> float | None:
+        """Both rounds without the batch discount, or None if unknown."""
+        if (
+            self.screening.online_total_usd is None
+            or self.finals.online_total_usd is None
+        ):
+            return None
+        return self.screening.online_total_usd + self.finals.online_total_usd
+
+    @property
     def total_usd(self) -> float | None:
         """Screening plus the assumed finals, or None if either is unknown."""
         if self.screening.total_usd is None or self.finals.total_usd is None:

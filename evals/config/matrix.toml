@@ -48,6 +48,27 @@ screening_cases = [
     "marketing-coordinator-match",     # new graduate, sparse KB, cover letter
 ]
 
+# Stage and judge calls go out as provider batches (about half price): each
+# model's queue flushes at max_requests or flush_seconds after its first
+# request, and is polled every poll_seconds. Google batches run on Vertex AI,
+# with files under <bucket>/runs/<run id>/; without a bucket Google calls go
+# online. --no-batch sends everything online.
+[batch]
+enabled = true
+max_requests = 1000
+flush_seconds = 30
+poll_seconds = 30
+concurrency = 512
+google_gcs_bucket = "gs://destinyventures-mkcv-evals"
+
+# Discounts on catalog prices. The three providers publish 50% off batches.
+# Cache multipliers price cached prompt tokens against the input price; they
+# are planning values, so check them against each provider's pricing page.
+[pricing]
+batch_discount = { anthropic = 0.5, openai = 0.5, google = 0.5 }
+cache_read_multiplier = { anthropic = 0.1, openai = 0.5, google = 0.25 }
+cache_write_multiplier = { anthropic = 1.25 }
+
 # Quality first: the best eligible model wins; cost only breaks a tie between
 # models within tie_epsilon of the best score. A model that fabricates in more
 # than max_fabrication_rate of its runs is not eligible.

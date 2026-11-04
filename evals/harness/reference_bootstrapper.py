@@ -1,12 +1,15 @@
 """Produce the reference artifacts that stage-isolated runs start from."""
 
+import asyncio
 import json
 import logging
 import shutil
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from evals.batch.call_scope import call_scope
 from evals.harness.stage_runner import ARTIFACT_DIR, RESUME_FILE, StageRunner
 from evals.harness.stop_after_stage import StopAfterStage
 from evals.models.eval_case import (
@@ -24,6 +27,9 @@ from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_key import PIPELINE_STAGE_NUMBERS, PIPELINE_STAGES, StageKey
+
+if TYPE_CHECKING:
+    from evals.batch.eval_adapters import EvalAdapters
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +70,11 @@ class ReferenceBootstrapper:
     is committed, so existing reference files are never overwritten: a case
     with every stage 1-4 file only gets the cover letter it lacks, and one
     with some but not all of them is left alone.
+
+    Cases run concurrently (up to ``concurrency``). Within a case each stage
+    needs the one before, so with batching ``adapters`` every case's stage 1
+    goes out in one batch, then every stage 2, and so on. Each case's calls
+    run under ``bootstrap/<case>``, so a resumed bootstrap finds them.
     """
 
     def __init__(
@@ -72,10 +83,14 @@ class ReferenceBootstrapper:
         *,
         reference: JudgeConfig,
         preset: str = "standard",
+        adapters: "EvalAdapters | None" = None,
+        concurrency: int = 64,
     ) -> None:
         self._config = config
         self._reference = reference
         self._preset = preset
+        self._adapters = adapters
+        self._gate = asyncio.Semaphore(concurrency)
 
     async def bootstrap(
         self, cases: Sequence[EvalCase], known: Sequence[EvalCase]
@@ -92,6 +107,14 @@ class ReferenceBootstrapper:
             known: Every case in the fixtures, used to find a probe's donor.
         """
         ordered = sorted(cases, key=lambda case: bool(case.review_probe_defects))
+        generated = await asyncio.gather(
+            *(
+                self._generate(case)
+                for case in ordered
+                if not case.review_probe_defects and not case.is_cover_letter_probe
+            )
+        )
+        by_case = {outcome.case_id: outcome for outcome in generated}
         outcomes: list[ReferenceOutcome] = []
         for case in ordered:
             if case.review_probe_defects:
@@ -99,10 +122,14 @@ class ReferenceBootstrapper:
             elif case.is_cover_letter_probe:
                 outcomes.append(_check_letter_probe(case))
             else:
-                outcomes.append(await self._generate(case))
+                outcomes.append(by_case[case.id])
         return outcomes
 
     async def _generate(self, case: EvalCase) -> ReferenceOutcome:
+        async with self._gate:
+            return await self._generate_case(case)
+
+    async def _generate_case(self, case: EvalCase) -> ReferenceOutcome:
         existing = _existing(case, PIPELINE_FILES)
         if existing and len(existing) < len(PIPELINE_FILES):
             return _skipped(case)
@@ -126,24 +153,37 @@ class ReferenceBootstrapper:
         )
 
     async def _run_stages(self, case: EvalCase, work_dir: Path) -> None:
+        providers = (
+            {self._reference.provider: self._adapters.create(self._reference.provider)}
+            if self._adapters is not None
+            else None
+        )
         service = create_pipeline_service_for_stage_configs(
-            self._config, self._stage_configs(), preset_name=self._preset
+            self._config,
+            self._stage_configs(),
+            preset_name=self._preset,
+            providers=providers,
         )
-        await service.generate(
-            case.jd_path,
-            case.persona_path,
-            output_dir=work_dir,
-            from_stage=1,
-            stage_callback=StopAfterStage(LAST_REFERENCE_STAGE),
-        )
+        with call_scope(f"bootstrap/{case.id}/resume"):
+            await service.generate(
+                case.jd_path,
+                case.persona_path,
+                output_dir=work_dir,
+                from_stage=1,
+                stage_callback=StopAfterStage(LAST_REFERENCE_STAGE),
+            )
 
     async def _write_cover_letter(self, case: EvalCase) -> None:
         """Write the letter with the reference model, from the stored references."""
         model = MatrixModel(
             provider=self._reference.provider, model=self._reference.model
         )
-        with tempfile.TemporaryDirectory() as scratch:
-            result = await StageRunner(self._config, preset=self._preset).run(
+        runner = StageRunner(self._config, preset=self._preset, adapters=self._adapters)
+        with (
+            tempfile.TemporaryDirectory() as scratch,
+            call_scope(f"bootstrap/{case.id}/cover_letter"),
+        ):
+            result = await runner.run(
                 case, StageKey.COVER_LETTER_GENERATE, model, 0, Path(scratch)
             )
         if result.status != "ok" or not isinstance(result.payload, dict):

@@ -355,6 +355,26 @@ class TestLoadMatrix:
         matrix = load_matrix(_write_matrix(tmp_path, body))
         assert matrix.run.judged_stages == [StageKey.STRUCTURE]
 
+    def test_the_shipped_matrix_batches_with_the_vertex_bucket(self) -> None:
+        batch = load_matrix(DEFAULT_MATRIX).batch
+        assert batch.enabled is True
+        assert batch.google_gcs_bucket == "gs://destinyventures-mkcv-evals"
+
+    def test_the_shipped_batch_discount_is_half_for_the_three_providers(
+        self,
+    ) -> None:
+        pricing = load_matrix(DEFAULT_MATRIX).pricing
+        assert pricing.batch_discount == {
+            "anthropic": 0.5,
+            "openai": 0.5,
+            "google": 0.5,
+        }
+
+    def test_a_matrix_without_a_batch_table_calls_online(self, tmp_path: Path) -> None:
+        assert (
+            load_matrix(_write_matrix(tmp_path, _MINIMAL_MATRIX)).batch.enabled is False
+        )
+
     def test_the_tie_epsilon_can_be_set(self, tmp_path: Path) -> None:
         body = "[recommendation]\ntie_epsilon = 0.02\n" + _MINIMAL_MATRIX
         settings = load_matrix(_write_matrix(tmp_path, body)).recommendation

@@ -30,6 +30,7 @@ def estimate_matrix_cost(
     *,
     skipped_judges: Mapping[str, str] | None = None,
     judges_for: Callable[[MatrixModel], Sequence[JudgeConfig]] | None = None,
+    discounts: Mapping[str, float] | None = None,
 ) -> CostEstimate:
     """Estimate the cost of running ``matrix`` over ``cases`` in one round.
 
@@ -47,7 +48,11 @@ def estimate_matrix_cost(
         skipped_judges: Judges that will not run (no credentials), with the
             reason, by ``provider/model``. Their calls are left out; the
             reasons are kept only if the run would have made judge calls.
+        judges_for: The judges of each model's outputs (default: the panel).
+        discounts: The share taken off each provider's calls (batching), by
+            provider name; ``online_total_usd`` keeps the undiscounted total.
     """
+    off = discounts or {}
     runs = [
         (case, stage)
         for case in cases
@@ -62,7 +67,7 @@ def estimate_matrix_cost(
         STAGE_REQUIREMENTS[s].est_output_tokens for _, s in runs
     )
 
-    model_costs = {
+    online_models = {
         model.label: _price_tokens(
             catalog.price_for(model.model, provider=model.provider),
             input_tokens,
@@ -81,18 +86,22 @@ def estimate_matrix_cost(
         for judge in judges_for(model) if judges_for else panel:
             counts[judge.label] = counts.get(judge.label, 0) + per_model
             configs[judge.label] = judge
-    judge_costs = {
+    online_judges = {
         label: _judge_cost(
             catalog.price_for(configs[label].model, provider=configs[label].provider),
             count,
         )
         for label, count in counts.items()
     }
+    model_costs = _discounted(online_models, off)
+    judge_costs = _discounted(online_judges, off)
     judge_total, _ = (
         summarize_costs(list(judge_costs.values())) if judge_costs else (0.0, False)
     )
     known_costs = [*model_costs.values(), *judge_costs.values()]
     total, is_partial = summarize_costs(known_costs) if known_costs else (0.0, False)
+    online = [*online_models.values(), *online_judges.values()]
+    online_total = summarize_costs(online)[0] if online else 0.0
     return CostEstimate(
         runs_per_model=len(runs) * repeats,
         model_costs=model_costs,
@@ -103,6 +112,7 @@ def estimate_matrix_cost(
         judge_cost_usd=judge_total,
         provider_costs=_by_provider(model_costs, judge_costs),
         total_usd=total,
+        online_total_usd=online_total,
         is_partial=is_partial,
         skipped_judges=skipped,
     )
@@ -114,6 +124,7 @@ def estimate_tournament_cost(
     catalog: ModelCatalog,
     *,
     skipped_judges: Mapping[str, str] | None = None,
+    discounts: Mapping[str, float] | None = None,
 ) -> TournamentEstimate:
     """Estimate both rounds of a tournament run.
 
@@ -142,15 +153,21 @@ def estimate_tournament_cost(
             catalog,
             skipped_judges=skipped_judges,
             judges_for=one_judge,
+            discounts=discounts,
         ),
         finals=estimate_matrix_cost(
             matrix.model_copy(update={"models": survivors}),
             cases,
             catalog,
             skipped_judges=skipped_judges,
+            discounts=discounts,
         ),
         finals_worst_case=estimate_matrix_cost(
-            matrix, cases, catalog, skipped_judges=skipped_judges
+            matrix,
+            cases,
+            catalog,
+            skipped_judges=skipped_judges,
+            discounts=discounts,
         ),
         assumed_survivors=[model.label for model in survivors],
     )
@@ -179,6 +196,17 @@ def assumed_survivors(
         if model not in kept:
             kept.append(model)
     return kept
+
+
+def _discounted(
+    costs: Mapping[str, float | None], discounts: Mapping[str, float]
+) -> dict[str, float | None]:
+    return {
+        label: None
+        if cost is None
+        else cost * (1.0 - discounts.get(label.partition("/")[0], 0.0))
+        for label, cost in costs.items()
+    }
 
 
 def _list_price(model: MatrixModel, catalog: ModelCatalog) -> float:

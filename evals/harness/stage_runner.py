@@ -4,7 +4,7 @@ import logging
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from evals.harness.stage_run import StageRun
 from evals.harness.stop_after_stage import StopAfterStage
@@ -26,6 +26,11 @@ from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.cover_letter import CoverLetter
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.stage_config import StageConfig
+from mkcv.core.ports.llm import LLMPort
+
+if TYPE_CHECKING:
+    from evals.batch.eval_adapters import EvalAdapters
+
 from mkcv.core.models.stage_key import (
     COVER_LETTER_STAGES,
     PIPELINE_STAGE_NUMBERS,
@@ -75,9 +80,16 @@ class StageRunner:
     reviews the reference letter.
     """
 
-    def __init__(self, config: Configuration, *, preset: str = "standard") -> None:
+    def __init__(
+        self,
+        config: Configuration,
+        *,
+        preset: str = "standard",
+        adapters: "EvalAdapters | None" = None,
+    ) -> None:
         self._config = config
         self._preset = preset
+        self._adapters = adapters
         self._store = FileSystemArtifactStore()
 
     async def run(
@@ -106,10 +118,12 @@ class StageRunner:
         stop = StopAfterStage(number)
         try:
             self._prepare(case, number, work_dir)
+            configs = _stage_configs(model, stage)
             service = create_pipeline_service_for_stage_configs(
                 self._config,
-                _stage_configs(model, stage),
+                configs,
                 preset_name=self._preset,
+                providers=self._providers(configs),
             )
             await service.generate(
                 case.jd_path,
@@ -129,8 +143,9 @@ class StageRunner:
             if work_dir.exists():
                 shutil.rmtree(work_dir)
             work_dir.mkdir(parents=True)
+            configs = _cover_letter_configs(model, stage)
             service = create_cover_letter_service_for_stage_configs(
-                self._config, _cover_letter_configs(model, stage)
+                self._config, configs, providers=self._providers(configs)
             )
             if stage is StageKey.COVER_LETTER_GENERATE:
                 analysis = JDAnalysis.model_validate_json(
@@ -156,6 +171,13 @@ class StageRunner:
             return StageRun(status="ok", payload=review.model_dump(), metadata=metadata)
         except (MkcvError, OSError, ValueError) as error:
             return StageRun(status="error", error=str(error))
+
+    def _providers(self, configs: dict[int, StageConfig]) -> dict[str, LLMPort] | None:
+        """Transport-backed adapters for the configs' providers, when batching."""
+        if self._adapters is None:
+            return None
+        providers = {config.provider for config in configs.values()}
+        return {name: self._adapters.create(name) for name in providers}
 
     def _prepare(self, case: EvalCase, number: int, work_dir: Path) -> None:
         """Start from an empty work directory holding the upstream references."""

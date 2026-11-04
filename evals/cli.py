@@ -8,7 +8,7 @@ not start because of bad input, bad configuration, or a missing confirmation.
 import argparse
 import asyncio
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -111,6 +111,14 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_fixtures_argument(list_cases)
     list_cases.set_defaults(handler=_list_cases)
 
+    check = commands.add_parser(
+        "check-reference",
+        help="list reference claims the knowledge base does not support",
+    )
+    _add_fixtures_argument(check)
+    check.add_argument("--cases", nargs="+", metavar="CASE", help="check only these")
+    check.set_defaults(handler=_check_reference)
+
     estimate = commands.add_parser(
         "estimate", help="estimate what a matrix run would cost"
     )
@@ -157,8 +165,22 @@ def _add_fixtures_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_batch_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--no-batch",
+        action="store_true",
+        help="call every model online instead of in provider batches",
+    )
+
+
 def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     _add_fixtures_argument(parser)
+    _add_batch_argument(parser)
+    parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="(estimate) price bootstrap-reference instead of a run",
+    )
     parser.add_argument(
         "--matrix", type=Path, default=DEFAULT_MATRIX, help="matrix TOML file"
     )
@@ -229,6 +251,15 @@ def _add_verbose_argument(parser: argparse.ArgumentParser) -> None:
 
 def _add_bootstrap_arguments(parser: argparse.ArgumentParser) -> None:
     _add_fixtures_argument(parser)
+    _add_batch_argument(parser)
+    parser.add_argument(
+        "--state",
+        type=Path,
+        default=DEFAULT_RESULTS_DIR / "bootstrap",
+        metavar="DIR",
+        help="where batches and usage persist, so a rerun resumes "
+        "(default: evals/results/bootstrap)",
+    )
     _add_verbose_argument(parser)
     parser.add_argument(
         "--matrix", type=Path, default=DEFAULT_MATRIX, help="matrix TOML file"
@@ -254,13 +285,19 @@ def _list_cases(args: argparse.Namespace, config: "Configuration") -> int:
 
 def _estimate(args: argparse.Namespace, config: "Configuration") -> int:
     matrix, cases, registry = _load_plan(args, config)
-    if matrix.tournament.enabled:
+    discounts = _batch_discounts(matrix, registry)
+    if args.bootstrap:
+        lines = [_bootstrap_estimate_line(matrix.reference, cases, registry, discounts)]
+    elif matrix.tournament.enabled:
         lines = _tournament_lines(
-            estimate_tournament_cost(matrix, cases, registry.catalog), matrix
+            estimate_tournament_cost(
+                matrix, cases, registry.catalog, discounts=discounts
+            ),
+            matrix,
         )
     else:
         lines = _estimate_lines(
-            estimate_matrix_cost(matrix, cases, registry.catalog),
+            estimate_matrix_cost(matrix, cases, registry.catalog, discounts=discounts),
             case_count=len(cases),
         )
     for line in lines:
@@ -286,8 +323,13 @@ def _run(args: argparse.Namespace, config: "Configuration") -> int:
 
     effective = matrix.model_copy(update={"models": runnable})
     _, skipped_judges = split_judges(registry, effective.panel)
+    discounts = _batch_discounts(effective, registry)
     estimate = estimate_matrix_cost(
-        effective, cases, registry.catalog, skipped_judges=skipped_judges
+        effective,
+        cases,
+        registry.catalog,
+        skipped_judges=skipped_judges,
+        discounts=discounts,
     )
     for label, reason in estimate.skipped_judges.items():
         _err(f"warning: judge {label} skipped ({reason})")
@@ -298,7 +340,11 @@ def _run(args: argparse.Namespace, config: "Configuration") -> int:
     if effective.tournament.enabled:
         lines = _tournament_lines(
             estimate_tournament_cost(
-                effective, cases, registry.catalog, skipped_judges=skipped_judges
+                effective,
+                cases,
+                registry.catalog,
+                skipped_judges=skipped_judges,
+                discounts=discounts,
             ),
             effective,
         )
@@ -340,11 +386,14 @@ def _report(args: argparse.Namespace, config: "Configuration") -> int:
 
 
 def _bootstrap_reference(args: argparse.Namespace, config: "Configuration") -> int:
+    from evals.batch.batch_store import BatchStore
+    from evals.batch.eval_adapters import EvalAdapters
+    from evals.batch.usage_ledger import UsageLedger
     from evals.harness.reference_bootstrapper import ReferenceBootstrapper
     from mkcv.adapters.factory import create_provider_registry
 
     configure_logging(verbose=args.verbose)
-    matrix = load_matrix(args.matrix)
+    matrix = MatrixOverrides(no_batch=args.no_batch).apply(load_matrix(args.matrix))
     reference = _reference_model(args, matrix)
     known = load_cases(args.fixtures)
     cases = select_cases(known, args.cases or matrix.run.cases)
@@ -352,21 +401,64 @@ def _bootstrap_reference(args: argparse.Namespace, config: "Configuration") -> i
     if not registry.has_credentials(reference.provider):
         return _fail(f"no API key for the reference provider '{reference.provider}'")
 
-    _out(_bootstrap_estimate_line(reference, cases, registry))
+    discounts = _batch_discounts(
+        matrix.model_copy(update={"models": [], "judges": [reference], "judge": None}),
+        registry,
+    )
+    _out(_bootstrap_estimate_line(reference, cases, registry, discounts))
     if not args.yes and not _confirmed():
         return EXIT_USAGE
 
+    args.state.mkdir(parents=True, exist_ok=True)
+    adapters = EvalAdapters(
+        registry,
+        settings=matrix.batch,
+        store=BatchStore(args.state / "batches") if matrix.batch.enabled else None,
+        ledger=UsageLedger(args.state / "usage.jsonl"),
+        run_id="bootstrap",
+    )
     bootstrapper = ReferenceBootstrapper(
-        config, reference=reference, preset=matrix.run.preset
+        config,
+        reference=reference,
+        preset=matrix.run.preset,
+        adapters=adapters,
+        concurrency=matrix.batch.concurrency if matrix.batch.enabled else 4,
     )
     outcomes = asyncio.run(bootstrapper.bootstrap(cases, known))
     for outcome in outcomes:
         _out(_outcome_line(outcome))
     _out(
         f"Review every file under {args.fixtures / 'reference'} for fabricated "
-        "facts before committing."
+        "facts before committing; `python -m evals check-reference` lists the "
+        "claims the knowledge base does not support."
     )
     return EXIT_FAILED if any(o.status == "error" for o in outcomes) else 0
+
+
+def _check_reference(args: argparse.Namespace, config: "Configuration") -> int:
+    from evals.harness.reference_checker import check_references
+
+    known = load_cases(args.fixtures)
+    cases = select_cases(known, args.cases or ["*"])
+    findings = asyncio.run(check_references(cases))
+    for finding in findings:
+        status = "ok"
+        if finding.error:
+            status = f"error: {finding.error}"
+        elif finding.violations:
+            listed = ", ".join(f"{v['type']} {v['text']!r}" for v in finding.violations)
+            status = f"{len(finding.violations)} flagged: {listed}"
+        note = (
+            " (probe: planted on purpose)" if finding.probe and status != "ok" else ""
+        )
+        _out(f"{finding.case_id} / {finding.artifact}: {status}{note}")
+    flagged = [f for f in findings if f.flagged]
+    _out(
+        f"{len(findings)} reference file(s) checked, {len(flagged)} to review"
+        if findings
+        else "No reference files found; run bootstrap-reference first."
+    )
+    return EXIT_FAILED if flagged else 0
 
 
 def _load_plan(
@@ -381,6 +473,7 @@ def _load_plan(
         judges=args.judge,
         concurrency=getattr(args, "concurrency", None),
         single_round=args.single_round,
+        no_batch=args.no_batch,
     )
     matrix = overrides.apply(load_matrix(args.matrix))
     known = load_cases(args.fixtures)
@@ -458,6 +551,8 @@ def _estimate_lines(estimate: CostEstimate, *, case_count: int) -> list[str]:
         )
     note = " (some prices unknown)" if estimate.is_partial else ""
     lines.append(f"Total{note}: {_usd(estimate.total_usd)}")
+    if estimate.online_total_usd != estimate.total_usd:
+        lines.append(f"Online, without batching: {_usd(estimate.online_total_usd)}")
     return lines
 
 
@@ -473,6 +568,7 @@ def _tournament_lines(estimate: TournamentEstimate, matrix: MatrixConfig) -> lis
         "repeats), the whole panel",
         *("  " + line for line in _estimate_lines(estimate.finals, case_count=0)[1:]),
         f"Total (screening + finals): {_usd(estimate.total_usd)}",
+        f"Online, without batching: {_usd(estimate.online_total_usd)}",
         "Worst case (no model eliminated): "
         f"{_usd(_sum(screening.total_usd, estimate.finals_worst_case.total_usd))}",
     ]
@@ -485,8 +581,36 @@ def _sum(*amounts: float | None) -> float | None:
     return sum(amount for amount in amounts if amount is not None)
 
 
+def _batch_discounts(
+    matrix: MatrixConfig, registry: "ProviderRegistry"
+) -> dict[str, float]:
+    """The batch discount of every provider whose calls the run would batch.
+
+    Anthropic and OpenAI batch whenever ``[batch]`` is on; Google only with a
+    Vertex AI bucket. Other providers always go online.
+    """
+    from mkcv.core.models.provider_kind import ProviderKind
+
+    if not matrix.batch.enabled:
+        return {}
+    names = {model.provider for model in matrix.models} | {
+        judge.provider for judge in matrix.panel
+    }
+    batching: list[str] = []
+    for name in sorted(names):
+        kind = registry.get(name).kind
+        if kind in (ProviderKind.ANTHROPIC, ProviderKind.OPENAI) or (
+            kind is ProviderKind.GOOGLE and matrix.batch.google_gcs_bucket
+        ):
+            batching.append(name)
+    return {name: matrix.pricing.batch_discount.get(name, 0.0) for name in batching}
+
+
 def _bootstrap_estimate_line(
-    reference: JudgeConfig, cases: Sequence[EvalCase], registry: "ProviderRegistry"
+    reference: JudgeConfig,
+    cases: Sequence[EvalCase],
+    registry: "ProviderRegistry",
+    discounts: Mapping[str, float] | None = None,
 ) -> str:
     from evals.harness.reference_bootstrapper import (
         needs_cover_letter,
@@ -505,8 +629,13 @@ def _bootstrap_estimate_line(
     ]
     known = [cost for cost in costs if cost is not None]
     total = sum(known) if len(known) == len(costs) else None
+    off = (discounts or {}).get(reference.provider, 0.0)
+    batched = total * (1.0 - off) if total is not None and off else None
+    priced = f"{_usd(total)} online" + (
+        f", {_usd(batched)} batched" if batched is not None else ""
+    )
     return (
-        f"Reference model {model.label}: {_usd(total)} for {len(pipeline)} "
+        f"Reference model {model.label}: {priced} for {len(pipeline)} "
         f"case(s) of stages 1-4 and {len(letters)} cover letter(s)"
     )
 

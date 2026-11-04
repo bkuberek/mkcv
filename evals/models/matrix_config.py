@@ -2,8 +2,10 @@
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from evals.models.batch_settings import BatchSettings
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
+from evals.models.pricing_settings import PricingSettings
 from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.run_settings import RunSettings
 from evals.models.tournament_settings import TournamentSettings
@@ -32,6 +34,8 @@ class MatrixConfig(BaseModel):
     tournament: TournamentSettings = Field(
         default_factory=lambda: TournamentSettings(enabled=False)
     )
+    batch: BatchSettings = Field(default_factory=BatchSettings)
+    pricing: PricingSettings = Field(default_factory=PricingSettings)
 
     @property
     def panel(self) -> list[JudgeConfig]:

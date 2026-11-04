@@ -10,13 +10,17 @@ from pathlib import Path
 from typing import Any, Literal, TextIO
 
 import mkcv
+from evals.batch.batch_store import BatchStore
+from evals.batch.call_scope import call_scope
+from evals.batch.eval_adapters import EvalAdapters
+from evals.batch.usage_ledger import UsageLedger
 from evals.graders.grader import Grader
 from evals.graders.grading_context import GradingContext
 from evals.graders.judge_panel import PanelVerdict, combine_panel
 from evals.graders.judged_grader import JudgedGrader
 from evals.graders.stage_graders import STAGE_GRADERS
-from evals.harness.judge_factory import create_judge, split_judges
-from evals.harness.run_files import MANIFEST_FILE, RESULTS_FILE
+from evals.harness.judge_factory import split_judges
+from evals.harness.run_files import BATCH_DIR, MANIFEST_FILE, RESULTS_FILE, USAGE_FILE
 from evals.harness.stage_run import StageRun
 from evals.harness.stage_runner import StageRunner, work_dir_for
 from evals.harness.tournament import (
@@ -25,6 +29,7 @@ from evals.harness.tournament import (
     screening_cases,
     screening_judge,
 )
+from evals.models.call_usage import CallUsage
 from evals.models.eval_case import REFERENCE_FILES, UPSTREAM_STAGES, EvalCase
 from evals.models.eval_record import EvalRecord
 from evals.models.grade import Grade
@@ -104,6 +109,7 @@ class _RunTools:
     runner: StageRunner
     gate: asyncio.Semaphore
     sink: TextIO
+    ledger: UsageLedger
 
 
 def job_key(
@@ -184,21 +190,23 @@ class EvalRunner:
         """
         registry = create_provider_registry(self._config)
         runnable, skipped_judges = split_judges(registry, matrix.panel)
-        judges = tuple(_create_judge(registry, judge) for judge in runnable)
-
         self._out_dir.mkdir(parents=True, exist_ok=True)
         kept = self._kept_records()
+        adapters = self._adapters(registry, matrix)
+        judges = tuple(_create_judge(adapters, judge) for judge in runnable)
         manifest = self._manifest(
             matrix, cases, skipped_models, registry.catalog, skipped_judges
         )
         self._write_manifest(manifest)
 
-        runner = StageRunner(self._config, preset=matrix.run.preset)
-        gate = asyncio.Semaphore(matrix.run.concurrency)
+        runner = StageRunner(self._config, preset=matrix.run.preset, adapters=adapters)
+        gate = asyncio.Semaphore(
+            matrix.batch.concurrency if matrix.batch.enabled else matrix.run.concurrency
+        )
         records = list(kept)
         mode: Literal["a", "w"] = "a" if self._resume else "w"
         with (self._out_dir / RESULTS_FILE).open(mode, encoding="utf-8") as sink:
-            tools = _RunTools(runner, gate, sink)
+            tools = _RunTools(runner, gate, sink, adapters.ledger)
             if not matrix.tournament.enabled:
                 plan = _single_round(matrix, cases, judges)
                 records += await self._run_jobs(tools, plan, kept)
@@ -214,6 +222,27 @@ class EvalRunner:
         self._write_manifest(finished)
         write_report_files(self._out_dir)
         return records
+
+    def _adapters(
+        self, registry: ProviderRegistry, matrix: MatrixConfig
+    ) -> EvalAdapters:
+        """The run's transport-backed adapters, batch queues, and usage ledger.
+
+        A fresh run starts a new ``usage.jsonl``; a resumed one appends to it
+        and finds its submitted batches in ``batches/``.
+        """
+        usage = self._out_dir / USAGE_FILE
+        if not self._resume:
+            usage.unlink(missing_ok=True)
+        return EvalAdapters(
+            registry,
+            settings=matrix.batch,
+            store=BatchStore(self._out_dir / BATCH_DIR)
+            if matrix.batch.enabled
+            else None,
+            ledger=UsageLedger(usage),
+            run_id=self._run_id,
+        )
 
     def _kept_records(self) -> list[EvalRecord]:
         if not self._resume or not (self._out_dir / RESULTS_FILE).is_file():
@@ -241,27 +270,19 @@ class EvalRunner:
                 job.model,
                 job.repeat,
             )
-            result = await tools.runner.run(
-                job.case, job.stage, job.model, job.repeat, work_dir
-            )
-            grades = await self._grade(
-                job.case, job.stage, job.model, result, job.judges
-            )
-            record = self._record(job, result, grades)
+            with call_scope(job.key):
+                result = await tools.runner.run(
+                    job.case, job.stage, job.model, job.repeat, work_dir
+                )
+            grades = await self._grade(job, result)
+            record = self._record(job, result, grades, tools.ledger.for_scope(job.key))
             tools.sink.write(record.model_dump_json() + "\n")
             tools.sink.flush()
         if self._on_record is not None:
             self._on_record(record)
         return record
 
-    async def _grade(
-        self,
-        case: EvalCase,
-        stage: StageKey,
-        model: MatrixModel,
-        result: StageRun,
-        judges: Sequence[_Judge],
-    ) -> list[Grade]:
+    async def _grade(self, job: _Job, result: StageRun) -> list[Grade]:
         """Run the stage's graders on an ``ok`` output; other results have none.
 
         A judged grader is asked once per judge, concurrently, and the
@@ -272,6 +293,7 @@ class EvalRunner:
         """
         if result.status != "ok":
             return []
+        case, stage, model = job.case, job.stage, job.model
         context = GradingContext(
             case=case,
             stage=stage,
@@ -284,14 +306,20 @@ class EvalRunner:
         grades: list[Grade] = []
         for grader in self._graders.get(stage, ()):
             if isinstance(grader, JudgedGrader):
-                grade = await _panel_grade(grader, context, judges)
+                grade = await _panel_grade(grader, context, job.judges, job.key)
             else:
                 grade = await _safe_grade(grader, context)
             if grade is not None:
                 grades.append(grade)
         return grades
 
-    def _record(self, job: _Job, result: StageRun, grades: list[Grade]) -> EvalRecord:
+    def _record(
+        self,
+        job: _Job,
+        result: StageRun,
+        grades: list[Grade],
+        usage: Sequence[CallUsage],
+    ) -> EvalRecord:
         metadata = result.metadata
         judges = _judges_of(grades)
         return EvalRecord(
@@ -307,6 +335,8 @@ class EvalRunner:
             input_tokens=metadata.input_tokens if metadata else 0,
             output_tokens=metadata.output_tokens if metadata else 0,
             cost_usd=metadata.cost_usd if metadata else 0.0,
+            cache_read_tokens=sum(call.cache_read_tokens for call in usage),
+            batched=any(call.batched for call in usage),
             latency_s=metadata.duration_seconds if metadata else 0.0,
             grades=grades,
             judge=", ".join(judges) or None,
@@ -410,9 +440,19 @@ def _judges_for(
     return judges if stage in matrix.run.judged_stages else ()
 
 
-def _create_judge(registry: ProviderRegistry, config: JudgeConfig) -> _Judge:
-    adapter, model = create_judge(registry, config)
-    return _Judge(adapter=adapter, provider=config.provider, model=model)
+def _create_judge(adapters: EvalAdapters, config: JudgeConfig) -> _Judge:
+    return _Judge(
+        adapter=adapters.create(config.provider),
+        provider=config.provider,
+        model=config.model,
+    )
+
+
+async def _scoped_grade(
+    scope: str, grader: Grader, context: GradingContext
+) -> Grade | None:
+    with call_scope(scope):
+        return await _safe_grade(grader, context)
 
 
 async def _safe_grade(grader: Grader, context: GradingContext) -> Grade | None:
@@ -423,9 +463,16 @@ async def _safe_grade(grader: Grader, context: GradingContext) -> Grade | None:
 
 
 async def _panel_grade(
-    grader: JudgedGrader, context: GradingContext, judges: Sequence[_Judge]
+    grader: JudgedGrader,
+    context: GradingContext,
+    judges: Sequence[_Judge],
+    job_key: str,
 ) -> Grade | None:
-    """Ask every judge, then combine their grades into the panel's grade."""
+    """Ask every judge, then combine their grades into the panel's grade.
+
+    Each judge's calls run under ``<job>/judge/<grader>/<judge>`` so that a
+    resumed run finds them in its batches.
+    """
     contexts = [
         context.model_copy(
             update={
@@ -436,7 +483,12 @@ async def _panel_grade(
         )
         for judge in judges
     ]
-    grades = await asyncio.gather(*(_safe_grade(grader, c) for c in contexts))
+    grades = await asyncio.gather(
+        *(
+            _scoped_grade(f"{job_key}/judge/{grader.name}/{judge.label}", grader, c)
+            for judge, c in zip(judges, contexts, strict=True)
+        )
+    )
     verdicts = [
         PanelVerdict(judge=judge.label, provider=judge.provider, grade=grade)
         for judge, grade in zip(judges, grades, strict=True)

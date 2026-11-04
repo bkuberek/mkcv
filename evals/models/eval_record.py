@@ -25,7 +25,13 @@ class EvalRecord(BaseModel):
     error: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
-    cost_usd: float = 0.0
+    cost_usd: float = Field(
+        default=0.0, description="The stage call at online catalog prices"
+    )
+    cache_read_tokens: int = Field(
+        default=0, description="Prompt tokens of the stage call read from a cache"
+    )
+    batched: bool = Field(default=False, description="The stage call went in a batch")
     latency_s: float = 0.0
     grades: list[Grade] = Field(default_factory=list)
     judge: str | None = Field(

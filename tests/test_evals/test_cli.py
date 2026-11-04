@@ -425,3 +425,104 @@ class TestUsage:
 def test_the_shipped_matrix_file_is_valid_toml() -> None:
     path = REPO_ROOT / "evals" / "config" / "matrix.toml"
     assert tomllib.loads(path.read_text(encoding="utf-8"))["models"]
+
+
+class TestEstimateBatching:
+    BATCHED = HAIKU_ANALYZE_MATRIX + "\n[batch]\nenabled = true\n"
+
+    def _out(
+        self,
+        tmp_path: Path,
+        fixtures: Path,
+        settings: Dynaconf,
+        capsys: pytest.CaptureFixture[str],
+        *extra: str,
+    ) -> str:
+        matrix = tmp_path / "batched.toml"
+        matrix.write_text(self.BATCHED, encoding="utf-8")
+        assert (
+            main(
+                [
+                    "estimate",
+                    "--matrix",
+                    str(matrix),
+                    "--fixtures",
+                    str(fixtures),
+                    *extra,
+                ],
+                config=settings,
+            )
+            == 0
+        )
+        return capsys.readouterr().out
+
+    def test_batching_halves_the_cost_and_shows_the_online_total(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        assert "Total: $0.0007" in out
+        assert "Online, without batching: $0.0014" in out
+
+    def test_no_batch_prices_online(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys, "--no-batch")
+        assert "Total: $0.0014" in out
+        assert "Online, without batching" not in out
+
+    def test_the_bootstrap_estimate_is_online_and_batched(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys, "--bootstrap")
+        assert "Reference model anthropic/claude-opus-5-5" in out
+        assert "online" in out and "batched" in out
+
+
+class TestCheckReference:
+    def test_a_faithful_reference_passes(
+        self,
+        tmp_fixtures: Path,
+        add_reference: Callable[..., None],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from evals.harness.case_loader import load_cases
+
+        add_reference(load_cases(tmp_fixtures)[0])
+        code = main(["check-reference", "--fixtures", str(tmp_fixtures)])
+        out = capsys.readouterr().out
+        assert "reference file(s) checked" in out
+        assert code in (0, 1)
+
+    def test_an_invented_claim_is_listed_and_fails(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        reference = tmp_fixtures / "reference" / "alpha-match"
+        reference.mkdir(parents=True)
+        (reference / "stage3_content.json").write_text(
+            '{"roles": [{"company": "Initech", "position": "Engineer", '
+            '"bullets": [{"rewritten": "Saved $2.4M a year"}]}]}'
+        )
+        code = main(["check-reference", "--fixtures", str(tmp_fixtures)])
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "alpha-match / stage3_content.json" in out
+        assert "number '$2.4M'" in out
+        assert "company 'Initech'" in out
+
+    def test_without_references_it_says_so(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["check-reference", "--fixtures", str(tmp_fixtures)]) == 0
+        assert "run bootstrap-reference first" in capsys.readouterr().out

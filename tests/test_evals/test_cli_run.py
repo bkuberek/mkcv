@@ -466,6 +466,8 @@ class TestBootstrapReference:
                 str(matrix_file),
                 "--fixtures",
                 str(tmp_fixtures),
+                "--state",
+                str(tmp_fixtures.parent / "bootstrap-state"),
                 *(["--yes"] if yes else []),
                 *extra,
             ]

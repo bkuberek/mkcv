@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from evals.batch.usage_ledger import read_usage
 from evals.graders.stage_graders import PRIMARY_METRIC
 from evals.harness.run_files import (
     MANIFEST_FILE,
@@ -12,6 +13,7 @@ from evals.harness.run_files import (
     REPORT_FILE,
     RESULTS_FILE,
     SUMMARY_FILE,
+    USAGE_FILE,
 )
 from evals.harness.tournament import decide_survivors
 from evals.models.eval_record import EvalRecord
@@ -102,6 +104,7 @@ def write_report_files(out_dir: Path) -> None:
             recommendations,
             screening=decisions,
             screening_only=screening_only,
+            usage=read_usage(out_dir / USAGE_FILE),
         ),
         encoding="utf-8",
     )
@@ -121,6 +124,7 @@ def publish_run(out_dir: Path, published_root: Path) -> Path:
         ValueError: If the run ID is not a plain folder name.
     """
     missing = next((n for n in PUBLISHED_FILES if not (out_dir / n).is_file()), None)
+    optional = [USAGE_FILE] if (out_dir / USAGE_FILE).is_file() else []
     if missing is not None:
         raise FileNotFoundError(
             f"No {missing} in {out_dir}; run the report command first"
@@ -130,7 +134,7 @@ def publish_run(out_dir: Path, published_root: Path) -> Path:
         raise ValueError(f"Cannot publish a run with the ID '{run_id}'")
     destination = published_root / run_id
     destination.mkdir(parents=True, exist_ok=True)
-    for name in PUBLISHED_FILES:
+    for name in (*PUBLISHED_FILES, *optional):
         shutil.copyfile(out_dir / name, destination / name)
     return destination
 
