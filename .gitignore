@@ -45,3 +45,7 @@ output/
 .claude/
 .atl/
 openspec/
+
+# Eval harness results (published runs are committed)
+evals/results/*
+!evals/results/published/
