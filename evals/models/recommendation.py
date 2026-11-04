@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field
 
+from evals.models.runner_up import RunnerUp
 from mkcv.core.models.stage_key import StageKey
 
 OVERALL = "overall"
@@ -23,6 +24,9 @@ class Recommendation(BaseModel):
     score: float | None = Field(
         default=None, description="The winner's primary quality score"
     )
+    std: float | None = Field(
+        default=None, description="The winner's standard deviation across runs"
+    )
     decided_by_cost: bool = Field(
         default=False,
         description="Other models scored within the tie epsilon; cost chose",
@@ -30,6 +34,13 @@ class Recommendation(BaseModel):
     tied_with: list[str] = Field(
         default_factory=list,
         description="'provider/model' of the models the winner tied with",
+    )
+    too_close_to_call: bool = Field(
+        default=False,
+        description="The winner's lead over a runner-up is smaller than the noise",
+    )
+    runners_up: list[RunnerUp] = Field(
+        default_factory=list, description="Models within the noise of the winner"
     )
     reason: str
 

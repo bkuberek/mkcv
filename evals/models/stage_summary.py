@@ -36,6 +36,15 @@ class StageSummary(BaseModel):
             "for a judged metric, unless only the model's own judge scored it"
         ),
     )
+    primary_std: float | None = Field(
+        default=None,
+        description="Sample standard deviation of the primary score across runs",
+    )
+    primary_n: int = Field(default=0, description="Runs with a primary score")
+    case_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description="Mean primary score of each case, over its repeats",
+    )
     primary_by_judge: dict[str, float] = Field(
         default_factory=dict,
         description="Mean primary score each judge gave, by 'provider/model'",

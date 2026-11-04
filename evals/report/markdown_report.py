@@ -27,7 +27,7 @@ STAGE_COLUMNS = (
     "Fabricated (det)",
     "Fabricated (judge)",
     "Faithfulness (judge)",
-    "Quality",
+    "Quality (mean ± sd)",
     "All judges",
     "Judge spread",
     "Cost/run",
@@ -234,7 +234,19 @@ def _winner_lines(recs: Sequence[Recommendation]) -> list[str]:
 def _best_overall_line(rec: Recommendation) -> str:
     if rec.label is None:
         return f"Best overall: none ({rec.reason})"
-    return f"Best overall: **{rec.label}** ({_score(rec.score)}). {rec.reason}."
+    line = f"Best overall: **{rec.label}** ({_quality(rec.score, rec.std)})."
+    if rec.decided_by_cost:
+        line += f" Cost decided a tie with {', '.join(rec.tied_with)}."
+    if rec.too_close_to_call:
+        runners_up = "; ".join(
+            f"{r.label} ({r.score:.2f}; lead {r.margin:.2f}, noise {_score(r.noise)})"
+            for r in rec.runners_up
+        )
+        line += (
+            " **Too close to call.** Its lead is smaller than the noise over: "
+            f"{runners_up}."
+        )
+    return line
 
 
 def _stage_row(s: StageSummary) -> tuple[str, ...]:
@@ -247,7 +259,7 @@ def _stage_row(s: StageSummary) -> tuple[str, ...]:
         _percent(s.fabrication_rate.get("faithfulness_extraction")),
         _percent(s.fabrication_rate.get("faithfulness_judge")),
         _score(s.mean.get("faithfulness_judge")),
-        _score(s.primary_score),
+        _quality(s.primary_score, s.primary_std),
         _score(s.mean.get(PRIMARY_METRIC.get(s.stage, ""))) if _is_judged(s) else "-",
         _score(s.judge_spread),
         _usd(s.cost_mean_usd),
@@ -307,7 +319,11 @@ def _recommendations_section(
         "",
         "Each stage recommends the eligible model with the highest quality score, "
         "across all providers and within each one. Cost only breaks a tie: models "
-        f"within {epsilon} of the best score count as tied, and the cheapest wins.",
+        f"within {epsilon} of the best score count as tied, and the cheapest wins. "
+        "A win is *too close to call* when its lead over another model is smaller "
+        "than the noise: the standard error of the per-case differences between "
+        "the two. Those runners-up are listed; re-run with more repeats or cases "
+        "to separate them.",
         "",
         *_table(columns, rows),
     ]
@@ -323,6 +339,9 @@ def _recommendation_notes(rec: Recommendation) -> list[str]:
     notes: list[str] = []
     if rec.decided_by_cost:
         notes.append(f"cost tie with {', '.join(rec.tied_with)}")
+    if rec.too_close_to_call:
+        labels = ", ".join(r.label for r in rec.runners_up)
+        notes.append(f"too close to call: {labels}")
     return notes
 
 
@@ -422,6 +441,12 @@ def _timestamp(moment: datetime | None) -> str:
 
 def _score(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f}"
+
+
+def _quality(value: float | None, std: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.2f}" if std is None else f"{value:.2f} ± {std:.2f}"
 
 
 def _percent(value: float | None) -> str:

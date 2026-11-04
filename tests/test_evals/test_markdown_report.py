@@ -5,6 +5,7 @@ import re
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.recommendation_settings import RecommendationSettings
+from evals.models.runner_up import RunnerUp
 from evals.report.markdown_report import render_markdown
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.models.stage_key import StageKey
@@ -17,7 +18,8 @@ from tests.test_evals.report_support import (
 
 TABLE_HEADER = (
     "| Provider | Model | n | OK | Schema | Fabricated (det) | Fabricated (judge) | "
-    "Faithfulness (judge) | Quality | All judges | Judge spread | Cost/run | "
+    "Faithfulness (judge) | Quality (mean ± sd) | All judges | Judge spread | "
+    "Cost/run | "
     "p50 latency | Eligible | Notes |"
 )
 PANEL = [
@@ -277,6 +279,13 @@ class TestStageTables:
             "| $0.0512 | 3.5s | yes |" in section
         )
 
+    def test_the_quality_shows_its_standard_deviation(self) -> None:
+        row_summary = summary(model="gpt-x", primary_score=0.85).model_copy(
+            update={"primary_std": 0.04, "primary_n": 12}
+        )
+        section = _section(_render(summaries=[row_summary]), "Stage: tailor")
+        assert "| 0.85 ± 0.04 |" in section
+
     def test_a_judged_row_shows_the_all_judge_mean_and_the_spread(self) -> None:
         row_summary = summary(
             model="gpt-x",
@@ -353,6 +362,17 @@ class TestStageWinners:
         assert "| openai | gpt-6.1-sol | 0.90 | because |" in stage
         assert "| google | argon | 0.80 | because |" in stage
 
+    def test_a_win_too_close_to_call_lists_the_runners_up(self) -> None:
+        rec = recommendation(
+            too_close_to_call=True,
+            runners_up=[
+                RunnerUp(label="google/argon", score=0.88, margin=0.02, noise=0.05)
+            ],
+        )
+        stage = self._stage(rec)
+        assert "**Too close to call.**" in stage
+        assert "google/argon (0.88; lead 0.02, noise 0.05)" in stage
+
     def test_a_stage_without_a_winner_says_why(self) -> None:
         stage = self._stage(recommendation(model=None, reason="no eligible model"))
         assert "Best overall: none (no eligible model)" in stage
@@ -388,6 +408,21 @@ class TestRecommendations:
         recs = [recommendation(model=None, reason="no eligible model")]
         section = _section(_render(recommendations=recs), "Recommendations")
         assert "| tailor | - | - | no eligible model |" in section
+
+    def test_a_win_too_close_to_call_is_noted(self) -> None:
+        recs = [
+            recommendation(
+                too_close_to_call=True,
+                runners_up=[
+                    RunnerUp(label="google/argon", score=0.88, margin=0.02, noise=0.05)
+                ],
+            )
+        ]
+        section = _section(_render(recommendations=recs), "Recommendations")
+        assert "too close to call: google/argon" in section
+
+    def test_it_explains_too_close_to_call(self) -> None:
+        assert "noise" in _section(_render(), "Recommendations")
 
     def test_a_tie_decided_by_cost_is_noted(self) -> None:
         recs = [recommendation(decided_by_cost=True, tied_with=["openai/gpt-6-astra"])]

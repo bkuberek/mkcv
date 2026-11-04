@@ -428,3 +428,50 @@ class TestJudgePanel:
             )
         ]
         assert "faithfulness_judge below 0.9" in _one(records).gate_failures
+
+
+class TestSpreadAcrossRuns:
+    """Repeats and cases give each model a mean, a deviation, and case means."""
+
+    def _runs(self, *scored: tuple[str, int, float]) -> list[EvalRecord]:
+        return [
+            record(
+                case=case,
+                repeat=repeat,
+                grades=[grade("schema", 1.0), grade("tailoring_judge", score)],
+            )
+            for case, repeat, score in scored
+        ]
+
+    def test_the_standard_deviation_is_over_every_scored_run(self) -> None:
+        summary = _one(self._runs(("a", 0, 0.6), ("a", 1, 0.8), ("b", 0, 1.0)))
+        assert summary.primary_std == pytest.approx(0.2)
+        assert summary.primary_n == 3
+
+    def test_one_run_has_no_standard_deviation(self) -> None:
+        summary = _one(self._runs(("a", 0, 0.6)))
+        assert (summary.primary_std, summary.primary_n) == (None, 1)
+
+    def test_case_scores_average_the_repeats_of_each_case(self) -> None:
+        summary = _one(self._runs(("a", 0, 0.6), ("a", 1, 0.8), ("b", 0, 1.0)))
+        assert summary.case_scores == {
+            "a": pytest.approx(0.7),
+            "b": pytest.approx(1.0),
+        }
+
+    def test_judged_runs_use_the_independent_score(self) -> None:
+        records = [
+            record(
+                provider="openai",
+                case="a",
+                repeat=repeat,
+                grades=[
+                    grade("schema", 1.0),
+                    panel_grade("tailoring_judge", {"openai": 1.0, "google": score}),
+                ],
+            )
+            for repeat, score in enumerate((0.6, 0.8))
+        ]
+        summary = _one(records)
+        assert summary.case_scores == {"a": pytest.approx(0.7)}
+        assert summary.primary_std == pytest.approx(0.1414, abs=1e-4)

@@ -1,5 +1,7 @@
 """Tests for recommending the best model per stage, overall and per provider."""
 
+import statistics
+
 import pytest
 
 from evals.models.recommendation import OVERALL, Recommendation
@@ -234,3 +236,82 @@ def test_the_reason_names_each_stages_primary_metric(
 ) -> None:
     rec = _overall(recommend([summary(stage=stage, model="a")]), stage)
     assert metric in rec.reason
+
+
+def _noisy(model: str, *case_scores: float, cost: float = 0.1) -> StageSummary:
+    """A summary whose cases score ``case_scores`` (one run each)."""
+    scores = {f"case-{i}": score for i, score in enumerate(case_scores)}
+    mean = sum(case_scores) / len(case_scores)
+    return summary(model=model, primary_score=mean, cost=cost).model_copy(
+        update={
+            "case_scores": scores,
+            "primary_n": len(case_scores),
+            "primary_std": (
+                statistics.stdev(case_scores) if len(case_scores) > 1 else None
+            ),
+        }
+    )
+
+
+class TestTooCloseToCall:
+    def _close(self) -> list[StageSummary]:
+        return [_noisy("a", 0.9, 0.7, 0.95), _noisy("b", 0.7, 0.9, 0.9)]
+
+    def test_a_lead_smaller_than_its_noise_is_too_close_to_call(self) -> None:
+        rec = _overall(recommend(self._close()))
+        assert rec.model == "a"
+        assert rec.too_close_to_call is True
+
+    def test_the_runner_up_is_listed_with_its_lead_and_noise(self) -> None:
+        [runner_up] = _overall(recommend(self._close())).runners_up
+        assert runner_up.label == "openai/b"
+        assert runner_up.score == pytest.approx(0.8333, abs=1e-4)
+        assert runner_up.margin == pytest.approx(0.0167, abs=1e-4)
+        assert runner_up.noise is not None
+        assert runner_up.noise > runner_up.margin
+
+    def test_a_steady_lead_on_every_case_is_a_clear_call(self) -> None:
+        rec = _overall(
+            recommend([_noisy("a", 0.9, 0.8, 0.7), _noisy("b", 0.8, 0.7, 0.6)])
+        )
+        assert (rec.too_close_to_call, rec.runners_up) == (False, [])
+
+    def test_every_model_within_the_noise_is_a_runner_up(self) -> None:
+        rec = _overall(
+            recommend(
+                [
+                    *self._close(),
+                    _noisy("c", 0.75, 0.95, 0.8),
+                    _noisy("d", 0.1, 0.2, 0.1),
+                ]
+            )
+        )
+        assert [r.label for r in rec.runners_up] == ["openai/b", "openai/c"]
+
+    def test_one_shared_case_falls_back_to_the_run_level_noise(self) -> None:
+        a = summary(model="a", primary_score=0.80).model_copy(
+            update={"case_scores": {"x": 0.80}, "primary_n": 2, "primary_std": 0.2}
+        )
+        b = summary(model="b", primary_score=0.75).model_copy(
+            update={"case_scores": {"x": 0.75}, "primary_n": 2, "primary_std": 0.2}
+        )
+        rec = _overall(recommend([a, b]))
+        assert rec.too_close_to_call is True
+        assert rec.runners_up[0].noise == pytest.approx(0.2)
+
+    def test_without_enough_runs_the_noise_is_unknown_and_not_flagged(self) -> None:
+        a = summary(model="a", primary_score=0.80).model_copy(
+            update={"case_scores": {"x": 0.80}, "primary_n": 1}
+        )
+        b = summary(model="b", primary_score=0.79).model_copy(
+            update={"case_scores": {"x": 0.79}, "primary_n": 1}
+        )
+        rec = _overall(recommend([a, b], tie_epsilon=0.0))
+        assert rec.too_close_to_call is False
+
+    def test_the_reason_says_it_is_too_close_to_call(self) -> None:
+        assert "too close to call" in _overall(recommend(self._close())).reason
+
+    def test_the_winner_carries_its_standard_deviation(self) -> None:
+        rec = _overall(recommend([_noisy("a", 0.9, 0.7)]))
+        assert rec.std == pytest.approx(0.1414, abs=1e-4)

@@ -96,6 +96,7 @@ def _summarize(
     latencies = sorted(record.latency_s for record in ok)
     metric = PRIMARY_METRIC.get(stage, "")
     spreads = _spreads(ok)
+    per_run = _primary_by_run(ok, metric)
     return StageSummary(
         stage=stage,
         provider=provider,
@@ -105,6 +106,9 @@ def _summarize(
         mean=mean,
         independent_mean=independent,
         primary_score=ranking.get(metric),
+        primary_std=statistics.stdev(per_run.values()) if len(per_run) > 1 else None,
+        primary_n=len(per_run),
+        case_scores=_case_means(per_run),
         primary_by_judge=_by_judge(ok, metric),
         judge_spread=statistics.fmean(spreads) if spreads else None,
         judge_agreement=(
@@ -164,6 +168,35 @@ def _independent_means(
             if name not in independent
         },
     )
+
+
+def _primary_by_run(
+    ok_records: list[EvalRecord], metric: str
+) -> dict[tuple[str, int], float]:
+    """Each run's primary score, by (case, repeat), as the quality score counts it.
+
+    A judged metric uses the independent score of every run that has one; only
+    when no run has one does it fall back to the runs' own-provider scores.
+    """
+    independent: dict[tuple[str, int], float] = {}
+    plain: dict[tuple[str, int], float] = {}
+    for record in ok_records:
+        grade = next((g for g in record.grades if g.name == metric), None)
+        if grade is None or grade.score is None:
+            continue
+        key = (record.case_id, record.repeat)
+        plain[key] = grade.score
+        outside = _independent_score(grade) if _is_judged(grade) else grade.score
+        if outside is not None:
+            independent[key] = outside
+    return independent or plain
+
+
+def _case_means(per_run: dict[tuple[str, int], float]) -> dict[str, float]:
+    by_case: dict[str, list[float]] = {}
+    for (case_id, _), score in per_run.items():
+        by_case.setdefault(case_id, []).append(score)
+    return {case_id: statistics.fmean(scores) for case_id, scores in by_case.items()}
 
 
 def _is_judged(grade: Grade) -> bool:
