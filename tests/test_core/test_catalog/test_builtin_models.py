@@ -11,6 +11,7 @@ from mkcv.core.models.capability_overlay import CapabilityOverlay
 from mkcv.core.models.model_capability import ModelCapability
 from mkcv.core.models.model_tier import ModelTier
 from mkcv.core.models.structured_output_mode import StructuredOutputMode
+from mkcv.core.models.token_param import TokenParam
 
 _OVERLAY_FIELDS = tuple(CapabilityOverlay.model_fields)
 _BY_KEY = {entry.key: entry for entry in BUILTIN_MODEL_CAPABILITIES}
@@ -123,6 +124,21 @@ def _reasoning(notes: str | None = None) -> dict[str, Any]:
 
 _SAMPLING = {"accepts_sampling_params": True, "min_output_tokens": 0}
 
+_JSON_OBJECT = StructuredOutputMode.JSON_OBJECT
+
+
+def _legacy_chat(tier: ModelTier, notes: str) -> dict[str, Any]:
+    return {
+        "tier": tier,
+        "structured_output": _JSON_OBJECT,
+        "allow_structured_fallback": True,
+        "accepts_sampling_params": True,
+        "token_param": TokenParam.MAX_TOKENS,
+        "min_output_tokens": 0,
+        "notes": notes,
+    }
+
+
 OPENAI_ROWS: list[tuple[str, str, str, dict[str, Any]]] = [
     ("openai", "gpt-6", "prefix", _reasoning("GPT-6 family: reasoning models.")),
     ("openai", "gpt-5", "prefix", _reasoning("GPT-5 family: reasoning models.")),
@@ -131,6 +147,43 @@ OPENAI_ROWS: list[tuple[str, str, str, dict[str, Any]]] = [
     ("openai", "o4", "prefix", _reasoning()),
     ("openai", "gpt-4.1", "prefix", dict(_SAMPLING)),
     ("openai", "gpt-4o", "prefix", dict(_SAMPLING)),
+    (
+        "openai",
+        "gpt-4-",
+        "prefix",
+        _legacy_chat(
+            _EFFICIENT,
+            "Legacy GPT-4 chat model: JSON mode only, no strict schema output.",
+        ),
+    ),
+    (
+        "openai",
+        "gpt-3.5-",
+        "prefix",
+        _legacy_chat(
+            _MINIMAL,
+            "Legacy GPT-3.5 chat model: JSON mode only, expect weak tailoring.",
+        ),
+    ),
+    (
+        "openai",
+        "chatgpt-",
+        "prefix",
+        _legacy_chat(
+            _EFFICIENT,
+            "ChatGPT alias model: JSON mode only, no strict schema output.",
+        ),
+    ),
+    (
+        "openai",
+        "gpt-4o-2024-05-13",
+        "exact",
+        {
+            "structured_output": _JSON_OBJECT,
+            "allow_structured_fallback": True,
+            "notes": "Predates structured outputs: JSON mode only.",
+        },
+    ),
     (
         "openai",
         "gpt-6-astra",
@@ -363,3 +416,47 @@ class TestImportOrder:
             check=False,
         )
         assert result.returncode == 0, result.stderr
+
+
+class TestLegacyOpenAIModels:
+    """Legacy chat models resolve to JSON mode, sampling, and no output floor."""
+
+    @pytest.mark.parametrize(
+        "model",
+        ["gpt-4-turbo", "gpt-4-0613", "gpt-3.5-turbo", "chatgpt-4o-latest"],
+    )
+    def test_family_uses_json_object_with_sampling(self, model: str) -> None:
+        from mkcv.core.models.model_catalog import ModelCatalog
+
+        found = ModelCatalog.builtin().lookup("openai", model)
+        assert found is not None
+        assert found.structured_output is _JSON_OBJECT
+        assert found.accepts_sampling_params is True
+        assert found.min_output_tokens == 0
+
+    def test_gpt_4o_snapshot_before_structured_outputs_uses_json_object(self) -> None:
+        from mkcv.core.models.model_catalog import ModelCatalog
+
+        found = ModelCatalog.builtin().lookup("openai", "gpt-4o-2024-05-13")
+        assert found is not None
+        assert found.structured_output is _JSON_OBJECT
+
+    def test_gpt_4o_snapshot_before_structured_outputs_is_left_unpriced(self) -> None:
+        from mkcv.core.models.model_catalog import ModelCatalog
+
+        catalog = ModelCatalog.builtin()
+        assert catalog.price_for("gpt-4o-2024-05-13", provider="openai") is None
+
+    def test_newer_gpt_4o_snapshots_keep_strict_schema_output(self) -> None:
+        from mkcv.core.models.model_catalog import ModelCatalog
+
+        found = ModelCatalog.builtin().lookup("openai", "gpt-4o-2024-08-06")
+        assert found is not None
+        assert found.structured_output is None
+
+    def test_gpt_4_1_is_not_taken_for_a_legacy_gpt_4(self) -> None:
+        from mkcv.core.models.model_catalog import ModelCatalog
+
+        found = ModelCatalog.builtin().lookup("openai", "gpt-4.1-mini")
+        assert found is not None
+        assert found.structured_output is None

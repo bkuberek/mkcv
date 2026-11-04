@@ -360,6 +360,65 @@ class TestNoStructuredDegradation:
         assert create.await_count == 1
 
 
+class TestUnknownModelsMayDegrade:
+    """A model the catalog does not know falls back from strict schema output."""
+
+    async def test_schema_rejection_degrades_to_json_object(self) -> None:
+        adapter, create = _adapter(
+            _bad_request("Invalid schema for response_format 'M'"),
+            _completion(),
+        )
+        result = await _structured(adapter, model="gpt-7-unlisted")
+        assert isinstance(result, M)
+        assert _kwargs(create, 1)["response_format"] == {"type": "json_object"}
+
+    async def test_degraded_mode_is_remembered_for_the_next_call(self) -> None:
+        adapter, create = _adapter(
+            _bad_request("Invalid schema for response_format 'M'"),
+            _completion(),
+            _completion(),
+        )
+        await _structured(adapter, model="gpt-7-unlisted")
+        await _structured(adapter, model="gpt-7-unlisted")
+        assert _kwargs(create, 2)["response_format"] == {"type": "json_object"}
+
+    async def test_known_modern_model_still_raises_on_schema_rejection(self) -> None:
+        adapter, create = _adapter(
+            _bad_request("Invalid schema for response_format 'M'")
+        )
+        with pytest.raises(ProviderError):
+            await _structured(adapter, model="gpt-6.1-sol")
+        assert create.await_count == 1
+
+
+class TestLegacyChatModels:
+    async def test_gpt_4_turbo_is_asked_for_json_object_first(self) -> None:
+        adapter, create = _adapter(_completion())
+        await _structured(adapter, model="gpt-4-turbo")
+        assert _kwargs(create, 0)["response_format"] == {"type": "json_object"}
+
+    async def test_gpt_4_turbo_receives_temperature(self) -> None:
+        adapter, create = _adapter(_completion())
+        await _structured(adapter, model="gpt-4-turbo", temperature=0.4)
+        assert _kwargs(create, 0)["temperature"] == 0.4
+
+    async def test_gpt_4_turbo_gets_no_output_floor(self) -> None:
+        adapter, create = _adapter(_completion())
+        await _structured(adapter, model="gpt-4-turbo", max_tokens=1000)
+        assert _kwargs(create, 0)["max_tokens"] == 1000
+
+    async def test_gpt_3_5_degrades_to_prompt_mode_when_json_mode_is_rejected(
+        self,
+    ) -> None:
+        adapter, create = _adapter(
+            _bad_request("response_format json_object is not supported"),
+            _completion(),
+        )
+        result = await _structured(adapter, model="gpt-3.5-turbo-0613")
+        assert isinstance(result, M)
+        assert "response_format" not in _kwargs(create, 1)
+
+
 class TestRequestAdaptation:
     """REQ-OAI-8."""
 

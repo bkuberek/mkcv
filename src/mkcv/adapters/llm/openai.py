@@ -3,6 +3,7 @@
 from mkcv.adapters.llm.model_resolver import ModelResolver, builtin_resolver
 from mkcv.adapters.llm.openai_compatible import OpenAICompatibleAdapter
 from mkcv.core.models.provider_kind import ProviderKind
+from mkcv.core.models.resolved_model import ResolvedModel
 
 
 class OpenAIAdapter(OpenAICompatibleAdapter):
@@ -13,7 +14,9 @@ class OpenAIAdapter(OpenAICompatibleAdapter):
     configuration, not code: the ``openai`` provider kind forbids structured
     output degradation (strict JSON schema or an error), sends
     ``max_completion_tokens``, and omits ``temperature`` for models that
-    reject it.
+    reject it. A model the catalog does not know may still degrade from the
+    strict schema to JSON mode, so an older model that rejects the schema
+    keeps working; a catalogued model never does.
 
     Implements: LLMPort
     """
@@ -32,3 +35,6 @@ class OpenAIAdapter(OpenAICompatibleAdapter):
             resolver=resolver or builtin_resolver(ProviderKind.OPENAI),
             provider_name=provider_name,
         )
+
+    def _may_degrade(self, resolved: ResolvedModel) -> bool:
+        return resolved.allow_structured_fallback or not resolved.known

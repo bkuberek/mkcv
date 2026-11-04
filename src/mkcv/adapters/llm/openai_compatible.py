@@ -179,9 +179,13 @@ class OpenAICompatibleAdapter:
         start = self._degraded_modes.get(model) or _as_chat_mode(
             resolved.structured_output
         )
-        if not resolved.allow_structured_fallback:
+        if not self._may_degrade(resolved):
             return [start]
         return list(_DEGRADATION_ORDER[_DEGRADATION_ORDER.index(start) :])
+
+    def _may_degrade(self, resolved: ResolvedModel) -> bool:
+        """Return True when a weaker structured-output mode may be tried."""
+        return resolved.allow_structured_fallback
 
     def _degrade(
         self, model: str, rejected: StructuredOutputMode, fallback: StructuredOutputMode

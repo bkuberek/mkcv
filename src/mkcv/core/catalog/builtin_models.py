@@ -14,6 +14,7 @@ from mkcv.core.models.capability_overlay import CapabilityOverlay
 from mkcv.core.models.model_capability import ModelCapability
 from mkcv.core.models.model_tier import ModelTier
 from mkcv.core.models.structured_output_mode import StructuredOutputMode
+from mkcv.core.models.token_param import TokenParam
 
 # Claude 5.x (and Opus 4.7/4.8) reject sampling parameters, always think
 # before answering, and support schema-constrained output.
@@ -43,6 +44,16 @@ _OPENAI_REASONING: dict[str, Any] = CapabilityOverlay(
 
 _OPENAI_SAMPLING: dict[str, Any] = CapabilityOverlay(
     accepts_sampling_params=True,
+    min_output_tokens=0,
+).model_dump(exclude_none=True)
+
+# Pre-GPT-4.1 chat models predate strict structured outputs: ask for JSON mode,
+# let the adapter degrade further, send temperature and the classic limit.
+_OPENAI_LEGACY_CHAT: dict[str, Any] = CapabilityOverlay(
+    structured_output=StructuredOutputMode.JSON_OBJECT,
+    allow_structured_fallback=True,
+    accepts_sampling_params=True,
+    token_param=TokenParam.MAX_TOKENS,
     min_output_tokens=0,
 ).model_dump(exclude_none=True)
 
@@ -269,6 +280,39 @@ BUILTIN_MODEL_CAPABILITIES: tuple[ModelCapability, ...] = (
     ),
     ModelCapability(
         provider="openai", match="gpt-4o", match_type="prefix", **_OPENAI_SAMPLING
+    ),
+    ModelCapability(
+        provider="openai",
+        match="gpt-4-",
+        match_type="prefix",
+        tier=ModelTier.EFFICIENT,
+        notes="Legacy GPT-4 chat model: JSON mode only, no strict schema output.",
+        **_OPENAI_LEGACY_CHAT,
+    ),
+    ModelCapability(
+        provider="openai",
+        match="gpt-3.5-",
+        match_type="prefix",
+        tier=ModelTier.MINIMAL,
+        notes="Legacy GPT-3.5 chat model: JSON mode only, expect weak tailoring.",
+        **_OPENAI_LEGACY_CHAT,
+    ),
+    ModelCapability(
+        provider="openai",
+        match="chatgpt-",
+        match_type="prefix",
+        tier=ModelTier.EFFICIENT,
+        notes="ChatGPT alias model: JSON mode only, no strict schema output.",
+        **_OPENAI_LEGACY_CHAT,
+    ),
+    # Longer than "gpt-4o", so it overlays that family: this snapshot predates
+    # structured outputs. Left unpriced: the pre-catalog table had no price.
+    ModelCapability(
+        provider="openai",
+        match="gpt-4o-2024-05-13",
+        structured_output=StructuredOutputMode.JSON_OBJECT,
+        allow_structured_fallback=True,
+        notes="Predates structured outputs: JSON mode only.",
     ),
     # ------------------------------------------------------------------
     # OpenAI: tiers, prices, and limits (exact)
