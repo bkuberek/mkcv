@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- version list -->
 
+## v1.5.0 (2026-11-04)
+
+### Features
+
+- Provider-agnostic models with capability catalog, mkcv models, and evals
+  ([#8](https://github.com/bkuberek/mkcv/pull/8),
+  [`3f7aac0`](https://github.com/bkuberek/mkcv/commit/3f7aac0f6b8a375b81bc930207db3aa52ee8d3aa))
+
+
 ## v1.4.0 (2026-11-04)
 
 ### Documentation
