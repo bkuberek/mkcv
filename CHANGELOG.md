@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- version list -->
 
+## v1.4.0 (2026-11-04)
+
+### Documentation
+
+- **brand**: Add logo, README banner, and social preview art
+  ([#7](https://github.com/bkuberek/mkcv/pull/7),
+  [`60e8fe8`](https://github.com/bkuberek/mkcv/commit/60e8fe897b13236aa0efe80edbdec6f659974c35))
+
+### Features
+
+- Default to Claude 5.5 models ([#6](https://github.com/bkuberek/mkcv/pull/6),
+  [`ecb4e8e`](https://github.com/bkuberek/mkcv/commit/ecb4e8e741b44ad39a439fc14e91b3c05553d0c0))
+
+
 ## v1.3.0 (2026-11-04)
 
 ### Features
