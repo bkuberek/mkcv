@@ -34,7 +34,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 
 ### P1: Registry, capability data, OpenAI-compatible, OpenAI structured outputs
 
-- [ ] T01: Model capability catalog and catalog-derived pricing (route: delegated; 11 new core modules + pricing)
+- [x] T01: Model capability catalog and catalog-derived pricing (route: delegated; 11 new core modules + pricing) - `dc5a0ad`
 - [ ] T02: OpenAI-compatible adapter with structured-output fallback chain (route: delegated; 6 new adapter modules)
 - [ ] T03: Native OpenAI adapter with strict structured outputs (route: delegated; adapter rewrite + test rewrite)
 - [ ] T04: Capability-driven Anthropic request shaping (route: delegated; adapter + tests)
@@ -95,7 +95,17 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 | Task | Commit | RED observed | GREEN observed | Review tier / outcome |
 |---|---|---|---|---|
-| | | | | |
+| T01 | `dc5a0ad` | `ModuleNotFoundError: No module named 'mkcv.core.models.capability_overlay'` | 269 focused, 1799 full | pending (parent runs `gentle-ai review assess`) |
+
+### Task notes
+
+**T01** (route: delegated writer, trigger: 11 new core modules plus tests).
+
+- Verification: `uv run pytest -q tests/test_core/test_models/test_model_catalog.py tests/test_core/test_catalog tests/test_core/test_models/test_pricing.py tests/test_core/test_exceptions.py`: 269 passed; `uv run ruff check src/ tests/`: clean; `uv run ruff format --check src/ tests/`: clean; `uv run mypy src/`: no issues (141 files); `uv run pytest -q`: 1799 passed, exit 0.
+- `uv.lock` records mkcv 1.2.0 on `main`; committed as `6ae735e chore(deps): sync uv.lock with project version` before T01 because Phase 1 changes no dependency. T06 will lock `google-genai` on top of it.
+- Decision: `core/catalog/__init__.py` imports `mkcv.core.models` first. `pricing.py` (imported by `core/models/__init__.py`) derives `MODEL_PRICING` from `core/catalog/builtin_models.py`, which imports from `mkcv.core.models`; importing the data module first in a fresh interpreter raised `ImportError ... partially initialized module`. `TestImportOrder` guards every entry order in a subprocess.
+- Decision: `MODEL_PRICING` per-1K values are `round(price_per_mtok / 1000, 12)` so every legacy key stays bit-identical (plain division gave `0.00014000000000000001` for `deepseek/deepseek-chat-v3`). `calculate_cost` itself uses the per-1M prices.
+- `docs/specs/cli-interface.md` exit-code row for `ConfigurationError` is left to T11 (its file list owns that doc).
 
 ## Decisions (rationale in `design.md` §1 and §15)
 
