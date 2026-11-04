@@ -11,13 +11,15 @@ from pydantic import BaseModel
 
 from evals.harness.case_loader import load_cases
 from evals.harness.reference_bootstrapper import ReferenceBootstrapper
+from evals.models.cover_letter_expectations import CoverLetterExpectations
 from evals.models.eval_case import REFERENCE_FILES, EvalCase
 from evals.models.judge_config import JudgeConfig
 from mkcv.adapters.llm.stub import StubLLMAdapter
 from mkcv.core.exceptions.provider import ProviderError
+from mkcv.core.models.cover_letter import CoverLetter
 from mkcv.core.models.stage_key import StageKey
 from mkcv.core.ports.llm import LLMPort
-from tests.test_evals.conftest import RECORDED_DIR, FailingStub
+from tests.test_evals.conftest import COVER_LETTER, RECORDED_DIR, FailingStub
 
 REFERENCE = JudgeConfig(provider="stub", model="stub-model")
 ALL_FILES = [name for names in REFERENCE_FILES.values() for name in names]
@@ -75,9 +77,10 @@ class TestBootstrapACase:
             StageKey.SELECT,
             StageKey.TAILOR,
             StageKey.STRUCTURE,
+            StageKey.COVER_LETTER_GENERATE,
         ]
 
-    async def test_it_runs_stages_one_to_four_and_not_the_review(
+    async def test_it_runs_stages_one_to_four_then_the_cover_letter(
         self,
         bootstrapper: ReferenceBootstrapper,
         cases: list[EvalCase],
@@ -91,7 +94,20 @@ class TestBootstrapACase:
             "ExperienceSelection",
             "TailoredContent",
             None,
+            "CoverLetter",
         ]
+
+    async def test_the_cover_letter_is_the_models_letter(
+        self,
+        bootstrapper: ReferenceBootstrapper,
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        install_adapter(canned_stub)
+        await bootstrapper.bootstrap(cases[:1], cases)
+        written = (cases[0].reference_dir / "cover_letter_content.json").read_text()
+        assert CoverLetter.model_validate_json(written) == COVER_LETTER
 
     async def test_the_artifacts_are_the_models_output(
         self,
@@ -309,3 +325,94 @@ class TestReviewProbe:
             ("alpha-probe", "written"),
         ]
         assert _written(cases[1]) == sorted(UPSTREAM_FILES)
+
+
+class TestCoverLetterReference:
+    async def test_a_case_with_stages_one_to_four_gets_only_the_letter(
+        self,
+        bootstrapper: ReferenceBootstrapper,
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        add_reference: Callable[..., None],
+    ) -> None:
+        add_reference(
+            cases[0],
+            [StageKey.ANALYZE, StageKey.SELECT, StageKey.TAILOR, StageKey.STRUCTURE],
+        )
+        (cases[0].reference_dir / "stage1_analysis.json").write_text(
+            (RECORDED_DIR / "stage1_analysis.json").read_text() + "\n"
+        )
+        before = (cases[0].reference_dir / "stage1_analysis.json").read_text()
+        install_adapter(canned_stub)
+        [outcome] = await bootstrapper.bootstrap(cases[:1], cases)
+        assert (outcome.status, outcome.detail) == ("written", "cover letter")
+        assert [c["response_model"] for c in canned_stub.call_log] == ["CoverLetter"]
+        assert (cases[0].reference_dir / "stage1_analysis.json").read_text() == before
+
+    async def test_an_existing_letter_is_never_replaced(
+        self,
+        bootstrapper: ReferenceBootstrapper,
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        add_reference: Callable[..., None],
+    ) -> None:
+        add_reference(cases[0])
+        install_adapter(canned_stub)
+        [outcome] = await bootstrapper.bootstrap(cases[:1], cases)
+        assert outcome.status == "skipped"
+        assert canned_stub.call_log == []
+
+    async def test_a_case_that_does_not_review_letters_gets_none(
+        self,
+        bootstrapper: ReferenceBootstrapper,
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        resume_only = cases[0].model_copy(update={"stages": [StageKey.TAILOR]})
+        install_adapter(canned_stub)
+        await bootstrapper.bootstrap([resume_only], [resume_only])
+        assert "cover_letter_content.json" not in _written(resume_only)
+
+    async def test_a_cover_letter_probe_needs_a_hand_written_letter(
+        self,
+        bootstrapper: ReferenceBootstrapper,
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        probe = _letter_probe(cases[0])
+        install_adapter(canned_stub)
+        [outcome] = await bootstrapper.bootstrap([probe], [probe])
+        assert outcome.status == "error"
+        assert "hand-written" in outcome.detail
+        assert canned_stub.call_log == []
+
+    async def test_a_cover_letter_probe_with_its_letter_is_skipped(
+        self,
+        bootstrapper: ReferenceBootstrapper,
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        add_reference: Callable[..., None],
+    ) -> None:
+        probe = _letter_probe(cases[0])
+        add_reference(probe, [StageKey.COVER_LETTER_GENERATE])
+        install_adapter(canned_stub)
+        [outcome] = await bootstrapper.bootstrap([probe], [probe])
+        assert outcome.status == "skipped"
+        assert canned_stub.call_log == []
+
+
+def _letter_probe(case: EvalCase) -> EvalCase:
+    return case.model_copy(
+        update={
+            "id": "letter-probe",
+            "stages": [StageKey.COVER_LETTER_REVIEW],
+            "cover_letter": CoverLetterExpectations(
+                review_defects=["a placeholder [Company]"]
+            ),
+        }
+    )

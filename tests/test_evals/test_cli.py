@@ -109,10 +109,45 @@ class TestListCases:
             "stage3_content.json",
             "stage4_structure.json",
             "resume.yaml",
+            "cover_letter_content.json",
         ):
             (reference / name).write_text("{}", encoding="utf-8")
         main(["list-cases", "--fixtures", str(tmp_fixtures)])
         assert "yes" in capsys.readouterr().out.splitlines()[1].split()
+
+    def test_a_case_without_its_cover_letter_is_partial(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        reference = tmp_fixtures / "reference" / "alpha-match"
+        reference.mkdir(parents=True)
+        for name in (
+            "stage1_analysis.json",
+            "stage2_selection.json",
+            "stage3_content.json",
+            "stage4_structure.json",
+            "resume.yaml",
+        ):
+            (reference / name).write_text("{}", encoding="utf-8")
+        main(["list-cases", "--fixtures", str(tmp_fixtures)])
+        row = capsys.readouterr().out.splitlines()[1]
+        assert "partial:" in row
+        assert "cover_letter.generate" not in row
+
+    def test_a_review_probe_needs_no_cover_letter(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        reference = tmp_fixtures / "reference" / "alpha-probe"
+        reference.mkdir(parents=True)
+        for name in (
+            "stage1_analysis.json",
+            "stage2_selection.json",
+            "stage3_content.json",
+            "stage4_structure.json",
+            "resume.yaml",
+        ):
+            (reference / name).write_text("{}", encoding="utf-8")
+        main(["list-cases", "--fixtures", str(tmp_fixtures)])
+        assert capsys.readouterr().out.splitlines()[2].split()[-1] == "yes"
 
     def test_missing_fixtures_directory_is_a_usage_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

@@ -22,7 +22,7 @@ from evals.harness.judge_factory import split_judges
 from evals.harness.logging_setup import configure_logging
 from evals.harness.run_files import REPORT_FILE
 from evals.models.cost_estimate import CostEstimate
-from evals.models.eval_case import DEFAULT_FIXTURES_DIR, REFERENCE_FILES, EvalCase
+from evals.models.eval_case import DEFAULT_FIXTURES_DIR, EvalCase
 from evals.models.eval_record import EvalRecord
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
@@ -31,8 +31,9 @@ from evals.models.matrix_overrides import MatrixOverrides
 from evals.models.reference_outcome import ReferenceOutcome
 from evals.models.run_settings import RunSettings
 from evals.report.report_writer import publish_run, write_report_files
+from evals.stages import EVALUATED_STAGES
 from mkcv.core.exceptions.base import MkcvError
-from mkcv.core.models.stage_key import PIPELINE_STAGES, StageKey
+from mkcv.core.models.stage_key import StageKey
 
 if TYPE_CHECKING:
     from mkcv.adapters.llm.provider_registry import ProviderRegistry
@@ -126,7 +127,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     bootstrap = commands.add_parser(
         "bootstrap-reference",
-        help="produce reference artifacts for stages 1-4 with the reference model",
+        help=(
+            "produce reference artifacts (stages 1-4 and the cover letter) "
+            "with the reference model"
+        ),
     )
     _add_bootstrap_arguments(bootstrap)
     bootstrap.set_defaults(handler=_bootstrap_reference)
@@ -151,7 +155,7 @@ def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--stages",
         nargs="+",
-        choices=[stage.value for stage in PIPELINE_STAGES],
+        choices=[stage.value for stage in EVALUATED_STAGES],
         metavar="STAGE",
         help="run only these stages (default: the matrix's stages)",
     )
@@ -348,8 +352,10 @@ def _confirmed() -> bool:
 
 
 def _reference_status(case: EvalCase) -> str:
-    available = case.reference_stages()
-    if len(available) == len(REFERENCE_FILES):
+    """Whether the case has every reference its stages read from."""
+    needed = case.needed_reference_stages()
+    available = [stage for stage in needed if stage in case.reference_stages()]
+    if len(available) == len(needed):
         return "yes"
     if available:
         return "partial: " + ",".join(stage.value for stage in available)
@@ -392,25 +398,45 @@ def _estimate_lines(estimate: CostEstimate, *, case_count: int) -> list[str]:
 def _bootstrap_estimate_line(
     reference: JudgeConfig, cases: Sequence[EvalCase], registry: "ProviderRegistry"
 ) -> str:
-    pending = [
-        c
-        for c in cases
-        if not c.review_probe_defects and not c.existing_reference_files()
-    ]
+    from evals.harness.reference_bootstrapper import (
+        needs_cover_letter,
+        needs_pipeline,
+    )
+
+    pipeline = [c for c in cases if needs_pipeline(c)]
+    letters = [c for c in cases if needs_pipeline(c) or needs_cover_letter(c)]
+    letters = [c for c in letters if needs_cover_letter(c)]
     model = MatrixModel(provider=reference.provider, model=reference.model)
+    costs = [
+        _reference_cost(model, stages, chosen, registry)
+        for stages, chosen in (
+            (list(REFERENCE_STAGES), pipeline),
+            ([StageKey.COVER_LETTER_GENERATE], letters),
+        )
+    ]
+    known = [cost for cost in costs if cost is not None]
+    total = sum(known) if len(known) == len(costs) else None
+    return (
+        f"Reference model {model.label}: {_usd(total)} for {len(pipeline)} "
+        f"case(s) of stages 1-4 and {len(letters)} cover letter(s)"
+    )
+
+
+def _reference_cost(
+    model: MatrixModel,
+    stages: list[StageKey],
+    cases: Sequence[EvalCase],
+    registry: "ProviderRegistry",
+) -> float | None:
     matrix = MatrixConfig(
-        run=RunSettings(stages=list(REFERENCE_STAGES)),
-        judge=reference,
-        reference=reference,
+        run=RunSettings(stages=stages),
+        judge=JudgeConfig(provider=model.provider, model=model.model),
+        reference=JudgeConfig(provider=model.provider, model=model.model),
         models=[model],
     )
-    cost = estimate_matrix_cost(matrix, pending, registry.catalog).model_costs[
+    return estimate_matrix_cost(matrix, cases, registry.catalog).model_costs[
         model.label
     ]
-    return (
-        f"Reference model {model.label}: {_usd(cost)} for {len(pending)} case(s), "
-        "stages 1-4 each"
-    )
 
 
 def _outcome_line(outcome: ReferenceOutcome) -> str:

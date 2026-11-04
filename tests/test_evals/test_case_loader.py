@@ -7,6 +7,7 @@ import pytest
 
 from evals.harness.case_loader import load_cases, load_matrix, select_cases
 from evals.models.eval_case import EvalCase
+from evals.stages import EVALUATED_STAGES
 from mkcv.adapters.llm.builtin_providers import BUILTIN_PROVIDERS
 from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.model_tier import ModelTier
@@ -77,6 +78,7 @@ class TestLoadCases:
             "forbidden_claims",
             "review_probe_defects",
             "stages",
+            "cover_letter",
         }
 
     def test_case_round_trips_through_json(self, tmp_fixtures: Path) -> None:
@@ -136,14 +138,26 @@ class TestLoadCases:
         with pytest.raises(ValueError, match=r"\[\[cases\]\]"):
             load_cases(tmp_fixtures)
 
-    def test_a_case_may_only_name_pipeline_stages(self, tmp_fixtures: Path) -> None:
+    def test_a_case_may_only_name_evaluated_stages(self, tmp_fixtures: Path) -> None:
         (tmp_fixtures / "cases.toml").write_text(
             '[[cases]]\nid = "a"\npersona = "personas/alpha.md"\n'
             'jd = "jds/alpha-match.md"\nstages = ["kb"]\n',
             encoding="utf-8",
         )
-        with pytest.raises(ValueError, match="not resume pipeline stages"):
+        with pytest.raises(ValueError, match="not stages the harness evaluates"):
             load_cases(tmp_fixtures)
+
+    def test_a_case_may_name_the_cover_letter_stages(self, tmp_fixtures: Path) -> None:
+        (tmp_fixtures / "cases.toml").write_text(
+            '[[cases]]\nid = "a"\npersona = "personas/alpha.md"\n'
+            'jd = "jds/alpha-match.md"\n'
+            'stages = ["cover_letter.generate", "cover_letter.review"]\n',
+            encoding="utf-8",
+        )
+        assert load_cases(tmp_fixtures)[0].stages == [
+            StageKey.COVER_LETTER_GENERATE,
+            StageKey.COVER_LETTER_REVIEW,
+        ]
 
     def test_file_without_cases_is_rejected(self, tmp_fixtures: Path) -> None:
         (tmp_fixtures / "cases.toml").write_text("title = 'x'\n", encoding="utf-8")
@@ -232,8 +246,14 @@ class TestLoadMatrix:
             ["*"],
         )
 
-    def test_the_shipped_matrix_runs_every_pipeline_stage(self) -> None:
-        assert tuple(load_matrix(DEFAULT_MATRIX).run.stages) == PIPELINE_STAGES
+    def test_the_shipped_matrix_runs_every_evaluated_stage(self) -> None:
+        assert tuple(load_matrix(DEFAULT_MATRIX).run.stages) == EVALUATED_STAGES
+
+    def test_run_settings_default_to_every_evaluated_stage(
+        self, tmp_path: Path
+    ) -> None:
+        matrix = load_matrix(_write_matrix(tmp_path, _MINIMAL_MATRIX))
+        assert tuple(matrix.run.stages) == EVALUATED_STAGES
 
     def test_the_shipped_reference_model(self) -> None:
         matrix = load_matrix(DEFAULT_MATRIX)
@@ -387,3 +407,115 @@ class TestLoadMatrix:
     def test_invalid_toml_is_a_value_error(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match=r"matrix\.toml"):
             load_matrix(_write_matrix(tmp_path, "[run\n"))
+
+
+_LETTER_CASE = """
+[[cases]]
+id = "a"
+persona = "personas/alpha.md"
+jd = "jds/alpha-match.md"
+forbidden_claims = ["PyTorch", "MLflow"]
+
+[cases.cover_letter]
+company = "Acme Corp"
+role = "Platform Engineer"
+must_not_claim = ["MLflow", "led a team of 20"]
+should_connect = ["Kubernetes migration at Initech -> cluster operations"]
+min_words = 200
+max_words = 350
+"""
+
+
+class TestCoverLetterExpectations:
+    def _case(self, fixtures: Path, body: str = _LETTER_CASE) -> EvalCase:
+        (fixtures / "cases.toml").write_text(body, encoding="utf-8")
+        return load_cases(fixtures)[0]
+
+    def test_a_case_without_a_cover_letter_table_gets_the_defaults(
+        self, tmp_fixtures: Path
+    ) -> None:
+        letter = load_cases(tmp_fixtures)[0].cover_letter
+        assert (letter.company, letter.role, letter.must_not_claim) == (None, None, [])
+        assert (letter.min_words, letter.max_words) == (250, 400)
+        assert (letter.should_connect, letter.review_defects) == ([], [])
+
+    def test_the_cover_letter_table_is_read(self, tmp_fixtures: Path) -> None:
+        letter = self._case(tmp_fixtures).cover_letter
+        assert (letter.company, letter.role) == ("Acme Corp", "Platform Engineer")
+        assert letter.should_connect == [
+            "Kubernetes migration at Initech -> cluster operations"
+        ]
+        assert (letter.min_words, letter.max_words) == (200, 350)
+
+    def test_the_letter_must_not_claim_the_forbidden_claims_either(
+        self, tmp_fixtures: Path
+    ) -> None:
+        assert self._case(tmp_fixtures).cover_letter_forbidden == [
+            "PyTorch",
+            "MLflow",
+            "led a team of 20",
+        ]
+
+    def test_an_unknown_cover_letter_key_is_rejected(self, tmp_fixtures: Path) -> None:
+        with pytest.raises(ValueError, match="tone"):
+            self._case(tmp_fixtures, _LETTER_CASE + 'tone = "warm"\n')
+
+    def test_the_word_bounds_must_be_in_order(self, tmp_fixtures: Path) -> None:
+        body = _LETTER_CASE.replace("min_words = 200", "min_words = 500")
+        with pytest.raises(ValueError, match="min_words"):
+            self._case(tmp_fixtures, body)
+
+    def test_seeded_review_defects_make_a_cover_letter_probe(
+        self, tmp_fixtures: Path
+    ) -> None:
+        body = _LETTER_CASE + 'review_defects = ["placeholder [Company] left in"]\n'
+        case = self._case(tmp_fixtures, body)
+        assert case.is_cover_letter_probe is True
+
+    def test_a_case_without_seeded_defects_is_not_a_probe(
+        self, tmp_fixtures: Path
+    ) -> None:
+        assert self._case(tmp_fixtures).is_cover_letter_probe is False
+
+
+class TestNeededReferences:
+    def test_a_full_case_needs_stages_one_to_four_and_a_cover_letter(
+        self, tmp_fixtures: Path
+    ) -> None:
+        assert load_cases(tmp_fixtures)[0].needed_reference_stages() == [
+            StageKey.ANALYZE,
+            StageKey.SELECT,
+            StageKey.TAILOR,
+            StageKey.STRUCTURE,
+            StageKey.COVER_LETTER_GENERATE,
+        ]
+
+    def test_a_review_probe_needs_only_stages_one_to_four(
+        self, tmp_fixtures: Path
+    ) -> None:
+        assert load_cases(tmp_fixtures)[1].needed_reference_stages() == [
+            StageKey.ANALYZE,
+            StageKey.SELECT,
+            StageKey.TAILOR,
+            StageKey.STRUCTURE,
+        ]
+
+    def test_a_cover_letter_review_case_needs_only_a_letter(
+        self, tmp_fixtures: Path
+    ) -> None:
+        (tmp_fixtures / "cases.toml").write_text(
+            '[[cases]]\nid = "a"\npersona = "personas/alpha.md"\n'
+            'jd = "jds/alpha-match.md"\nstages = ["cover_letter.review"]\n',
+            encoding="utf-8",
+        )
+        assert load_cases(tmp_fixtures)[0].needed_reference_stages() == [
+            StageKey.COVER_LETTER_GENERATE
+        ]
+
+    def test_the_cover_letter_reference_is_its_own_stage(
+        self, tmp_fixtures: Path
+    ) -> None:
+        case = load_cases(tmp_fixtures)[0]
+        case.reference_dir.mkdir(parents=True)
+        (case.reference_dir / "cover_letter_content.json").write_text("{}")
+        assert case.reference_stages() == [StageKey.COVER_LETTER_GENERATE]

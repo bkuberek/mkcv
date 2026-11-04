@@ -1,0 +1,14 @@
+{
+  "company": "Acme Corp",
+  "role_title": "Senior Platform Engineer",
+  "salutation": "Dear Hiring Manager,",
+  "opening_paragraph": "Acme Corp's Platform Engineering team runs more than 60 services on Kubernetes for field service companies, and the Senior Platform Engineer role asks for someone who will design the improvements, write the code, and share the pager. That mix of ownership and hands-on work is what I have done for the last several years, and it is the work I want to keep doing.",
+  "body_paragraphs": [
+    "At Initech I led the migration of 42 services from VM-based deploys to Kubernetes, which cut deploy time from 45 minutes to 6 minutes. I also designed the observability stack on OpenTelemetry, Prometheus, and Grafana across 120 services, and the mean time to detect incidents fell from 25 minutes to 4 minutes. Those two projects map directly to the cluster operations and the observability standards your description puts first.",
+    "Your team also owns PostgreSQL and incident response. At Globex I migrated a 3 TB PostgreSQL database to a partitioned schema with zero downtime, and at Initech I ran the on-call rotation for a team of 9 and introduced runbooks that lowered pages per week from 31 to 12. I also wrote shared Terraform modules adopted by 14 teams, so reviewing infrastructure changes from other teams is familiar ground for me."
+  ],
+  "closing_paragraph": "I value blameless postmortems and pragmatic engineering over novelty, the same values Acme Corp describes, and I enjoy turning incident findings into lasting fixes. I would welcome the chance to talk about how I can help the Platform Engineering team keep its Kubernetes platform reliable as more teams build on it.",
+  "sign_off": "Sincerely,",
+  "candidate_name": "Alex Rivera",
+  "tone_notes": "Direct and practical, matching a pragmatic platform team."
+}

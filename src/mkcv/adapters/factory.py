@@ -528,6 +528,43 @@ def create_cover_letter_service(
     )
 
 
+def create_cover_letter_service_for_stage_configs(
+    config: Configuration,
+    stage_configs: dict[int, StageConfig],
+) -> CoverLetterService:
+    """Create a CoverLetterService that runs exactly the given stage configs.
+
+    Nothing is resolved: no profile, per-stage config, or command-line flag
+    changes which provider or model a stage uses. The eval harness uses this
+    to pin both cover letter stages to the model under evaluation.
+
+    Args:
+        config: Application configuration (providers, keys, catalog).
+        stage_configs: Provider, model, and temperature for stages 1 and 2.
+
+    Returns:
+        CoverLetterService with one LLM adapter per provider in ``stage_configs``.
+
+    Raises:
+        ConfigurationError: If a provider is unknown or the provider or
+            model-catalog settings are invalid.
+    """
+    from mkcv.adapters.renderers.typst_cover_letter import (
+        TypstCoverLetterRenderer,
+    )
+
+    registry = _registry(config)
+    return CoverLetterService(
+        providers=_create_providers(config, stage_configs, registry),
+        prompts=_create_prompt_loader(config),
+        artifacts=FileSystemArtifactStore(),
+        renderer=TypstCoverLetterRenderer(),
+        stage_configs=stage_configs,
+        design=_build_cover_letter_design(config),
+        catalog=registry.catalog,
+    )
+
+
 def create_batch_render_service(
     config: Configuration,
 ) -> BatchRenderService:

@@ -35,6 +35,20 @@ def bare_digits(normalized: str) -> str:
     return normalized.rstrip(NUMBER_UNITS)
 
 
+def supported_numbers(text: str) -> set[str]:
+    """Return the numbers in ``text`` (dates included), with and without units."""
+    normalized = {
+        normalize_number(token) for token in extract_numbers(text, skip_dates=False)
+    }
+    return normalized | {bare_digits(number) for number in normalized}
+
+
+def is_supported_number(token: str, supported: set[str]) -> bool:
+    """Return True if ``token`` (as written) is among ``supported`` numbers."""
+    normalized = normalize_number(token)
+    return normalized in supported or bare_digits(normalized) in supported
+
+
 def normalize_text(text: str) -> str:
     """Lowercase ``text`` and reduce every run of punctuation to one space."""
     return _NON_WORD_RUNS.sub(" ", text.lower()).strip()

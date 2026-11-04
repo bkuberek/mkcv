@@ -478,7 +478,7 @@ class TestBootstrapReference:
     ) -> None:
         assert bootstrap() == 0
         case = load_cases(tmp_fixtures)[0]
-        assert len(case.reference_stages()) == 4
+        assert len(case.reference_stages()) == 5
 
     def test_it_reminds_the_user_to_review_before_committing(
         self, bootstrap: Callable[..., int], capsys: pytest.CaptureFixture[str]

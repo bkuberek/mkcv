@@ -19,7 +19,7 @@ from evals.harness.judge_factory import create_judge, split_judges
 from evals.harness.run_files import MANIFEST_FILE, RESULTS_FILE
 from evals.harness.stage_run import StageRun
 from evals.harness.stage_runner import StageRunner, work_dir_for
-from evals.models.eval_case import REFERENCE_FILES, EvalCase
+from evals.models.eval_case import REFERENCE_FILES, UPSTREAM_STAGES, EvalCase
 from evals.models.eval_record import EvalRecord
 from evals.models.grade import Grade
 from evals.models.matrix_config import MatrixConfig
@@ -31,7 +31,7 @@ from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.config.configuration import Configuration
 from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.model_catalog import ModelCatalog
-from mkcv.core.models.stage_key import PIPELINE_STAGE_NUMBERS, PIPELINE_STAGES, StageKey
+from mkcv.core.models.stage_key import StageKey
 from mkcv.core.ports.llm import LLMPort
 
 if TYPE_CHECKING:
@@ -318,16 +318,13 @@ def _judges_of(grades: Sequence[Grade]) -> list[str]:
 
 
 def _upstream_reference(case: EvalCase, stage: StageKey) -> dict[str, Any]:
-    """Load the case's JSON reference artifacts of the stages before ``stage``.
+    """Load the case's JSON reference artifacts that ``stage`` reads from.
 
-    Keys are the artifact names (``stage1_analysis``, ...). The stage 4 resume
-    is YAML, not an artifact, so it is not included.
+    Keys are the artifact names (``stage1_analysis``, ``cover_letter_content``,
+    ...). The stage 4 resume is YAML, not an artifact, so it is not included.
     """
-    number = PIPELINE_STAGE_NUMBERS[stage]
     reference: dict[str, Any] = {}
-    for earlier in PIPELINE_STAGES:
-        if PIPELINE_STAGE_NUMBERS[earlier] >= number:
-            break
+    for earlier in UPSTREAM_STAGES[stage]:
         for name in REFERENCE_FILES[earlier]:
             path = case.reference_dir / name
             if path.suffix == ".json" and path.is_file():

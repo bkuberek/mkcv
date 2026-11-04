@@ -208,6 +208,65 @@ class CoverLetterService:
 
         return result
 
+    async def generate_letter(
+        self,
+        jd_text: str,
+        *,
+        resume_text: str | None = None,
+        kb_text: str | None = None,
+        company: str = "",
+        role_title: str = "",
+        jd_analysis: JDAnalysis | None = None,
+        output_dir: Path,
+    ) -> tuple[CoverLetter, StageMetadata]:
+        """Run only stage 1: write the letter, without reviewing or rendering it.
+
+        The letter is saved as the ``cover_letter_content`` artifact under
+        ``output_dir/.mkcv``.
+
+        Raises:
+            CoverLetterError: If neither ``resume_text`` nor ``kb_text`` is
+                given, or the LLM call fails.
+        """
+        if resume_text is None and kb_text is None:
+            raise CoverLetterError(
+                "At least one of resume_text or kb_text must be provided "
+                "for cover letter generation."
+            )
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        return await self._generate_cover_letter(
+            jd_text=jd_text,
+            resume_text=resume_text,
+            kb_text=kb_text,
+            jd_analysis=jd_analysis,
+            company=company,
+            role_title=role_title,
+            run_dir=artifact_dir,
+        )
+
+    async def review_letter(
+        self,
+        cover_letter: CoverLetter,
+        jd_text: str,
+        *,
+        output_dir: Path,
+    ) -> tuple[CoverLetterReview, StageMetadata]:
+        """Run only stage 2: review ``cover_letter``.
+
+        Unlike ``generate``, a failing review raises instead of being skipped.
+        The review is saved as the ``cover_letter_review`` artifact under
+        ``output_dir/.mkcv``.
+
+        Raises:
+            CoverLetterError: If the LLM call fails.
+        """
+        artifact_dir = output_dir / ".mkcv"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        return await self._review_cover_letter(
+            cover_letter=cover_letter, jd_text=jd_text, run_dir=artifact_dir
+        )
+
     # ------------------------------------------------------------------
     # Stage implementations
     # ------------------------------------------------------------------

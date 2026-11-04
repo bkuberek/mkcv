@@ -31,18 +31,18 @@ class FaithfulnessJudgeGrader(JudgedGrader):
     """
 
     name = "faithfulness_judge"
+    rubric = "faithfulness"
 
     async def grade(self, ctx: GradingContext) -> Grade | None:
-        """Ask the judge about the rewritten bullets of ``ctx.output``."""
-        claims = extract_claims(ctx.stage, ctx.output)
-        bullets = claims.bullets if claims else []
+        """Ask the judge about the claims of ``ctx.output``."""
+        bullets = self._claims(ctx)
         if not has_judge(ctx) or not bullets:
             return None
 
         judgement = await ask_judge(
             ctx,
-            rubric=load_rubric("faithfulness"),
-            user=_user_message(ctx.kb_text, bullets),
+            rubric=load_rubric(self.rubric),
+            user=self._user_message(ctx, bullets),
             response_model=FaithfulnessJudgement,
         )
         verdicts = _by_index(judgement)
@@ -59,10 +59,21 @@ class FaithfulnessJudgeGrader(JudgedGrader):
             details={**judge_details(ctx), "unsupported": unsupported},
         )
 
+    def _claims(self, ctx: GradingContext) -> list[str]:
+        """The claims to number for the judge: the output's bullets."""
+        claims = extract_claims(ctx.stage, ctx.output)
+        return claims.bullets if claims else []
 
-def _user_message(kb_text: str, bullets: list[str]) -> str:
-    numbered = "\n".join(f"{n}. {bullet}" for n, bullet in enumerate(bullets, start=1))
-    return f"Knowledge base:\n{kb_text}\n\nBullets to judge:\n{numbered}\n"
+    def _user_message(self, ctx: GradingContext, bullets: list[str]) -> str:
+        return (
+            f"Knowledge base:\n{ctx.kb_text}\n\n"
+            f"Bullets to judge:\n{numbered(bullets)}\n"
+        )
+
+
+def numbered(claims: list[str]) -> str:
+    """The claims as a list numbered from 1, one per line."""
+    return "\n".join(f"{n}. {claim}" for n, claim in enumerate(claims, start=1))
 
 
 def _by_index(judgement: FaithfulnessJudgement) -> dict[int, FaithfulnessVerdict]:

@@ -1,6 +1,15 @@
 """Which graders score each stage, and which grade is its quality metric."""
 
 from evals.graders.ats_rules_grader import AtsRulesGrader
+from evals.graders.cover_letter_defect_grader import CoverLetterDefectGrader
+from evals.graders.cover_letter_faithfulness_grader import (
+    CoverLetterFaithfulnessGrader,
+)
+from evals.graders.cover_letter_faithfulness_judge_grader import (
+    CoverLetterFaithfulnessJudgeGrader,
+)
+from evals.graders.cover_letter_judge_grader import CoverLetterJudgeGrader
+from evals.graders.cover_letter_rules_grader import CoverLetterRulesGrader
 from evals.graders.faithfulness_extraction_grader import FaithfulnessExtractionGrader
 from evals.graders.faithfulness_judge_grader import FaithfulnessJudgeGrader
 from evals.graders.grader import Grader
@@ -34,6 +43,14 @@ STAGE_GRADERS: dict[StageKey, tuple[Grader, ...]] = {
         FaithfulnessExtractionGrader(),
     ),
     StageKey.REVIEW: (SchemaGrader(), ReviewDefectGrader()),
+    StageKey.COVER_LETTER_GENERATE: (
+        SchemaGrader(),
+        CoverLetterRulesGrader(),
+        CoverLetterFaithfulnessGrader(),
+        CoverLetterFaithfulnessJudgeGrader(),
+        CoverLetterJudgeGrader(),
+    ),
+    StageKey.COVER_LETTER_REVIEW: (SchemaGrader(), CoverLetterDefectGrader()),
 }
 """Graders run on each stage's ``ok`` output, in order (design 9.6).
 
@@ -72,5 +89,7 @@ PRIMARY_METRIC: dict[StageKey, str] = {
     StageKey.TAILOR: "tailoring_judge",
     StageKey.STRUCTURE: "ats_rules",
     StageKey.REVIEW: "review_defect_recall",
+    StageKey.COVER_LETTER_GENERATE: "cover_letter_judge",
+    StageKey.COVER_LETTER_REVIEW: "cover_letter_defect_recall",
 }
 """The grade that ranks models at each stage (design 9.6)."""

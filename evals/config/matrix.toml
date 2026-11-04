@@ -4,7 +4,15 @@
 [run]
 repeats = 1
 concurrency = 2
-stages = ["analyze", "select", "tailor", "structure", "review"]
+stages = [
+    "analyze",
+    "select",
+    "tailor",
+    "structure",
+    "review",
+    "cover_letter.generate",
+    "cover_letter.review",
+]
 cases = ["*"]                       # case IDs or "*"
 preset = "standard"
 

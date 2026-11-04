@@ -23,7 +23,14 @@ from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.ports.llm import LLMPort
 from mkcv.core.ports.stage_callback import StageCallbackPort
-from tests.test_evals.conftest import RESUME_YAML, FailingStub, UsageStub, recorded
+from tests.test_evals.conftest import (
+    COVER_LETTER,
+    COVER_LETTER_REVIEW,
+    RESUME_YAML,
+    FailingStub,
+    UsageStub,
+    recorded,
+)
 
 MODEL = MatrixModel(provider="stub", model="stub-model")
 RESPONSE_MODEL_FOR_STAGE: dict[StageKey, type[BaseModel] | None] = {
@@ -514,3 +521,133 @@ class TestWorkDirectory:
         model = MatrixModel(provider="a b", model="llama3.1:8b")
         path = work_dir_for(Path("r"), "c", StageKey.REVIEW, model, 1)
         assert path.parent.name == "a_b__llama3.1_8b"
+
+
+class TestCoverLetterStages:
+    """Each cover letter stage runs on its own, from the case's references."""
+
+    async def test_generate_makes_one_cover_letter_call(
+        self,
+        runner: StageRunner,
+        case: EvalCase,
+        add_reference: Callable[..., None],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        add_reference(case)
+        install_adapter(canned_stub)
+        result = await runner.run(
+            case, StageKey.COVER_LETTER_GENERATE, MODEL, 0, tmp_path / "work"
+        )
+        assert [c["response_model"] for c in canned_stub.call_log] == ["CoverLetter"]
+        assert (result.status, result.payload) == ("ok", COVER_LETTER.model_dump())
+        assert result.metadata is not None
+        assert result.metadata.stage_number == 1
+
+    async def test_generate_writes_from_the_kb_jd_and_reference_resume(
+        self,
+        runner: StageRunner,
+        case: EvalCase,
+        add_reference: Callable[..., None],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        add_reference(case)
+        install_adapter(canned_stub)
+        await runner.run(
+            case, StageKey.COVER_LETTER_GENERATE, MODEL, 0, tmp_path / "work"
+        )
+        prompt = canned_stub.call_log[0]["messages"][0]["content"]
+        assert case.kb_text.strip() in prompt
+        assert case.jd_text.strip() in prompt
+        assert "Alex Rivera" in prompt  # the reference resume
+        assert "Company: Acme Corp" in prompt  # the reference analysis
+        assert "Position: Senior Platform Engineer" in prompt
+
+    async def test_generate_uses_the_stage_temperature_and_model(
+        self,
+        runner: StageRunner,
+        case: EvalCase,
+        add_reference: Callable[..., None],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        add_reference(case)
+        install_adapter(canned_stub)
+        result = await runner.run(
+            case, StageKey.COVER_LETTER_GENERATE, MODEL, 0, tmp_path / "work"
+        )
+        assert result.metadata is not None
+        assert (result.metadata.model, result.metadata.temperature) == (
+            "stub-model",
+            STAGE_REQUIREMENTS[StageKey.COVER_LETTER_GENERATE].default_temperature,
+        )
+
+    async def test_review_reviews_the_reference_letter(
+        self,
+        runner: StageRunner,
+        case: EvalCase,
+        add_reference: Callable[..., None],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        add_reference(case, [StageKey.COVER_LETTER_GENERATE])
+        install_adapter(canned_stub)
+        result = await runner.run(
+            case, StageKey.COVER_LETTER_REVIEW, MODEL, 0, tmp_path / "work"
+        )
+        assert [c["response_model"] for c in canned_stub.call_log] == [
+            "CoverLetterReview"
+        ]
+        assert (
+            COVER_LETTER.opening_paragraph
+            in (canned_stub.call_log[0]["messages"][0]["content"])
+        )
+        assert (result.status, result.payload) == (
+            "ok",
+            COVER_LETTER_REVIEW.model_dump(),
+        )
+
+    @pytest.mark.parametrize(
+        ("stage", "missing"),
+        [
+            (StageKey.COVER_LETTER_GENERATE, "analyze, structure"),
+            (StageKey.COVER_LETTER_REVIEW, "cover_letter.generate"),
+        ],
+    )
+    async def test_a_missing_reference_skips_the_stage(
+        self,
+        runner: StageRunner,
+        case: EvalCase,
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+        stage: StageKey,
+        missing: str,
+    ) -> None:
+        install_adapter(canned_stub)
+        result = await runner.run(case, stage, MODEL, 0, tmp_path / "work")
+        assert result.status == "skipped"
+        assert missing in (result.error or "")
+        assert "bootstrap-reference" in (result.error or "")
+        assert canned_stub.call_log == []
+
+    async def test_a_failing_model_is_an_error_run(
+        self,
+        runner: StageRunner,
+        case: EvalCase,
+        add_reference: Callable[..., None],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        add_reference(case)
+        install_adapter(FailingStub())
+        result = await runner.run(
+            case, StageKey.COVER_LETTER_GENERATE, MODEL, 0, tmp_path / "work"
+        )
+        assert result.status == "error"
+        assert "boom" in (result.error or "")

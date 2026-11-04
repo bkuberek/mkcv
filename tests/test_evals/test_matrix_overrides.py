@@ -14,8 +14,9 @@ from evals.models.matrix_model import MatrixModel
 from evals.models.matrix_overrides import MatrixOverrides
 from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.run_settings import RunSettings
+from evals.stages import EVALUATED_STAGES
 from mkcv.adapters.factory import create_provider_registry
-from mkcv.core.models.stage_key import PIPELINE_STAGES, StageKey
+from mkcv.core.models.stage_key import StageKey
 
 JUDGE = JudgeConfig(provider="anthropic", model="claude-opus-5-5")
 HAIKU = MatrixModel(provider="anthropic", model="claude-haiku-5-5", temperature=0.4)
@@ -44,7 +45,7 @@ class TestMatrixOverrides:
             MatrixOverrides(stages=["polish"]).apply(_matrix())
 
     def test_a_non_pipeline_stage_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="not resume pipeline stages"):
+        with pytest.raises(ValueError, match="not stages the harness evaluates"):
             MatrixOverrides(stages=["kb"]).apply(_matrix())
 
     def test_cases_replace_the_run_cases(self) -> None:
@@ -61,7 +62,7 @@ class TestMatrixOverrides:
     def test_other_run_settings_are_kept(self) -> None:
         result = MatrixOverrides(concurrency=1).apply(_matrix())
         assert result.run.repeats == 2
-        assert tuple(result.run.stages) == PIPELINE_STAGES
+        assert tuple(result.run.stages) == EVALUATED_STAGES
 
     def test_models_replace_the_matrix_models(self) -> None:
         result = MatrixOverrides(models=["stub:stub-model"]).apply(_matrix())
