@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- version list -->
 
+## v1.7.0 (2026-11-04)
+
+### Continuous Integration
+
+- **release**: Publish GitHub releases and the Homebrew formula
+  ([#11](https://github.com/bkuberek/mkcv/pull/11),
+  [`5f457d6`](https://github.com/bkuberek/mkcv/commit/5f457d616da803d01c94b976c65c48db52132d55))
+
+### Documentation
+
+- Recommend storing API keys in the user config file
+  ([#12](https://github.com/bkuberek/mkcv/pull/12),
+  [`d123829`](https://github.com/bkuberek/mkcv/commit/d123829b315251df4ce6a9e7394bf843338af92a))
+
+### Features
+
+- **config**: Create a commented settings file on first run
+  ([#13](https://github.com/bkuberek/mkcv/pull/13),
+  [`11d25e6`](https://github.com/bkuberek/mkcv/commit/11d25e6e976c00699869a667a0da4c150d15cb69))
+
+
 ## v1.6.0 (2026-11-04)
 
 ### Features
