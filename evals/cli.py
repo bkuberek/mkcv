@@ -404,8 +404,7 @@ def _bootstrap_estimate_line(
     )
 
     pipeline = [c for c in cases if needs_pipeline(c)]
-    letters = [c for c in cases if needs_pipeline(c) or needs_cover_letter(c)]
-    letters = [c for c in letters if needs_cover_letter(c)]
+    letters = [c for c in cases if needs_cover_letter(c)]
     model = MatrixModel(provider=reference.provider, model=reference.model)
     costs = [
         _reference_cost(model, stages, chosen, registry)

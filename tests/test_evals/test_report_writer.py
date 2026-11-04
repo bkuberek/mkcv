@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from evals.models.stage_summary import StageSummary
+from evals.models.run_summary import RunSummary
 from evals.report.report_writer import publish_run, read_records, write_report_files
 from mkcv.core.models.stage_key import StageKey
 from tests.test_evals.report_support import RUN_ID, grade, manifest, record
@@ -45,15 +45,44 @@ class TestWriteReportFiles:
         assert (run_dir / "summary.json").is_file()
         assert (run_dir / "report.md").is_file()
 
-    def test_the_summary_is_a_list_of_stage_summaries(self, run_dir: Path) -> None:
+    def test_the_summary_holds_the_stage_summaries(self, run_dir: Path) -> None:
         write_report_files(run_dir)
-        loaded = json.loads((run_dir / "summary.json").read_text())
-        [summary] = [StageSummary.model_validate(item) for item in loaded]
+        loaded = RunSummary.model_validate_json((run_dir / "summary.json").read_text())
+        [summary] = loaded.stages
         assert (summary.stage, summary.n, summary.eligible) == (
             StageKey.TAILOR,
             6,
             True,
         )
+
+    def test_the_summary_holds_the_recommendations(self, run_dir: Path) -> None:
+        write_report_files(run_dir)
+        loaded = RunSummary.model_validate_json((run_dir / "summary.json").read_text())
+        assert [(r.scope, r.model) for r in loaded.recommendations] == [
+            ("overall", "gpt-6.1-sol"),
+            ("openai", "gpt-6.1-sol"),
+        ]
+
+    def test_the_summary_holds_the_suggested_profiles(self, run_dir: Path) -> None:
+        write_report_files(run_dir)
+        loaded = RunSummary.model_validate_json((run_dir / "summary.json").read_text())
+        profiles = {p.name: p for p in loaded.suggested_profiles}
+        assert sorted(profiles) == ["openai", "recommended"]
+        [choice] = profiles["openai"].choices
+        assert (choice.model, choice.current, choice.changed) == (
+            "gpt-6.1-sol",
+            "gpt-6-astra",
+            True,
+        )
+
+    def test_the_summary_names_the_primary_metrics_and_what_was_not_evaluated(
+        self, run_dir: Path
+    ) -> None:
+        write_report_files(run_dir)
+        loaded = RunSummary.model_validate_json((run_dir / "summary.json").read_text())
+        assert loaded.run_id == RUN_ID
+        assert loaded.primary_metrics[StageKey.TAILOR] == "tailoring_judge"
+        assert StageKey.KB in loaded.not_evaluated
 
     def test_the_report_names_the_run(self, run_dir: Path) -> None:
         write_report_files(run_dir)
@@ -89,7 +118,7 @@ class TestWriteReportFiles:
     def test_an_empty_results_file_gives_an_empty_report(self, run_dir: Path) -> None:
         (run_dir / "results.jsonl").write_text("")
         write_report_files(run_dir)
-        assert json.loads((run_dir / "summary.json").read_text()) == []
+        assert json.loads((run_dir / "summary.json").read_text())["stages"] == []
         assert "No results" in (run_dir / "report.md").read_text()
 
 

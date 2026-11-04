@@ -797,7 +797,9 @@ class TestFiles:
         await make_runner().run(
             _matrix([STUB], [StageKey.ANALYZE], repeats=2), cases[:1]
         )
-        [summary] = json.loads((tmp_path / "out" / "summary.json").read_text())
+        [summary] = json.loads((tmp_path / "out" / "summary.json").read_text())[
+            "stages"
+        ]
         assert (summary["stage"], summary["provider"], summary["n"]) == (
             "analyze",
             "stub",
@@ -964,7 +966,9 @@ class TestFiles:
         assert records == []
         assert (tmp_path / "out" / "results.jsonl").read_text() == ""
         assert (tmp_path / "out" / "run.json").is_file()
-        assert json.loads((tmp_path / "out" / "summary.json").read_text()) == []
+        assert (
+            json.loads((tmp_path / "out" / "summary.json").read_text())["stages"] == []
+        )
         assert "No results" in (tmp_path / "out" / "report.md").read_text()
 
 

@@ -1,11 +1,11 @@
 """Read a run directory and write its summary and report; publish a run."""
 
-import json
 import shutil
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from evals.graders.stage_graders import PRIMARY_METRIC
 from evals.harness.run_files import (
     MANIFEST_FILE,
     PUBLISHED_FILES,
@@ -15,8 +15,10 @@ from evals.harness.run_files import (
 )
 from evals.models.eval_record import EvalRecord
 from evals.models.run_manifest import RunManifest
+from evals.models.run_summary import RunSummary
 from evals.report.aggregator import aggregate
 from evals.report.markdown_report import render_markdown
+from evals.report.profile_suggester import not_evaluated, suggest_profiles
 from evals.report.recommender import recommend
 
 
@@ -72,9 +74,16 @@ def write_report_files(out_dir: Path) -> None:
     settings = manifest.matrix.recommendation
     summaries = aggregate(records, settings)
     recommendations = recommend(summaries, tie_epsilon=settings.tie_epsilon)
+    summary = RunSummary(
+        run_id=manifest.run_id,
+        primary_metrics=PRIMARY_METRIC,
+        stages=summaries,
+        recommendations=recommendations,
+        suggested_profiles=suggest_profiles(recommendations),
+        not_evaluated=not_evaluated(summaries),
+    )
     (out_dir / SUMMARY_FILE).write_text(
-        json.dumps([s.model_dump(mode="json") for s in summaries], indent=2) + "\n",
-        encoding="utf-8",
+        summary.model_dump_json(indent=2) + "\n", encoding="utf-8"
     )
     (out_dir / REPORT_FILE).write_text(
         render_markdown(manifest, summaries, recommendations), encoding="utf-8"

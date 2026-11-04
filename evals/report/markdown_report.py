@@ -10,12 +10,14 @@ from evals.models.judge_config import JudgeConfig
 from evals.models.recommendation import OVERALL, Recommendation
 from evals.models.run_manifest import RunManifest
 from evals.models.stage_summary import StageSummary
+from evals.models.suggested_profile import SuggestedProfile
 from evals.report.aggregator import LOW_SAMPLE_BELOW
-from evals.stages import EVALUATED_STAGES
-from mkcv.core.catalog.builtin_model_profiles import (
-    BUILTIN_MODEL_PROFILES,
-    profile_stage_model,
+from evals.report.profile_suggester import (
+    RECOMMENDED_PROFILE,
+    not_evaluated,
+    suggest_profiles,
 )
+from evals.stages import EVALUATED_STAGES
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 
 STAGE_COLUMNS = (
@@ -51,7 +53,7 @@ def render_markdown(
         _judge_panel_section(manifest, summaries),
         _cost_section(summaries),
         *_stage_sections(summaries, recommendations),
-        _recommendations_section(manifest, recommendations),
+        _recommendations_section(manifest, summaries, recommendations),
         _profile_changes_section(manifest, recommendations),
         _token_section(summaries),
     ]
@@ -285,10 +287,17 @@ def _notes(s: StageSummary) -> list[str]:
 
 
 def _recommendations_section(
-    manifest: RunManifest, recommendations: Sequence[Recommendation]
+    manifest: RunManifest,
+    summaries: Sequence[StageSummary],
+    recommendations: Sequence[Recommendation],
 ) -> list[str]:
+    missing = [
+        f"- {stage.value}: {reason}"
+        for stage, reason in not_evaluated(summaries).items()
+    ]
+    footer = ["", "Not evaluated:", "", *missing]
     if not recommendations:
-        return ["## Recommendations", "", NO_RESULTS]
+        return ["## Recommendations", "", NO_RESULTS, *footer]
     epsilon = manifest.matrix.recommendation.tie_epsilon
     providers = sorted({r.scope for r in recommendations if r.scope != OVERALL})
     rows: list[tuple[str, ...]] = []
@@ -326,6 +335,7 @@ def _recommendations_section(
         "to separate them.",
         "",
         *_table(columns, rows),
+        *footer,
     ]
 
 
@@ -348,32 +358,70 @@ def _recommendation_notes(rec: Recommendation) -> list[str]:
 def _profile_changes_section(
     manifest: RunManifest, recommendations: Sequence[Recommendation]
 ) -> list[str]:
-    best = {
-        (r.stage, r.scope): r.model
-        for r in recommendations
-        if r.scope != OVERALL and r.model is not None
-    }
-    changes: list[str] = []
-    for profile in BUILTIN_MODEL_PROFILES.values():
-        if profile.economy:
-            continue
-        for stage in EVALUATED_STAGES:
-            target = best.get((stage, profile.provider))
-            current = profile_stage_model(profile, stage)
-            if target and target != current:
-                changes.append(
-                    f"- {profile.name} / {stage.value}: {current} → {target}"
-                )
-    return [
+    profiles = suggest_profiles(recommendations)
+    changes = [
+        f"- {profile.name} / {choice.stage.value}: {choice.current} → {choice.model}"
+        + (" (too close to call)" if choice.too_close_to_call else "")
+        for profile in profiles
+        if profile.provider is not None
+        for choice in profile.changes
+    ]
+    lines = [
         "## Suggested profile changes",
         "",
-        "Apply these by hand in `src/mkcv/core/catalog/builtin_model_profiles.py` "
+        "Nothing here is applied automatically. Apply provider profile changes by "
+        "hand in `src/mkcv/core/catalog/builtin_model_profiles.py` "
         f'(set `evidence="eval"` and `eval_run="{manifest.run_id}"`) and '
-        "`docs/models.md`, citing the published report. Each provider profile "
-        "follows that provider's best model. Economy profiles are not changed: "
-        "this rule recommends the best model, not the cheapest.",
+        "`docs/models.md`, citing the published report.",
+        "",
+        "### Provider profiles",
+        "",
+        "Each provider profile follows that provider's best model. Economy "
+        "profiles are not changed: this rule recommends the best model, not "
+        "the cheapest.",
         "",
         *(changes or ["No changes suggested."]),
+    ]
+    recommended = next((p for p in profiles if p.name == RECOMMENDED_PROFILE), None)
+    if recommended is not None:
+        lines.extend(["", *_recommended_lines(recommended)])
+    return lines
+
+
+def _recommended_lines(profile: SuggestedProfile) -> list[str]:
+    rows = [
+        (
+            c.stage.value,
+            c.provider,
+            c.model,
+            _score(c.score),
+            "too close to call" if c.too_close_to_call else "",
+        )
+        for c in profile.choices
+    ]
+    settings: list[str] = []
+    for choice in profile.choices:
+        settings.extend(
+            [
+                f"[default.{STAGE_REQUIREMENTS[choice.stage].config_path}]",
+                f'provider = "{choice.provider}"',
+                f'model = "{choice.model}"',
+                "",
+            ]
+        )
+    return [
+        f"### Cross-provider profile `{RECOMMENDED_PROFILE}`",
+        "",
+        "The best model of every stage, whatever its provider. A built-in "
+        "profile runs on one provider, so until profiles can mix providers this "
+        "is a suggestion for your settings, written below as `mkcv.toml` stage "
+        "overrides.",
+        "",
+        *_table(("Stage", "Provider", "Model", "Quality", "Notes"), rows),
+        "",
+        "```toml",
+        *settings[:-1],
+        "```",
     ]
 
 

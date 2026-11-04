@@ -379,6 +379,12 @@ class TestStageWinners:
 
 
 class TestRecommendations:
+    def test_it_lists_the_stages_it_did_not_evaluate(self) -> None:
+        section = _section(_render(), "Recommendations")
+        assert "Not evaluated:" in section
+        assert "- kb: not evaluated" in section
+        assert "- analyze: not in this run" in section
+
     def test_it_states_the_rule(self) -> None:
         section = _section(_render(), "Recommendations")
         assert "highest quality score" in section
@@ -481,6 +487,32 @@ class TestSuggestedProfileChanges:
 
     def test_it_reminds_that_the_maintainer_applies_changes_by_hand(self) -> None:
         assert "builtin_model_profiles.py" in self._suggested()
+
+    def test_the_recommended_profile_lists_the_overall_winners(self) -> None:
+        suggested = self._suggested(
+            recommendation(provider="google", model="gemini-4-argon", score=0.93)
+        )
+        assert "### Cross-provider profile `recommended`" in suggested
+        assert "| tailor | google | gemini-4-argon | 0.93 |" in suggested
+
+    def test_the_recommended_profile_comes_as_mkcv_settings(self) -> None:
+        suggested = self._suggested(
+            recommendation(provider="google", model="gemini-4-argon"),
+            recommendation(
+                stage=StageKey.COVER_LETTER_GENERATE,
+                provider="anthropic",
+                model="claude-opus-5-5",
+            ),
+        )
+        assert (
+            '[default.pipeline.stages.tailor]\nprovider = "google"\n'
+            'model = "gemini-4-argon"' in suggested
+        )
+        assert "[default.cover_letter.stages.generate]" in suggested
+
+    def test_a_too_close_recommended_choice_is_flagged(self) -> None:
+        suggested = self._suggested(recommendation(too_close_to_call=True))
+        assert "too close to call" in suggested
 
 
 class TestTokenEstimates:
