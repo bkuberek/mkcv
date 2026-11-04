@@ -147,7 +147,7 @@ provider by dispatching on its *kind*, never on its name:
 - `_utils.py` — shared utilities (schema prompts, JSON extraction, validation)
 
 Resolution and configuration:
-- `ProviderRegistry` (`provider_registry.py`) — names, specs, API keys, capability defaults, and adapter creation; falls back to `StubLLMAdapter` (with a warning) if a provider needs a key and none is found
+- `ProviderRegistry` (`provider_registry.py`) — names, specs, API keys, capability defaults, and adapter creation; raises `ConfigurationError` (exit 3) if a provider needs a key and none is found (only an explicit `stub` provider runs offline)
 - `builtin_providers.py` — the built-in providers and the per-kind capability defaults
 - `model_catalog_loader.py` — layers the user's `[[default.model_catalog]]` entries over the built-in catalog
 - `StageResolver` (`stage_resolver.py`) — decides the provider, model, and temperature of each stage and returns `ResolvedStages`
