@@ -1,0 +1,48 @@
+cv:
+  name: Nadia Haddad
+  headline: Enterprise customer success manager who protects renewals, grows net revenue retention, and turns QBRs into expansion.
+  location: Quarry Point, NJ
+  email: nadia.haddad@example.com
+  sections:
+    experience:
+      - company: Brightspan Software
+        position: Senior Customer Success Manager
+        location: Quarry Point, NJ
+        start_date: 2022-04
+        end_date: present
+        highlights:
+          - I manage a book of 28 enterprise accounts worth $6.8M in ARR, with average contract values from $90K to $600K
+          - Delivered 94% gross revenue retention and 112% net revenue retention for the book in fiscal year 2025, against a company average of 104%
+          - Built a customer health score that flagged 9 at-risk accounts about 120 days before renewal; 7 of them renewed, saving $1.3M in ARR
+          - Raised customer satisfaction scores by 27 points across the enterprise book with a new escalation process
+          - Led renewals negotiation with customer procurement teams and converted 11 annual contracts to 3-year terms
+          - Sourced $1.1M in expansion pipeline in Salesforce for account executives, of which $640K closed
+      - company: Brightspan Software
+        position: Customer Success Manager
+        location: Quarry Point, NJ
+        start_date: 2020-01
+        end_date: 2023-03
+        highlights:
+          - Cut onboarding time to first value from 90 days to 55 days with a templated onboarding plan and weekly check-ins
+          - Reduced annual logo churn on a 55-account mid-market book from 14% to 8%
+          - Worked closely with customers to ensure their success and satisfaction
+      - company: Tidewater POS Systems
+        position: Implementation Consultant
+        location: Quarry Point, NJ
+        start_date: 2017-06
+        end_date: 2019-12
+        highlights:
+          - Led onboarding and implementation for 140 restaurant locations across 22 customers and trained about 1,900 restaurant staff
+    skills:
+      - label: Customer success
+        details: Renewals, QBRs and executive business reviews, health scoring, churn risk playbooks, onboarding, expansion
+      - label: Tools
+        details: Salesforce, Zendesk, Looker, SQL
+    education:
+      - institution: Quarry Point College
+        area: Communication
+        degree: BA
+        start_date: 2011-09
+        end_date: 2015-05
+design:
+  theme: sb2nov

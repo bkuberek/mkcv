@@ -1,0 +1,51 @@
+cv:
+  name: Renata Alvarez
+  headline: Clinical informatics nurse who redesigns Epic nursing workflows, leads go-lives, and trains super-users across a 420-bed teaching hospital.
+  location: Velmont, OH
+  email: renata.alvarez@example.com
+  sections:
+    experience:
+      - company: Velmont General Hospital
+        position: Clinical Informatics Nurse
+        location: Velmont, OH
+        start_date: 2023-02
+        end_date: present
+        highlights:
+          - Led the nursing workflow redesign of the Epic admission navigator after a time-and-motion study of 40 admissions, cutting median admission documentation time from 52 minutes to 34 minutes across 11 inpatient units
+          - I served as nursing lead for the 2024-05 Epic upgrade go-live, coordinating 45 super-users and training 310 nurses in 4 weeks
+          - Wrote the clinical requirements and test scripts for a redesigned sepsis screening alert, and the alert's override rate fell from 88% to 61% in six months
+          - Reduced nursing documentation errors by 35% by standardizing flowsheet rows across units
+          - Responsible for various informatics projects and supported system improvements for nursing
+          - Reports quarterly results to the Nursing Informatics Council from Epic Reporting Workbench data analyzed in Excel
+      - company: Velmont General Hospital
+        position: Registered Nurse, Medical ICU
+        location: Velmont, OH
+        start_date: 2016-06
+        end_date: 2023-01
+        highlights:
+          - Charge nurse for a 24-bed medical ICU, managing bed flow and assignments for up to 14 nurses per shift
+          - Epic super-user for the hospital's 2019-10 conversion to Epic, training 70 ICU nurses and giving three weeks of at-the-elbow support
+          - Led weekly central line audits for 18 months as part of a CLABSI prevention bundle, lowering the unit's CLABSI rate from 2.1 to 0.6 per 1,000 line days
+      - company: Saint Brennan Medical Center
+        position: Registered Nurse, Medical-Surgical
+        location: Harrow Point, OH
+        start_date: 2015-07
+        end_date: 2018-05
+        highlights:
+          - Co-led an hourly rounding audit that lowered the unit's fall rate from 3.4 to 2.1 per 1,000 patient days
+          - Rewrote 6 nursing procedures to match current evidence as a member of the unit practice council
+    skills:
+      - label: Clinical informatics
+        details: Nursing workflow analysis, clinical requirements, test scripts, go-live support, super-user programs, end-user training
+      - label: Systems
+        details: Epic ClinDoc, Epic Inpatient Orders, Epic Reporting Workbench, Excel, SQL
+      - label: Languages
+        details: English, Spanish
+    education:
+      - institution: Calloway State University
+        area: Nursing
+        degree: BSN
+        start_date: 2011-08
+        end_date: 2015-05
+design:
+  theme: sb2nov

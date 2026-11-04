@@ -21,7 +21,7 @@ whatever earlier stages would have produced for it. Each output is graded:
 | Kind | Grades |
 |------|--------|
 | By rule | `schema`, `jd_keyword_recall`, `ats_rules` (seven ATS rules), `structure`, `faithfulness_extraction` (numbers, employers, titles, and forbidden skills traced to the knowledge base) |
-| By a judge model | `faithfulness_judge`, `selection_judge`, `tailoring_judge`, and `review_defect_recall` (on the review probe) |
+| By a judge model | `faithfulness_judge`, `selection_judge`, `tailoring_judge`, and `review_defect_recall` (on the review probes) |
 
 It then writes a report with recommendations. The five commands:
 
@@ -60,8 +60,8 @@ Providers you define in `mkcv.toml` work in the matrix too.
    uv run python -m evals estimate
    ```
 
-   For the shipped matrix (ten models over the seven cases) the estimate is
-   about $36, of which about $10 is the judge. These are planning token counts,
+   For the shipped matrix (ten models over the 26 cases) the estimate is
+   about $138, of which about $39 is the judge. These are planning token counts,
    not measurements; `report.md` shows what the run really used. Narrow a run
    with `--models`, `--cases`, or `--stages`, or lower `repeats` in
    `config/matrix.toml`.
@@ -73,9 +73,10 @@ Providers you define in `mkcv.toml` work in the matrix too.
    ```
 
    The reference model (`[reference]` in the matrix) runs stages 1 to 4 for
-   every case and writes the results to `evals/fixtures/reference/<case>/`. The
-   review probe copies its stage 1 to 3 files from `backend-platform-match` and
-   keeps its hand-written resume with three seeded defects.
+   every case and writes the results to `evals/fixtures/reference/<case>/`. Each
+   review probe copies its stage 1 to 3 files from the case that shares its
+   persona and job description, and keeps its hand-written resume with seeded
+   defects.
 
    **Review every file under `evals/fixtures/reference/` by hand** before
    committing them: the references are the input every evaluated model sees, so
@@ -143,6 +144,31 @@ A model is **Eligible** for a stage when at least 95% of its runs completed, its
 `faithfulness_extraction` mean is at least 0.95 and its `faithfulness_judge` mean
 at least 0.90. A model that fails any of these is never recommended, however
 well it writes. The Notes column says which one it missed.
+
+## Fixtures
+
+Every person, employer, school, city, and number in `fixtures/` is invented.
+`cases.toml` pairs 13 personas with 23 job descriptions in 26 cases:
+
+- **Personas** span new graduate to executive and nine fields beyond software
+  (healthcare, education, security, accounting, operations, customer success,
+  design, research, and marketing). Each one carries a hard situation: a career
+  switch, a three-year gap, three short tenures, a freelancer with eleven
+  clients, a thirty-year career, a non-US career, a messy notes-style
+  knowledge base, or a verbose one with far more material than fits.
+- **Match and stretch.** Most personas have a strong match and a stretch job.
+  `forbidden_claims` lists what the job asks for and the knowledge base lacks,
+  so a faithful resume must not claim it. The "overreach" jobs pile on keyword
+  bait. For the newer cases every `expected_keywords` term appears in both the
+  job description and the knowledge base.
+- **Review probes.** `review-probe` seeds three defects; `review-probe-clinical`
+  and `review-probe-customer-success` seed six each (an invented metric, a
+  first-person bullet, a missing requirement the knowledge base supports, a
+  contradicted date, a vague bullet, and an unsupported skill).
+- **Cover letters.** `fixtures/cover_letter_cases.md` lists the cases suited to
+  cover letter evaluation and what each letter must and must not say.
+
+`tests/test_evals/test_fixtures.py` checks these rules.
 
 ## Layout
 

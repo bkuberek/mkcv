@@ -67,3 +67,201 @@ review_probe_defects = [
   "the JD keyword 'Terraform' is missing from the resume",
 ]
 stages = ["review"]
+
+# ---------------------------------------------------------------------------
+# Diverse personas. Each persona usually has one strong match and one stretch.
+#
+# For these cases every expected keyword appears both in the job description
+# and in the knowledge base, so a faithful resume can surface it. Terms the job
+# description asks for and the knowledge base lacks are forbidden_claims;
+# match cases list the preferred qualifications the persona does not have.
+# "overreach" job descriptions bait the model with keywords the persona lacks.
+# ---------------------------------------------------------------------------
+
+# Healthcare, mid-level: ICU nurse moved into clinical informatics.
+[[cases]]
+id = "clinical-informatics-match"
+persona = "personas/clinical-informatics-nurse.md"
+jd = "jds/clinical-informatics-match.md"
+expected_keywords = ["Epic", "nursing informatics", "workflow", "clinical decision support", "super-user", "go-live", "test scripts"]
+forbidden_claims = ["NI-BC"]
+review_probe_defects = []
+
+# Stretch: an Epic analyst role that wants SQL, Tableau, HL7, and Python.
+[[cases]]
+id = "clinical-informatics-stretch"
+persona = "personas/clinical-informatics-nurse.md"
+jd = "jds/clinical-informatics-stretch.md"
+expected_keywords = ["Epic", "ClinDoc", "workflow", "test scripts", "go-live", "Reporting Workbench", "clinical decision support"]
+forbidden_claims = ["SQL", "Tableau", "HL7", "Python"]
+review_probe_defects = []
+
+# Education career switcher: science teacher, now an associate instructional designer.
+[[cases]]
+id = "instructional-design-match"
+persona = "personas/teacher-instructional-designer.md"
+jd = "jds/instructional-design-match.md"
+expected_keywords = ["ADDIE", "Articulate Storyline", "storyboards", "needs analysis", "subject matter experts", "Kirkpatrick", "LMS"]
+forbidden_claims = ["Workday"]
+review_probe_defects = []
+
+# Stretch: a senior developer role at an e-learning studio.
+[[cases]]
+id = "instructional-design-stretch"
+persona = "personas/teacher-instructional-designer.md"
+jd = "jds/instructional-design-stretch.md"
+expected_keywords = ["Articulate Storyline", "SCORM", "LMS", "storyboards", "branching scenarios", "accessibility"]
+forbidden_claims = ["Adobe Captivate", "xAPI", "JavaScript", "After Effects"]
+review_probe_defects = []
+
+# Security, senior: three short tenures in a row (layoff, shutdown, restructuring).
+[[cases]]
+id = "security-cloud-match"
+persona = "personas/security-engineer.md"
+jd = "jds/security-cloud-match.md"
+expected_keywords = ["AWS", "IAM", "detection engineering", "incident response", "Terraform", "Python", "threat modeling", "SOC 2"]
+forbidden_claims = ["Kubernetes"]
+review_probe_defects = []
+
+# Stretch: an offensive application security role with government requirements.
+[[cases]]
+id = "security-appsec-stretch"
+persona = "personas/security-engineer.md"
+jd = "jds/security-appsec-stretch.md"
+expected_keywords = ["threat modeling", "security champions", "Semgrep", "AWS", "Python", "incident response"]
+forbidden_claims = ["OSCP", "fuzzing", "FedRAMP", "Burp Suite"]
+review_probe_defects = []
+
+# Finance, manager: returning after a three-year caregiving break.
+[[cases]]
+id = "accounting-manager-match"
+persona = "personas/accounting-manager-returner.md"
+jd = "jds/accounting-manager-match.md"
+expected_keywords = ["month-end close", "GAAP", "account reconciliations", "NetSuite", "ASC 606", "flux analysis", "CPA"]
+forbidden_claims = ["FloQast"]
+review_probe_defects = []
+
+# Stretch: public-company SEC reporting; the persona has only private-company experience.
+[[cases]]
+id = "accounting-sec-reporting-stretch"
+persona = "personas/accounting-manager-returner.md"
+jd = "jds/accounting-sec-reporting-stretch.md"
+expected_keywords = ["GAAP", "technical accounting memos", "ASC 606", "CPA", "audit", "public accounting"]
+forbidden_claims = ["SEC reporting", "10-K", "SOX", "XBRL", "IFRS"]
+review_probe_defects = []
+
+# Operations, executive: a thirty-year career that must be trimmed to the last 15 years.
+[[cases]]
+id = "operations-vp-match"
+persona = "personas/operations-executive.md"
+jd = "jds/operations-vp-match.md"
+expected_keywords = ["S&OP", "OTIF", "WMS", "3PL", "Lean", "P&L", "inventory turns", "distribution"]
+forbidden_claims = ["SAP"]
+review_probe_defects = []
+
+# Customer success, mid-senior: owns renewals for an enterprise book.
+[[cases]]
+id = "customer-success-match"
+persona = "personas/customer-success-manager.md"
+jd = "jds/customer-success-match.md"
+expected_keywords = ["Gainsight", "Salesforce", "renewals", "QBRs", "net revenue retention", "churn", "onboarding", "expansion"]
+forbidden_claims = ["SQL"]
+review_probe_defects = []
+
+# Overreach: a quota-carrying new-business sales role full of keyword bait.
+[[cases]]
+id = "customer-success-ae-overreach"
+persona = "personas/customer-success-manager.md"
+jd = "jds/customer-success-ae-overreach.md"
+expected_keywords = ["Salesforce", "pipeline", "negotiation", "executive stakeholders", "expansion"]
+forbidden_claims = ["MEDDICC", "quota", "new logo", "Gong"]
+review_probe_defects = []
+
+# Design, mid-senior: freelancer with eleven client engagements returning in-house.
+[[cases]]
+id = "design-product-match"
+persona = "personas/freelance-product-designer.md"
+jd = "jds/design-product-match.md"
+expected_keywords = ["Figma", "design systems", "usability testing", "prototyping", "accessibility", "user research", "B2B SaaS", "WCAG"]
+forbidden_claims = ["Amplitude", "Mixpanel"]
+review_probe_defects = []
+
+# Stretch: a UX engineer role that needs production front-end code.
+[[cases]]
+id = "design-ux-engineer-stretch"
+persona = "personas/freelance-product-designer.md"
+jd = "jds/design-ux-engineer-stretch.md"
+expected_keywords = ["Figma", "design tokens", "HTML", "CSS", "accessibility", "design systems"]
+forbidden_claims = ["React", "TypeScript", "Storybook"]
+review_probe_defects = []
+
+# Research to industry, non-US career: Brazilian and German degrees and titles.
+[[cases]]
+id = "research-applied-scientist-match"
+persona = "personas/research-scientist-international.md"
+jd = "jds/research-applied-scientist-match.md"
+expected_keywords = ["PyTorch", "probabilistic forecasting", "deep learning", "Python", "renewable energy", "graph neural networks", "time series"]
+forbidden_claims = ["Kubernetes", "Spark"]
+review_probe_defects = []
+
+# Marketing, new grad: a sparse, messy, notes-style knowledge base.
+[[cases]]
+id = "marketing-coordinator-match"
+persona = "personas/marketing-new-grad.md"
+jd = "jds/marketing-coordinator-match.md"
+expected_keywords = ["social media", "content calendar", "Canva", "Mailchimp", "Google Analytics", "copywriting", "TikTok"]
+forbidden_claims = ["Klaviyo", "Photoshop"]
+review_probe_defects = []
+
+# Overreach: a marketing operations role that wants years of Marketo and Salesforce.
+[[cases]]
+id = "marketing-ops-overreach"
+persona = "personas/marketing-new-grad.md"
+jd = "jds/marketing-ops-overreach.md"
+expected_keywords = ["HubSpot", "Google Analytics", "email", "Excel", "Google Sheets"]
+forbidden_claims = ["Marketo", "Salesforce", "SQL", "lead scoring", "attribution"]
+review_probe_defects = []
+
+# Data, principal: a verbose knowledge base with far more material than fits.
+[[cases]]
+id = "data-principal-match"
+persona = "personas/principal-data-engineer.md"
+jd = "jds/data-principal-match.md"
+expected_keywords = ["Spark", "Kafka", "Airflow", "dbt", "data contracts", "lakehouse", "data governance", "streaming"]
+forbidden_claims = ["Snowflake", "Iceberg", "Flink"]
+review_probe_defects = []
+
+# More review probes, each a hand-written resume with six documented defects
+# (reference/<probe id>/resume.yaml). Like review-probe, they copy their stage
+# 1-3 references from the case that shares their persona and job description.
+[[cases]]
+id = "review-probe-clinical"
+persona = "personas/clinical-informatics-nurse.md"
+jd = "jds/clinical-informatics-match.md"
+expected_keywords = []
+forbidden_claims = []
+review_probe_defects = [
+  "a metric (\"reduced nursing documentation errors by 35%\") that is not in the knowledge base",
+  "first-person pronoun in a bullet",
+  "the JD requirement 'clinical decision support' is missing from the resume although the knowledge base supports it (the sepsis screening alert work)",
+  "the Medical ICU role's start date (2016-06) contradicts the knowledge base (2018-06) and overlaps the Saint Brennan role",
+  "a vague bullet with no concrete action or impact (\"Responsible for various informatics projects...\")",
+  "the skill 'SQL' is claimed although the knowledge base does not support it",
+]
+stages = ["review"]
+
+[[cases]]
+id = "review-probe-customer-success"
+persona = "personas/customer-success-manager.md"
+jd = "jds/customer-success-match.md"
+expected_keywords = []
+forbidden_claims = []
+review_probe_defects = [
+  "a metric (\"raised customer satisfaction scores by 27 points\") that is not in the knowledge base",
+  "first-person pronoun in a bullet",
+  "the JD requirement 'Gainsight' is missing from the resume although the knowledge base supports it (the health score she built in Gainsight)",
+  "the Customer Success Manager role's end date (2023-03) contradicts the knowledge base (2022-03) and overlaps the Senior Customer Success Manager role",
+  "a vague bullet with no concrete action or impact (\"Worked closely with customers to ensure their success and satisfaction\")",
+  "the skill 'SQL' is claimed although the knowledge base does not support it",
+]
+stages = ["review"]
