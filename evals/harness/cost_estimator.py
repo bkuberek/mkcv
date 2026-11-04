@@ -77,7 +77,8 @@ def estimate_matrix_cost(
     }
 
     judged = matrix.run.judged_stages
-    per_model = repeats * sum(judge_calls(c, s, judged=judged) for c, s in runs)
+    distinct = sum(judge_calls(c, s, judged=judged) for c, s in runs)
+    per_model = repeats * distinct
     skipped = dict(skipped_judges or {}) if per_model and matrix.models else {}
     panel = [judge for judge in matrix.panel if judge.label not in skipped]
     counts: dict[str, int] = {}
@@ -90,6 +91,9 @@ def estimate_matrix_cost(
         label: _judge_cost(
             catalog.price_for(configs[label].model, provider=configs[label].provider),
             count,
+            prefixes=distinct,
+            provider=configs[label].provider,
+            matrix=matrix,
         )
         for label, count in counts.items()
     }
@@ -225,10 +229,41 @@ def _by_provider(*costs: Mapping[str, float | None]) -> dict[str, float | None]:
     }
 
 
-def _judge_cost(price: tuple[float, float] | None, calls: int) -> float | None:
+def _judge_cost(
+    price: tuple[float, float] | None,
+    calls: int,
+    *,
+    prefixes: int,
+    provider: str,
+    matrix: MatrixConfig,
+) -> float | None:
+    """Price ``calls`` judge calls, with the cached prefix when caching is on.
+
+    All calls of a judge on one (case, stage, grader) share a prefix, so
+    ``prefixes`` of them must write it (Anthropic charges extra for that)
+    and the rest can read it, of which ``estimated_hit_rate`` do.
+    """
     if calls == 0:
         return 0.0
-    return _price_tokens(price, calls * JUDGE_INPUT_TOKENS, calls * JUDGE_OUTPUT_TOKENS)
+    if price is None:
+        return None
+    caching = matrix.caching
+    if not caching.enabled:
+        return _price_tokens(
+            price, calls * JUDGE_INPUT_TOKENS, calls * JUDGE_OUTPUT_TOKENS
+        )
+    prefix = JUDGE_INPUT_TOKENS * caching.judge_prefix_share
+    hits = max(0, calls - prefixes) * caching.estimated_hit_rate
+    pricing = matrix.pricing
+    input_tokens = (
+        (calls - hits) * prefix * pricing.cache_write_multiplier.get(provider, 1.0)
+        + hits * prefix * pricing.cache_read_multiplier.get(provider, 1.0)
+        + calls * (JUDGE_INPUT_TOKENS - prefix)
+    )
+    input_price, output_price = price
+    return (
+        input_tokens * input_price + calls * JUDGE_OUTPUT_TOKENS * output_price
+    ) / _TOKENS_PER_MILLION
 
 
 def _price_tokens(

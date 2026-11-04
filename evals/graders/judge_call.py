@@ -27,6 +27,7 @@ async def ask_judge[Judgement: BaseModel](
     ctx: GradingContext,
     *,
     rubric: str,
+    prefix: str = "",
     user: str,
     response_model: type[Judgement],
 ) -> Judgement:
@@ -34,6 +35,12 @@ async def ask_judge[Judgement: BaseModel](
 
     The request is deterministic (temperature 0.0); the judge's own adapter
     drops the temperature if its model rejects sampling settings.
+
+    The messages put what every output of a case shares first, byte for byte
+    the same on every call: the rubric (system), then ``prefix`` (the case's
+    job description, knowledge base, and guidance), and only then ``user``,
+    the output being judged. Providers cache that stable prefix (Anthropic
+    when the eval transport marks it; OpenAI and Gemini on their own).
 
     Raises:
         MkcvError: If the judge call fails (a provider error).
@@ -43,6 +50,7 @@ async def ask_judge[Judgement: BaseModel](
     judgement = await ctx.judge.complete_structured(
         [
             {"role": "system", "content": rubric},
+            *([{"role": "user", "content": prefix}] if prefix else []),
             {"role": "user", "content": user},
         ],
         model=ctx.judge_model,

@@ -10,8 +10,8 @@ from evals.models.run_settings import RunSettings
 
 class MatrixOverrides(BaseModel):
     """Values for ``--stages``, ``--cases``, ``--models``, ``--judge``,
-    ``--concurrency``, ``--single-round``, and ``--no-batch``; None (or False)
-    leaves the matrix file's value in place."""
+    ``--concurrency``, ``--single-round``, ``--no-batch``, and ``--no-cache``;
+    None (or False) leaves the matrix file's value in place."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -22,6 +22,7 @@ class MatrixOverrides(BaseModel):
     concurrency: int | None = None
     single_round: bool = False
     no_batch: bool = False
+    no_cache: bool = False
 
     def apply(self, matrix: MatrixConfig) -> MatrixConfig:
         """Return ``matrix`` with the given overrides applied.
@@ -52,6 +53,11 @@ class MatrixOverrides(BaseModel):
                 else matrix.batch
             ),
             pricing=matrix.pricing,
+            caching=(
+                matrix.caching.model_copy(update={"enabled": False})
+                if self.no_cache
+                else matrix.caching
+            ),
         )
 
     def _run_settings(self, current: RunSettings) -> RunSettings:

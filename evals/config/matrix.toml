@@ -69,6 +69,17 @@ batch_discount = { anthropic = 0.5, openai = 0.5, google = 0.5 }
 cache_read_multiplier = { anthropic = 0.1, openai = 0.5, google = 0.25 }
 cache_write_multiplier = { anthropic = 1.25 }
 
+# Judge requests lead with what every output of a case shares (rubric, job
+# description, knowledge base), byte for byte. Anthropic gets it marked for
+# its prompt cache; OpenAI and Gemini cache it on their own. The estimate
+# assumes that prefix is judge_prefix_share of a judge call's input and that
+# estimated_hit_rate of the calls that could reuse it do (best effort in
+# batches). --no-cache turns the markers off.
+[caching]
+enabled = true
+judge_prefix_share = 0.7
+estimated_hit_rate = 0.5
+
 # Quality first: the best eligible model wins; cost only breaks a tie between
 # models within tie_epsilon of the best score. A model that fabricates in more
 # than max_fabrication_rate of its runs is not eligible.

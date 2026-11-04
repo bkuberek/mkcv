@@ -47,7 +47,8 @@ class DefectRecallGrader(JudgedGrader):
         judgement = await ask_judge(
             ctx,
             rubric=load_rubric(self.rubric),
-            user=_user_message(defects, ctx.output),
+            prefix=_planted(defects),
+            user=f"Review (JSON):\n{json.dumps(ctx.output, indent=2)}\n",
             response_model=DefectJudgement,
         )
         matched = _match(defects, judgement.findings)
@@ -64,12 +65,9 @@ class DefectRecallGrader(JudgedGrader):
         )
 
 
-def _user_message(defects: list[str], review: object) -> str:
+def _planted(defects: list[str]) -> str:
     listed = "\n".join(f"{n}. {text}" for n, text in enumerate(defects, start=1))
-    return (
-        f"Planted defects:\n{listed}\n\n"
-        f"Review (JSON):\n{json.dumps(review, indent=2)}\n"
-    )
+    return f"Planted defects:\n{listed}\n"
 
 
 def _match(

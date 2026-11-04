@@ -31,6 +31,7 @@ from tests.test_evals.grading_support import (
     FIXTURES,
     make_context,
     recorded_json,
+    user_text,
 )
 from tests.test_evals.test_judge_graders import RecordingJudge
 
@@ -288,7 +289,7 @@ class TestFaithfulnessJudge:
             judge_provider="anthropic",
         )
         assert (grade.score, grade.passed) == (1.0, True)
-        user = judge.requests[0]["messages"][1]["content"]
+        user = user_text(judge.requests[0])
         assert "10. " in user
         assert "11. " not in user
 
@@ -304,7 +305,8 @@ class TestFaithfulnessJudge:
             judge_model="m",
             judge_provider="anthropic",
         )
-        system, user = (m["content"] for m in judge.requests[0]["messages"])
+        system = judge.requests[0]["messages"][0]["content"]
+        user = user_text(judge.requests[0])
         assert system == (RUBRICS / "cover_letter_faithfulness.md").read_text()
         assert "Acme Corp" in user
         assert "MLflow" in user
@@ -319,9 +321,7 @@ class TestFaithfulnessJudge:
             judge_model="m",
             judge_provider="anthropic",
         )
-        assert (
-            "invent a reason for leaving" in judge.requests[0]["messages"][1]["content"]
-        )
+        assert "invent a reason for leaving" in user_text(judge.requests[0])
 
     async def test_one_unsupported_sentence_fails(self) -> None:
         judge = self._judge(*["supported"] * 9, "unsupported")
@@ -378,7 +378,7 @@ class TestCoverLetterJudge:
             judge=judge,
             judge_model="m",
         )
-        user = judge.requests[0]["messages"][1]["content"]
+        user = user_text(judge.requests[0])
         assert "Kubernetes migration -> cluster upgrades" in user
 
     async def test_the_judge_sees_what_the_letter_must_and_must_not_do(
@@ -392,14 +392,14 @@ class TestCoverLetterJudge:
             judge=judge,
             judge_model="m",
         )
-        user = judge.requests[0]["messages"][1]["content"]
+        user = user_text(judge.requests[0])
         assert "lead with OTIF" in user
         assert "claim SAP" in user
 
     async def test_without_connections_none_are_listed(self) -> None:
         judge = self._judge()
         await _grade(self.grader, _letter(), judge=judge, judge_model="m")
-        assert "connect" not in judge.requests[0]["messages"][1]["content"].lower()
+        assert "connect" not in user_text(judge.requests[0]).lower()
 
 
 class TestCoverLetterDefectRecall:

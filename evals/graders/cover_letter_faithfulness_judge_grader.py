@@ -21,12 +21,14 @@ class CoverLetterFaithfulnessJudgeGrader(FaithfulnessJudgeGrader):
         except ValueError:
             return []
 
-    def _user_message(self, ctx: GradingContext, bullets: list[str]) -> str:
+    def _prefix(self, ctx: GradingContext) -> str:
         rules = [*ctx.case.cover_letter_forbidden, *ctx.case.letter.must_not]
         forbidden = "\n".join(f"- {rule}" for rule in rules)
         return (
             f"Knowledge base:\n{ctx.kb_text}\n\n"
             f"Job description:\n{ctx.jd_text}\n\n"
-            f"Must not claim:\n{forbidden or '- (nothing listed)'}\n\n"
-            f"Sentences to judge:\n{numbered(bullets)}\n"
+            f"Must not claim:\n{forbidden or '- (nothing listed)'}\n"
         )
+
+    def _user_message(self, ctx: GradingContext, bullets: list[str]) -> str:
+        return f"Sentences to judge:\n{numbered(bullets)}\n"

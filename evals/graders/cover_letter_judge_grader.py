@@ -21,8 +21,8 @@ class CoverLetterJudgeGrader(RubricJudgeGrader):
     )
     output_label = "Cover letter (JSON)"
 
-    def _user_message(self, ctx: GradingContext) -> str:
-        message = super()._user_message(ctx)
+    def _prefix(self, ctx: GradingContext) -> str:
+        message = super()._prefix(ctx)
         letter = ctx.case.letter
         for heading, items in (
             ("A great letter for this job must", letter.must),

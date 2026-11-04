@@ -42,6 +42,7 @@ class FaithfulnessJudgeGrader(JudgedGrader):
         judgement = await ask_judge(
             ctx,
             rubric=load_rubric(self.rubric),
+            prefix=self._prefix(ctx),
             user=self._user_message(ctx, bullets),
             response_model=FaithfulnessJudgement,
         )
@@ -64,11 +65,12 @@ class FaithfulnessJudgeGrader(JudgedGrader):
         claims = extract_claims(ctx.stage, ctx.output)
         return claims.bullets if claims else []
 
+    def _prefix(self, ctx: GradingContext) -> str:
+        """What every output of the case shares: the knowledge base."""
+        return f"Knowledge base:\n{ctx.kb_text}\n"
+
     def _user_message(self, ctx: GradingContext, bullets: list[str]) -> str:
-        return (
-            f"Knowledge base:\n{ctx.kb_text}\n\n"
-            f"Bullets to judge:\n{numbered(bullets)}\n"
-        )
+        return f"Bullets to judge:\n{numbered(bullets)}\n"
 
 
 def numbered(claims: list[str]) -> str:

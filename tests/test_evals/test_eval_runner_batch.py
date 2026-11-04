@@ -164,3 +164,26 @@ async def test_a_resumed_run_does_not_submit_again(
     assert json.loads(lines[0])["grades"] == [
         g.model_dump(mode="json") for g in record.grades
     ]
+
+
+async def test_with_caching_the_judges_prefix_is_marked(
+    make_settings: Callable[..., Dynaconf],
+    tmp_path: Path,
+    batches: SchemaBatches,
+    case: EvalCase,
+) -> None:
+    from evals.models.caching_settings import CachingSettings
+
+    matrix = _matrix().model_copy(update={"caching": CachingSettings(enabled=True)})
+    await _runner(make_settings, tmp_path).run(matrix, [case])
+    judged = [
+        r["params"]
+        for group in batches.created
+        for r in group
+        if r["params"]["model"] == "claude-opus-5-5"
+    ]
+    assert judged
+    for params in judged:
+        assert params["system"][0]["cache_control"] == {"type": "ephemeral"}
+        assert params["messages"][0]["content"][0]["cache_control"]
+        assert isinstance(params["messages"][-1]["content"], str)

@@ -242,6 +242,7 @@ class EvalRunner:
             else None,
             ledger=UsageLedger(usage),
             run_id=self._run_id,
+            cache_prefix=matrix.caching.enabled,
         )
 
     def _kept_records(self) -> list[EvalRecord]:

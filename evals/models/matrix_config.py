@@ -3,6 +3,7 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from evals.models.batch_settings import BatchSettings
+from evals.models.caching_settings import CachingSettings
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.pricing_settings import PricingSettings
@@ -36,6 +37,7 @@ class MatrixConfig(BaseModel):
     )
     batch: BatchSettings = Field(default_factory=BatchSettings)
     pricing: PricingSettings = Field(default_factory=PricingSettings)
+    caching: CachingSettings = Field(default_factory=CachingSettings)
 
     @property
     def panel(self) -> list[JudgeConfig]:

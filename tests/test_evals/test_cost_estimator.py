@@ -9,6 +9,7 @@ from evals.harness.cost_estimator import (
     estimate_matrix_cost,
     estimate_tournament_cost,
 )
+from evals.models.caching_settings import CachingSettings
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import EvalCase
 from evals.models.judge_config import JudgeConfig
@@ -439,3 +440,61 @@ class TestAssumedSurvivors:
             MODELS, TournamentSettings(keep_top=4), ModelCatalog.builtin()
         )
         assert [m.label for m in survivors][3:] == ["google/gemini-3.5-flash-lite"]
+
+
+class TestCachingEstimate:
+    """Judge calls of one case share a cached prefix across models and repeats."""
+
+    def _matrix(self, provider: str, model: str, **caching: object) -> MatrixConfig:
+        return MatrixConfig(
+            run=RunSettings(stages=[StageKey.SELECT], repeats=2),
+            judges=[JudgeConfig(provider=provider, model=model)],
+            reference=JUDGE,
+            models=[_unit_model("m"), _unit_model("n")],
+            caching=CachingSettings(enabled=True, **caching),  # type: ignore[arg-type]
+        )
+
+    def _cost(self, matrix: MatrixConfig) -> float:
+        catalog = ModelCatalog(
+            [
+                _priced("p", "m", 0.0, 0.0),
+                _priced("p", "n", 0.0, 0.0),
+                _priced("anthropic", "opus", 1.0, 0.0),
+                _priced("openai", "astra", 1.0, 0.0),
+            ]
+        )
+        cost = estimate_matrix_cost(matrix, [_case()], catalog).judge_cost_usd
+        assert cost is not None
+        return cost
+
+    def test_without_caching_every_prompt_token_is_full_price(self) -> None:
+        matrix = self._matrix("anthropic", "opus").model_copy(
+            update={"caching": CachingSettings(enabled=False)}
+        )
+        assert self._cost(matrix) == pytest.approx(4 * JUDGE_INPUT_TOKENS / PER_MILLION)
+
+    def test_anthropic_writes_the_prefix_once_and_reads_it_after(self) -> None:
+        cost = self._cost(
+            self._matrix(
+                "anthropic", "opus", judge_prefix_share=0.5, estimated_hit_rate=1.0
+            )
+        )
+        prefix, rest = 3000, 3000
+        # 4 calls, 1 distinct prefix: 1 write at 1.25x, 3 reads at 0.1x
+        expected = (prefix * 1.25 + 3 * prefix * 0.1 + 4 * rest) / PER_MILLION
+        assert cost == pytest.approx(expected)
+
+    def test_openai_reads_at_its_multiplier_with_no_write_premium(self) -> None:
+        cost = self._cost(
+            self._matrix(
+                "openai", "astra", judge_prefix_share=0.5, estimated_hit_rate=1.0
+            )
+        )
+        expected = (3000 + 3 * 3000 * 0.5 + 4 * 3000) / PER_MILLION
+        assert cost == pytest.approx(expected)
+
+    def test_the_hit_rate_scales_the_reads(self) -> None:
+        full = self._cost(self._matrix("openai", "astra", estimated_hit_rate=1.0))
+        none = self._cost(self._matrix("openai", "astra", estimated_hit_rate=0.0))
+        half = self._cost(self._matrix("openai", "astra", estimated_hit_rate=0.5))
+        assert half == pytest.approx((full + none) / 2)

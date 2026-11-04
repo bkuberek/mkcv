@@ -118,3 +118,12 @@ JUDGED_CRITERIA = (
     "clarity",
     "prioritization",
 )
+
+
+def user_text(request: dict[str, Any]) -> str:
+    """Every user message of a recorded judge request, joined in order."""
+    return "\n".join(
+        message["content"]
+        for message in request["messages"]
+        if message["role"] == "user"
+    )

@@ -576,3 +576,7 @@ class TestNeededReferences:
         case.reference_dir.mkdir(parents=True)
         (case.reference_dir / "cover_letter_content.json").write_text("{}")
         assert case.reference_stages() == [StageKey.COVER_LETTER_GENERATE]
+
+
+def test_the_shipped_matrix_caches_the_judges_prefix() -> None:
+    assert load_matrix(DEFAULT_MATRIX).caching.enabled is True

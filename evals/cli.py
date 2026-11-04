@@ -171,6 +171,11 @@ def _add_batch_argument(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="call every model online instead of in provider batches",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="do not mark (or price) the judges' cached prompt prefix",
+    )
 
 
 def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
@@ -474,6 +479,7 @@ def _load_plan(
         concurrency=getattr(args, "concurrency", None),
         single_round=args.single_round,
         no_batch=args.no_batch,
+        no_cache=args.no_cache,
     )
     matrix = overrides.apply(load_matrix(args.matrix))
     known = load_cases(args.fixtures)

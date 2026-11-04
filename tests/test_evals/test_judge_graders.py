@@ -29,6 +29,7 @@ from tests.test_evals.grading_support import (
     CASE_BY_ID,
     make_context,
     recorded_json,
+    user_text,
 )
 
 RUBRICS = Path(evals.graders.__file__).parent / "rubrics"
@@ -322,7 +323,7 @@ class TestFaithfulnessJudge:
     async def test_the_system_message_is_the_rubric(self) -> None:
         judge = RecordingJudge(_verdicts("supported"))
         await self.grader.grade(_judged(StageKey.TAILOR, _tailored(1), judge))
-        system, _ = judge.requests[0]["messages"]
+        system = judge.requests[0]["messages"][0]
         assert system["role"] == "system"
         assert system["content"] == (RUBRICS / "faithfulness.md").read_text(
             encoding="utf-8"
@@ -334,20 +335,28 @@ class TestFaithfulnessJudge:
         output = _tailored(2)
         judge = RecordingJudge(_verdicts("supported", "supported"))
         await self.grader.grade(_judged(StageKey.TAILOR, output, judge))
-        _, user = judge.requests[0]["messages"]
+        _, prefix, user = judge.requests[0]["messages"]
         first, second = _bullets(output)
-        assert user["role"] == "user"
-        assert BACKEND_KB in user["content"]
+        assert (prefix["role"], user["role"]) == ("user", "user")
+        assert BACKEND_KB in prefix["content"]
         assert f"1. {first}" in user["content"]
         assert f"2. {second}" in user["content"]
-        assert user["content"].index(BACKEND_KB) < user["content"].index(f"1. {first}")
+
+    async def test_the_knowledge_base_comes_first_as_a_stable_prefix(self) -> None:
+        judge = RecordingJudge(_verdicts("supported"))
+        await self.grader.grade(_judged(StageKey.TAILOR, _tailored(1), judge))
+        other = RecordingJudge(_verdicts("supported"))
+        await self.grader.grade(_judged(StageKey.TAILOR, _tailored(2), other))
+        prefix = judge.requests[0]["messages"][1]["content"]
+        assert prefix == other.requests[0]["messages"][1]["content"]
+        assert "Bullets" not in prefix
 
     async def test_the_original_bullets_are_not_shown_to_the_judge(self) -> None:
         output = _tailored(1)
         output["roles"][0]["bullets"][0]["original"] = "SECRET ORIGINAL TEXT"
         judge = RecordingJudge(_verdicts("supported"))
         await self.grader.grade(_judged(StageKey.TAILOR, output, judge))
-        assert "SECRET ORIGINAL TEXT" not in judge.requests[0]["messages"][1]["content"]
+        assert "SECRET ORIGINAL TEXT" not in user_text(judge.requests[0])
 
     async def test_without_bullets_there_is_nothing_to_judge_and_no_call(self) -> None:
         judge = RecordingJudge(_verdicts("supported"))
@@ -460,7 +469,7 @@ class TestRubricJudges:
         output = _tailored()
         judge = RecordingJudge(_rubric(3, 3, 3, 3, 3))
         await TailoringJudgeGrader().grade(_judged(StageKey.TAILOR, output, judge))
-        content = judge.requests[0]["messages"][1]["content"]
+        content = user_text(judge.requests[0])
         assert JD_TEXT in content
         assert BACKEND_KB in content
         assert json.dumps(output, indent=2) in content
@@ -581,7 +590,7 @@ class TestReviewDefectRecall:
     async def test_the_user_message_lists_the_defects_and_the_review(self) -> None:
         judge = RecordingJudge(_defects(True, True, True))
         await self.grader.grade(self._context(judge))
-        content = judge.requests[0]["messages"][1]["content"]
+        content = user_text(judge.requests[0])
         for position, text in enumerate(
             CASE_BY_ID["review-probe"].review_probe_defects, start=1
         ):

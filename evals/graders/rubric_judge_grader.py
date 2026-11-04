@@ -43,6 +43,7 @@ class RubricJudgeGrader(JudgedGrader):
         judgement = await ask_judge(
             ctx,
             rubric=load_rubric(self.rubric),
+            prefix=self._prefix(ctx),
             user=self._user_message(ctx),
             response_model=RubricJudgement,
         )
@@ -58,9 +59,9 @@ class RubricJudgeGrader(JudgedGrader):
         mean = sum(item.score for item in judgement.criteria) / len(judgement.criteria)
         return Grade(name=self.name, score=mean / MAX_SCORE, details=details)
 
+    def _prefix(self, ctx: GradingContext) -> str:
+        """What every output of the case shares: the job and the knowledge base."""
+        return f"Job description:\n{ctx.jd_text}\n\nKnowledge base:\n{ctx.kb_text}\n"
+
     def _user_message(self, ctx: GradingContext) -> str:
-        return (
-            f"Job description:\n{ctx.jd_text}\n\n"
-            f"Knowledge base:\n{ctx.kb_text}\n\n"
-            f"{self.output_label}:\n{json.dumps(ctx.output, indent=2)}\n"
-        )
+        return f"{self.output_label}:\n{json.dumps(ctx.output, indent=2)}\n"
