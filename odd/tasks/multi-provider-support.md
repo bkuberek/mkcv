@@ -255,4 +255,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-T01-T11 are implemented and committed on `feat/multi-provider-support` (P1-P3 complete). Next: T12 (eval package scaffolding, models, case loading, and cost estimate); it needs `create_provider_registry` and `create_model_report`'s resolver pieces from the factory, `STAGE_REQUIREMENTS`, and `load_model_catalog`. P4 (T12-T17) is the remaining work, then the owner actions at the end of `tasks.md`.
+T01-T11 are implemented and committed on `feat/multi-provider-support` (P1-P3 complete). Next: T12 (eval package scaffolding, models, case loading, and cost estimate); it builds on `STAGE_REQUIREMENTS`, `StageKey`, `load_model_catalog`, and the factory (`create_provider_registry` gives access to the catalog with the user's overrides). P4 (T12-T17) is the remaining work, then the owner actions at the end of `tasks.md`.
