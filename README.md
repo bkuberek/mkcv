@@ -33,7 +33,7 @@ brew install bkuberek/tap/mkcv
 
 # Set up an API key (at least one provider) in your user config file
 mkdir -p ~/.config/mkcv
-cat > ~/.config/mkcv/settings.toml <<'EOF'
+cat >> ~/.config/mkcv/settings.toml <<'EOF'
 [default.providers.anthropic]
 api_key = "sk-ant-..."
 EOF
@@ -259,7 +259,7 @@ mkcv models --json                       # Machine-readable output
 
 `mkcv generate` and `mkcv cover-letter` print the same warnings before they
 run when a stage uses a weak or unknown model, or when a provider's API key is
-missing. Warnings never stop a run.
+missing. Model warnings never stop a run; a missing API key does (exit code 3).
 
 ## Configuration
 
