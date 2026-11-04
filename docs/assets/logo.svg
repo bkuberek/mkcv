@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="mkcv-logo-title">
+  <title id="mkcv-logo-title">mkcv</title>
+  <!-- Ink tile. Every coordinate sits on a 16-unit grid (1px at 32px). -->
+  <rect width="512" height="512" rx="112" fill="#15181E"/>
+  <!-- Prompt chevron, spanning exactly the three text rows. -->
+  <path d="M96 128h64l88 120-88 120H96l88-120z" fill="#F2EEE6"/>
+  <!-- Typeset lines: a full measure, then a shorter one. -->
+  <path d="M288 128h128v48H288zM288 224h96v48h-96z" fill="#F2EEE6"/>
+  <!-- Cursor: the line still being written. -->
+  <rect x="288" y="320" width="64" height="48" fill="#E4572E"/>
+</svg>

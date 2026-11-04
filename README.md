@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/banner.png" alt="mkcv — AI-tailored, ATS-ready resumes from the command line" width="100%"></p>
+
 # mkcv
 
 [![CI](https://github.com/bkuberek/mkcv/actions/workflows/ci.yml/badge.svg)](https://github.com/bkuberek/mkcv/actions/workflows/ci.yml)
