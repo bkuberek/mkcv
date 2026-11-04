@@ -36,7 +36,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 
 - [x] T01: Model capability catalog and catalog-derived pricing (route: delegated; 11 new core modules + pricing) - `dc5a0ad`
 - [x] T02: OpenAI-compatible adapter with structured-output fallback chain (route: delegated; 6 new adapter modules) - `703caff`
-- [ ] T03: Native OpenAI adapter with strict structured outputs (route: delegated; adapter rewrite + test rewrite)
+- [x] T03: Native OpenAI adapter with strict structured outputs (route: delegated; adapter rewrite + test rewrite) - `baecd67`
 - [ ] T04: Capability-driven Anthropic request shaping (route: delegated; adapter + tests)
 - [ ] T05: Provider registry, catalog overrides, and factory dispatch (route: delegated; registry, loader, factory, services, workspace README)
 
@@ -97,6 +97,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 |---|---|---|---|---|
 | T01 | `dc5a0ad` | `ModuleNotFoundError: No module named 'mkcv.core.models.capability_overlay'` | 269 focused, 1799 full | pending (parent runs `gentle-ai review assess`) |
 | T02 | `703caff` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.strict_schema'` | 311 focused, 2110 full | pending (parent runs `gentle-ai review assess`) |
+| T03 | `baecd67` | `KeyError: 'max_completion_tokens'` (request still sent json_object, temperature, max_tokens) | 82 focused (test_openai + test_factory), 2148 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -116,6 +117,12 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Decision: a response with `usage is None` records `TokenUsage()` (zero) instead of keeping the previous call's usage, so `get_last_usage()` always describes the latest call.
 - Decision: the strict-schema walker treats `properties` as a name-to-schema mapping, so a property called `title`, `default`, or `format` is not mistaken for a keyword (`test_properties_named_like_keywords_are_not_filtered`).
 - The parent adapter checks `message.refusal` with an `isinstance(str)` guard so a mocked message (truthy `MagicMock`) cannot masquerade as a refusal. `ollama.py` and its tests are untouched until T05.
+
+**T03** (route: delegated writer, trigger: adapter rewrite plus test rewrite).
+
+- Verification: `uv run pytest -q tests/test_adapters/test_llm/test_openai.py tests/test_adapters/test_llm/test_factory.py`: 82 passed; ruff check/format, `uv run mypy src/`: clean; `uv run pytest -q`: 2148 passed, exit 0.
+- `OpenAIAdapter` has no method overrides, as the design predicted: refusal, truncation, adaptation, and repair live in the parent. The rewritten `test_openai.py` covers REQ-OAI-1 to 10 with SDK `ChatCompletion` objects; the max_tokens-to-max_completion_tokens adaptation (REQ-OAI-8) is exercised with a custom resolver whose `token_param` is `max_tokens`.
+- `factory.py` still constructs `OpenAIAdapter(api_key=..., base_url=...)` for `openai` and `openrouter`; `test_factory.py` passes unchanged. Note that until T05 `openrouter` runs on `OpenAIAdapter`, so it now gets strict JSON-schema output with no degradation; T05 moves it to `OpenAICompatibleAdapter`.
 
 ## Decisions (rationale in `design.md` §1 and §15)
 
