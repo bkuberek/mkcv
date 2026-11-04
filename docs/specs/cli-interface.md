@@ -409,5 +409,5 @@ prefix:
 | `OPENROUTER_API_KEY` | OpenRouter |
 
 A provider you define under `[default.providers.<name>]` names its own
-variable with `api_key_env`. Ollama needs no key. A missing key makes mkcv warn
-and fall back to the offline stub.
+variable with `api_key_env`. Ollama needs no key. A missing key stops the command
+with a configuration error (exit code 3); use `--provider stub` for offline runs.
