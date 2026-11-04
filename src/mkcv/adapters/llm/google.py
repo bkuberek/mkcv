@@ -27,6 +27,7 @@ from mkcv.adapters.llm._utils import (
 )
 from mkcv.adapters.llm.model_resolver import ModelResolver, builtin_resolver
 from mkcv.adapters.llm.request_adaptation import rejected_parameter
+from mkcv.adapters.llm.vertex_target import VertexTarget
 from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.exceptions.context_length import ContextLengthError
 from mkcv.core.exceptions.provider import ProviderError
@@ -69,8 +70,28 @@ _PARSE_ERRORS = (ValueError, ValidationError)
 type _RequestBuilder = Callable[[], dict[str, Any]]
 
 
+def _create_client(
+    api_key: str | None,
+    vertex: VertexTarget | None,
+    http_options: types.HttpOptions | None,
+) -> genai.Client:
+    if vertex is not None:
+        pinned = {"credentials": vertex.credentials} if vertex.credentials else {}
+        return genai.Client(
+            vertexai=True,
+            project=vertex.project,
+            location=vertex.location,
+            http_options=http_options,
+            **pinned,
+        )
+    return genai.Client(api_key=api_key, http_options=http_options)
+
+
 class GoogleGeminiAdapter:
-    """LLM adapter for the Gemini API.
+    """LLM adapter for the Gemini API, or for Gemini on Vertex AI.
+
+    With a ``vertex`` target the client authenticates with Application Default
+    Credentials and no API key is used.
 
     Request shape per model comes from the capability resolver: whether
     ``temperature`` is sent and the output-token floor. When Gemini rejects
@@ -82,14 +103,15 @@ class GoogleGeminiAdapter:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         *,
+        vertex: VertexTarget | None = None,
         base_url: str | None = None,
         resolver: ModelResolver | None = None,
         provider_name: str = "google",
     ) -> None:
         http_options = types.HttpOptions(base_url=base_url) if base_url else None
-        self._client = genai.Client(api_key=api_key, http_options=http_options)
+        self._client = _create_client(api_key, vertex, http_options)
         self._resolver = resolver or builtin_resolver(ProviderKind.GOOGLE)
         self._provider_name = provider_name
         self._last_usage = TokenUsage()

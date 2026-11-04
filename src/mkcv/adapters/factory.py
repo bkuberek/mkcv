@@ -652,12 +652,12 @@ def create_model_report(
 
 
 def _missing_key_warning(registry: ProviderRegistry, provider: str) -> ModelWarning:
-    """Build the warning for a provider whose API key cannot be found."""
-    variables = registry.get(provider).api_key_env
-    where = (
-        " or ".join(variables)
-        if variables
-        else f"api_key in [default.providers.{provider}]"
+    """Build the warning for a provider whose credentials cannot be found."""
+    hint = registry.credential_hint(provider)
+    found = (
+        f"no Application Default Credentials found ({hint})"
+        if registry.uses_vertex(provider)
+        else f"no API key found (set {hint})"
     )
     return ModelWarning(
         kind=ModelWarningKind.MISSING_API_KEY,
@@ -665,8 +665,7 @@ def _missing_key_warning(registry: ProviderRegistry, provider: str) -> ModelWarn
         provider=provider,
         model=None,
         message=(
-            f"{provider}: no API key found (set {where}); "
-            "a run that uses it stops with a configuration error."
+            f"{provider}: {found}; a run that uses it stops with a configuration error."
         ),
     )
 

@@ -1,9 +1,11 @@
 """Tests for command-line overrides of the matrix and credential splitting."""
 
 from collections.abc import Callable
+from unittest.mock import MagicMock, patch
 
 import pytest
 from dynaconf import Dynaconf
+from google.auth.exceptions import DefaultCredentialsError
 
 from evals.harness.credentials import split_by_credentials
 from evals.models.judge_config import JudgeConfig
@@ -154,3 +156,33 @@ class TestSplitByCredentials:
         registry = create_provider_registry(make_settings())
         with pytest.raises(ConfigurationError, match="Unknown LLM provider 'nowhere'"):
             split_by_credentials(registry, [MatrixModel(provider="nowhere", model="m")])
+
+
+GEMINI = MatrixModel(provider="google", model="gemini-3.8-flash")
+VERTEX_SETTINGS = "[default.providers.google]\nvertexai = true\n"
+
+
+class TestSplitByCredentialsWithVertex:
+    def test_google_with_adc_is_runnable_without_a_key(
+        self, make_settings: Callable[..., Dynaconf]
+    ) -> None:
+        registry = create_provider_registry(make_settings(VERTEX_SETTINGS))
+        with patch("google.auth.default", return_value=(MagicMock(), "p")):
+            assert split_by_credentials(registry, [GEMINI]) == ([GEMINI], [])
+
+    def test_google_without_adc_is_skipped_with_the_login_hint(
+        self, make_settings: Callable[..., Dynaconf]
+    ) -> None:
+        registry = create_provider_registry(make_settings(VERTEX_SETTINGS))
+        with patch("google.auth.default", side_effect=DefaultCredentialsError("x")):
+            runnable, skipped = split_by_credentials(registry, [GEMINI])
+        assert runnable == []
+        assert "gcloud auth application-default login" in skipped[0]
+
+    def test_google_without_a_key_mentions_the_adc_alternative(
+        self, make_settings: Callable[..., Dynaconf]
+    ) -> None:
+        registry = create_provider_registry(make_settings())
+        _, skipped = split_by_credentials(registry, [GEMINI])
+        assert "GEMINI_API_KEY" in skipped[0]
+        assert "Application Default Credentials" in skipped[0]

@@ -2,10 +2,11 @@
 
 from pathlib import Path
 from typing import Any, ClassVar
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from dynaconf import Dynaconf
+from google.auth.exceptions import DefaultCredentialsError
 
 from mkcv.adapters import factory as factory_module
 from mkcv.adapters.factory import (
@@ -1079,7 +1080,34 @@ model = "gemini-2.5-flash"
         config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
         report = create_model_report(config, model_profile="google")
         assert report.warnings[0].message == (
-            "google: no API key found (set GEMINI_API_KEY or GOOGLE_API_KEY); "
+            "google: no API key found (set GEMINI_API_KEY or GOOGLE_API_KEY, or "
+            "use Vertex AI with Application Default Credentials: set "
+            "vertexai = true in [default.providers.google] and run "
+            "'gcloud auth application-default login'); "
+            "a run that uses it stops with a configuration error."
+        )
+
+    def test_vertex_google_with_adc_raises_no_warning(self, tmp_path: Path) -> None:
+        config = _real_config(
+            tmp_path,
+            _EMPTY_USER_CONFIG + "[default.providers.google]\nvertexai = true\n",
+        )
+        with patch("google.auth.default", return_value=(MagicMock(), "p")):
+            report = create_model_report(config, model_profile="google")
+        assert report.warnings == []
+
+    def test_vertex_google_without_adc_warns_about_credentials(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(
+            tmp_path,
+            _EMPTY_USER_CONFIG + "[default.providers.google]\nvertexai = true\n",
+        )
+        with patch("google.auth.default", side_effect=DefaultCredentialsError("x")):
+            report = create_model_report(config, model_profile="google")
+        assert report.warnings[0].message == (
+            "google: no Application Default Credentials found (run "
+            "'gcloud auth application-default login'); "
             "a run that uses it stops with a configuration error."
         )
 
