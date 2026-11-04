@@ -5,11 +5,13 @@ from evals.graders.faithfulness_extraction_grader import FaithfulnessExtractionG
 from evals.graders.faithfulness_judge_grader import FaithfulnessJudgeGrader
 from evals.graders.grader import Grader
 from evals.graders.jd_recall_grader import JdRecallGrader
+from evals.graders.judged_grader import JudgedGrader
 from evals.graders.review_defect_grader import ReviewDefectGrader
 from evals.graders.schema_grader import SchemaGrader
 from evals.graders.selection_judge_grader import SelectionJudgeGrader
 from evals.graders.structure_grader import StructureGrader
 from evals.graders.tailoring_judge_grader import TailoringJudgeGrader
+from evals.models.eval_case import EvalCase
 from mkcv.core.models.stage_key import StageKey
 
 STAGE_GRADERS: dict[StageKey, tuple[Grader, ...]] = {
@@ -40,9 +42,29 @@ review defect grader does so on every case but the probe.
 """
 
 JUDGE_STAGES: frozenset[StageKey] = frozenset(
-    {StageKey.SELECT, StageKey.TAILOR, StageKey.REVIEW}
+    stage
+    for stage, graders in STAGE_GRADERS.items()
+    if any(isinstance(grader, JudgedGrader) for grader in graders)
 )
 """Stages with a judge grader (the review one applies to the probe case only)."""
+
+JUDGED_GRADES: frozenset[str] = frozenset(
+    grader.name
+    for graders in STAGE_GRADERS.values()
+    for grader in graders
+    if isinstance(grader, JudgedGrader)
+)
+"""Names of the grades the judge panel scores."""
+
+
+def judge_calls(case: EvalCase, stage: StageKey) -> int:
+    """Return the calls each judge makes to grade one run of ``case`` at ``stage``."""
+    return sum(
+        1
+        for grader in STAGE_GRADERS.get(stage, ())
+        if isinstance(grader, JudgedGrader) and grader.applies_to(case)
+    )
+
 
 PRIMARY_METRIC: dict[StageKey, str] = {
     StageKey.ANALYZE: "jd_keyword_recall",

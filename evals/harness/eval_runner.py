@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING, Any, TextIO
 import mkcv
 from evals.graders.grader import Grader
 from evals.graders.grading_context import GradingContext
+from evals.graders.judge_panel import PanelVerdict, combine_panel
+from evals.graders.judged_grader import JudgedGrader
 from evals.graders.stage_graders import STAGE_GRADERS
-from evals.harness.judge_factory import create_judge, judge_unavailable_reason
+from evals.harness.judge_factory import create_judge, split_judges
 from evals.harness.run_files import MANIFEST_FILE, RESULTS_FILE
 from evals.harness.stage_run import StageRun
 from evals.harness.stage_runner import StageRunner, work_dir_for
@@ -60,11 +62,15 @@ def current_git_sha(directory: Path) -> str | None:
 
 @dataclass(frozen=True)
 class _Judge:
-    """The judge adapter a run created once, with who it is."""
+    """A judge adapter a run created once, with who it is."""
 
     adapter: LLMPort
     provider: str
     model: str
+
+    @property
+    def label(self) -> str:
+        return f"{self.provider}/{self.model}"
 
 
 @dataclass(frozen=True)
@@ -74,7 +80,7 @@ class _RunTools:
     runner: StageRunner
     gate: asyncio.Semaphore
     sink: TextIO
-    judge: _Judge | None
+    judges: tuple[_Judge, ...]
 
 
 class EvalRunner:
@@ -84,9 +90,11 @@ class EvalRunner:
     ``run.json`` exists from the start, so an interrupted run still leaves
     its results and manifest on disk.
 
-    The judge is created once per run. Without credentials for its provider
-    the run goes on without judge grades and the manifest says why. When the
-    records are in, ``summary.json`` and ``report.md`` are written beside them.
+    Each judge of the panel is created once per run and scores every judged
+    output. A judge without credentials for its provider is left out and the
+    manifest says why; with no judge at all the run goes on without judge
+    grades. When the records are in, ``summary.json`` and ``report.md`` are
+    written beside them.
     """
 
     def __init__(
@@ -120,19 +128,19 @@ class EvalRunner:
                 recorded in the manifest.
         """
         registry = create_provider_registry(self._config)
-        judge_skipped = judge_unavailable_reason(registry, matrix.judge)
-        judge = None if judge_skipped else _create_judge(registry, matrix.judge)
+        runnable, skipped_judges = split_judges(registry, matrix.panel)
+        judges = tuple(_create_judge(registry, judge) for judge in runnable)
 
         self._out_dir.mkdir(parents=True, exist_ok=True)
         manifest = self._manifest(
-            matrix, cases, skipped_models, registry.catalog, judge_skipped
+            matrix, cases, skipped_models, registry.catalog, skipped_judges
         )
         self._write_manifest(manifest)
 
         runner = StageRunner(self._config, preset=matrix.run.preset)
         gate = asyncio.Semaphore(matrix.run.concurrency)
         with (self._out_dir / RESULTS_FILE).open("w", encoding="utf-8") as sink:
-            tools = _RunTools(runner, gate, sink, judge)
+            tools = _RunTools(runner, gate, sink, judges)
             async with asyncio.TaskGroup() as group:
                 tasks = [
                     group.create_task(self._run_job(tools, case, stage, model, repeat))
@@ -160,7 +168,7 @@ class EvalRunner:
         async with tools.gate:
             work_dir = work_dir_for(self._out_dir, case.id, stage, model, repeat)
             result = await tools.runner.run(case, stage, model, repeat, work_dir)
-            grades = await self._grade(case, stage, model, result, tools.judge)
+            grades = await self._grade(case, stage, model, result, tools.judges)
             record = self._record(case, stage, model, repeat, result, grades)
             tools.sink.write(record.model_dump_json() + "\n")
             tools.sink.flush()
@@ -174,14 +182,15 @@ class EvalRunner:
         stage: StageKey,
         model: MatrixModel,
         result: StageRun,
-        judge: _Judge | None,
+        judges: Sequence[_Judge],
     ) -> list[Grade]:
         """Run the stage's graders on an ``ok`` output; other results have none.
 
-        A grader that fails with an mkcv, OS, or value error (a judge call, say)
-        leaves a grade without a score that names the error, so the run goes
-        on. A grader that does not apply (no judge, no seeded defects) adds
-        nothing.
+        A judged grader is asked once per judge, concurrently, and the
+        judges' grades are combined into one. A grader that fails with an
+        mkcv, OS, or value error (a judge call, say) leaves a grade without a
+        score that names the error, so the run goes on. A grader that does
+        not apply (no judge, no seeded defects) adds nothing.
         """
         if result.status != "ok":
             return []
@@ -192,17 +201,14 @@ class EvalRunner:
             jd_text=case.jd_text,
             output=result.payload,
             reference=_upstream_reference(case, stage),
-            judge=judge.adapter if judge else None,
-            judge_model=judge.model if judge else None,
-            judge_provider=judge.provider if judge else None,
             evaluated_provider=model.provider,
         )
         grades: list[Grade] = []
         for grader in self._graders.get(stage, ()):
-            try:
-                grade = await grader.grade(context)
-            except (MkcvError, OSError, ValueError) as error:
-                grade = Grade(name=grader.name, details={"error": str(error)})
+            if isinstance(grader, JudgedGrader):
+                grade = await _panel_grade(grader, context, judges)
+            else:
+                grade = await _safe_grade(grader, context)
             if grade is not None:
                 grades.append(grade)
         return grades
@@ -217,6 +223,7 @@ class EvalRunner:
         grades: list[Grade],
     ) -> EvalRecord:
         metadata = result.metadata
+        judges = _judges_of(grades)
         return EvalRecord(
             run_id=self._run_id,
             case_id=case.id,
@@ -231,9 +238,8 @@ class EvalRunner:
             cost_usd=metadata.cost_usd if metadata else 0.0,
             latency_s=metadata.duration_seconds if metadata else 0.0,
             grades=grades,
-            judge=next(
-                (g.details["judge"] for g in grades if "judge" in g.details), None
-            ),
+            judge=", ".join(judges) or None,
+            judges=judges,
         )
 
     def _manifest(
@@ -242,7 +248,7 @@ class EvalRunner:
         cases: Sequence[EvalCase],
         skipped_models: Sequence[str],
         catalog: ModelCatalog,
-        judge_skipped: str | None,
+        skipped_judges: dict[str, str],
     ) -> RunManifest:
         return RunManifest(
             run_id=self._run_id,
@@ -250,11 +256,11 @@ class EvalRunner:
             mkcv_version=mkcv.__version__,
             git_sha=current_git_sha(REPO_ROOT),
             matrix=matrix,
-            judge=matrix.judge,
+            judges=matrix.panel,
             catalog_prices=_catalog_prices(matrix, catalog),
             cases=[case.id for case in cases],
             skipped_models=list(skipped_models),
-            judge_skipped=judge_skipped,
+            skipped_judges=skipped_judges,
         )
 
     def _write_manifest(self, manifest: RunManifest) -> None:
@@ -266,6 +272,49 @@ class EvalRunner:
 def _create_judge(registry: ProviderRegistry, config: "JudgeConfig") -> _Judge:
     adapter, model = create_judge(registry, config)
     return _Judge(adapter=adapter, provider=config.provider, model=model)
+
+
+async def _safe_grade(grader: Grader, context: GradingContext) -> Grade | None:
+    try:
+        return await grader.grade(context)
+    except (MkcvError, OSError, ValueError) as error:
+        return Grade(name=grader.name, details={"error": str(error)})
+
+
+async def _panel_grade(
+    grader: JudgedGrader, context: GradingContext, judges: Sequence[_Judge]
+) -> Grade | None:
+    """Ask every judge, then combine their grades into the panel's grade."""
+    contexts = [
+        context.model_copy(
+            update={
+                "judge": judge.adapter,
+                "judge_model": judge.model,
+                "judge_provider": judge.provider,
+            }
+        )
+        for judge in judges
+    ]
+    grades = await asyncio.gather(*(_safe_grade(grader, c) for c in contexts))
+    verdicts = [
+        PanelVerdict(judge=judge.label, provider=judge.provider, grade=grade)
+        for judge, grade in zip(judges, grades, strict=True)
+    ]
+    assert context.evaluated_provider is not None
+    return combine_panel(
+        grader.name, verdicts, evaluated_provider=context.evaluated_provider
+    )
+
+
+def _judges_of(grades: Sequence[Grade]) -> list[str]:
+    """Every judge that scored one of ``grades``, in the order first seen."""
+    labels = [
+        label
+        for grade in grades
+        for label in grade.details.get("judges", [])
+        if isinstance(label, str)
+    ]
+    return list(dict.fromkeys(labels))
 
 
 def _upstream_reference(case: EvalCase, stage: StageKey) -> dict[str, Any]:
@@ -289,9 +338,9 @@ def _upstream_reference(case: EvalCase, stage: StageKey) -> dict[str, Any]:
 def _catalog_prices(
     matrix: MatrixConfig, catalog: ModelCatalog
 ) -> dict[str, tuple[float, float]]:
-    """Return the catalog price of every model that has one, plus the judge."""
+    """Return the catalog price of every model that has one, plus the judges."""
     prices: dict[str, tuple[float, float]] = {}
-    priced: list[MatrixModel | JudgeConfig] = [*matrix.models, matrix.judge]
+    priced: list[MatrixModel | JudgeConfig] = [*matrix.models, *matrix.panel]
     for model in priced:
         price = catalog.price_for(model.model, provider=model.provider)
         if price is not None:

@@ -402,7 +402,7 @@ class TestOverrides:
         self, run: Callable[..., int], out_dir: Path
     ) -> None:
         run("--judge", "openai:gpt-6.1-sol")
-        judge = _manifest(out_dir).judge
+        [judge] = _manifest(out_dir).panel
         assert (judge.provider, judge.model) == ("openai", "gpt-6.1-sol")
 
     def test_a_judge_without_a_colon_exits_two_with_a_usage_message(
@@ -606,8 +606,7 @@ class TestJudge:
         self, run: Callable[..., int], out_dir: Path
     ) -> None:
         run()
-        reason = _manifest(out_dir).judge_skipped
-        assert reason is not None
+        reason = _manifest(out_dir).skipped_judges["anthropic/claude-opus-5-5"]
         assert "ANTHROPIC_API_KEY" in reason
 
     def test_the_records_have_no_judge_grades(
@@ -650,7 +649,7 @@ class TestJudge:
         select = next(r for r in _records(out_dir) if r.stage is StageKey.SELECT)
         assert select.judge == "stub/stub-model"
         assert "selection_judge" in [g.name for g in select.grades]
-        assert _manifest(out_dir).judge_skipped is None
+        assert _manifest(out_dir).skipped_judges == {}
 
     def test_strict_refuses_a_judge_without_a_key_before_any_call(
         self,

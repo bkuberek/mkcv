@@ -10,6 +10,7 @@ from evals.graders.judge_call import (
     judge_details,
     load_rubric,
 )
+from evals.graders.judged_grader import JudgedGrader
 from evals.models.faithfulness_judgement import FaithfulnessJudgement
 from evals.models.faithfulness_verdict import FaithfulnessVerdict
 from evals.models.grade import Grade
@@ -18,7 +19,7 @@ PARTIAL_CREDIT = 0.5
 MAX_EVIDENCE_CHARS = 300
 
 
-class FaithfulnessJudgeGrader:
+class FaithfulnessJudgeGrader(JudgedGrader):
     """A judge's verdict, bullet by bullet, on the tailored content (stage 3).
 
     A supported bullet scores 1, a partial one 0.5, an unsupported one 0; the

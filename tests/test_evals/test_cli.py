@@ -287,6 +287,93 @@ class TestEstimate:
         assert (code, "n/a" in capsys.readouterr().out) == (0, False)
 
 
+class TestEstimatePanel:
+    """The estimate prices every judge of the panel, keys or not."""
+
+    PANEL_MATRIX = HAIKU_ANALYZE_MATRIX.replace(
+        'stages = ["analyze"]', 'stages = ["tailor"]'
+    ).replace(
+        '[judge]\nprovider = "anthropic"\nmodel = "claude-opus-5-5"\n',
+        '[[judges]]\nprovider = "anthropic"\nmodel = "claude-opus-5-5"\n\n'
+        '[[judges]]\nprovider = "openai"\nmodel = "gpt-6-astra"\n',
+    )
+
+    def _out(
+        self,
+        tmp_path: Path,
+        fixtures: Path,
+        settings: Dynaconf,
+        capsys: pytest.CaptureFixture[str],
+        *extra: str,
+    ) -> str:
+        matrix = tmp_path / "panel.toml"
+        matrix.write_text(self.PANEL_MATRIX, encoding="utf-8")
+        code = main(
+            ["estimate", "--matrix", str(matrix), "--fixtures", str(fixtures), *extra],
+            config=settings,
+        )
+        assert code == 0
+        return capsys.readouterr().out
+
+    def test_every_judge_has_its_own_line(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        lines = [line for line in out.splitlines() if line.startswith("Judge ")]
+        assert len(lines) == 2
+        assert "anthropic/claude-opus-5-5" in lines[0]
+        assert "openai/gpt-6-astra" in lines[1]
+        assert all("2 calls" in line for line in lines)
+
+    def test_judges_are_priced_without_their_keys(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        assert "(skipped)" not in out
+
+    def test_the_cost_is_broken_down_by_provider(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        lines = out.splitlines()
+        start = lines.index("By provider (models and judges):")
+        providers = [line.split()[0] for line in lines[start + 1 : start + 3]]
+        assert providers == ["anthropic", "openai"]
+
+    def test_the_judge_flag_takes_a_panel(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(
+            tmp_path,
+            tmp_fixtures,
+            make_settings(),
+            capsys,
+            "--judge",
+            "google:gemini-4-argon",
+            "openai:gpt-6-luna",
+        )
+        judges = [
+            line.split()[1] for line in out.splitlines() if line.startswith("Judge ")
+        ]
+        assert judges == ["google/gemini-4-argon", "openai/gpt-6-luna"]
+
+
 class TestUsage:
     def test_no_command_exits_two(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert main([]) == 2

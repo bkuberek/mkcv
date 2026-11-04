@@ -1,5 +1,7 @@
 """Create the judge model that scores outputs the graders cannot check by rule."""
 
+from collections.abc import Sequence
+
 from evals.harness.credentials import missing_key_reason
 from evals.models.judge_config import JudgeConfig
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
@@ -16,6 +18,29 @@ def judge_unavailable_reason(
         ConfigurationError: If mkcv does not know the judge's provider.
     """
     return missing_key_reason(registry, judge.provider)
+
+
+def split_judges(
+    registry: ProviderRegistry, panel: Sequence[JudgeConfig]
+) -> tuple[list[JudgeConfig], dict[str, str]]:
+    """Split ``panel`` into the judges that can run and why the others cannot.
+
+    Returns:
+        ``(runnable, skipped)``: runnable judges in panel order, and the
+        reason for each skipped one by ``provider/model``.
+
+    Raises:
+        ConfigurationError: If mkcv does not know a judge's provider.
+    """
+    runnable: list[JudgeConfig] = []
+    skipped: dict[str, str] = {}
+    for judge in panel:
+        reason = judge_unavailable_reason(registry, judge)
+        if reason is None:
+            runnable.append(judge)
+        else:
+            skipped[judge.label] = reason
+    return runnable, skipped
 
 
 def create_judge(registry: ProviderRegistry, judge: JudgeConfig) -> tuple[LLMPort, str]:

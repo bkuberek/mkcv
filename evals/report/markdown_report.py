@@ -4,7 +4,9 @@ import statistics
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from evals.graders.stage_graders import PRIMARY_METRIC
+from evals.graders.judge_panel import AGREEMENT_SPREAD
+from evals.graders.stage_graders import JUDGED_GRADES, PRIMARY_METRIC
+from evals.models.judge_config import JudgeConfig
 from evals.models.recommendation import OVERALL, Recommendation
 from evals.models.run_manifest import RunManifest
 from evals.models.stage_summary import StageSummary
@@ -26,6 +28,8 @@ STAGE_COLUMNS = (
     "Fabricated (judge)",
     "Faithfulness (judge)",
     "Quality",
+    "All judges",
+    "Judge spread",
     "Cost/run",
     "p50 latency",
     "Eligible",
@@ -44,6 +48,7 @@ def render_markdown(
         [f"# mkcv eval report: {manifest.run_id}"],
         _run_section(manifest),
         _caveats_section(manifest, summaries),
+        _judge_panel_section(manifest, summaries),
         _cost_section(summaries),
         *_stage_sections(summaries, recommendations),
         _recommendations_section(manifest, recommendations),
@@ -61,7 +66,8 @@ def _run_section(manifest: RunManifest) -> list[str]:
         ("Finished", _timestamp(manifest.finished_at)),
         ("mkcv", manifest.mkcv_version),
         ("Commit", manifest.git_sha or "-"),
-        ("Judge", manifest.judge.label),
+        ("Judges", ", ".join(j.label for j in manifest.panel) or "-"),
+        ("Judges that ran", ", ".join(manifest.judges_that_ran) or "none"),
         ("Cases", ", ".join(manifest.cases) or "-"),
         ("Models", ", ".join(m.label for m in manifest.matrix.models) or "-"),
         ("Repeats", str(settings.repeats)),
@@ -80,8 +86,9 @@ def _caveats_section(
     self_judged = [s for s in summaries if s.self_judged]
     if self_judged:
         lines.append(
-            "- Rows that are self-judged (the judge shares the evaluated model's "
-            f"provider), so read their quality scores with care: {_rows(self_judged)}."
+            "- Rows that are self-judged (only a judge from the evaluated model's "
+            "own provider scored them), so read their quality scores with care: "
+            f"{_rows(self_judged)}."
         )
     small = [s for s in summaries if s.low_sample]
     if small:
@@ -92,16 +99,75 @@ def _caveats_section(
     if manifest.skipped_models:
         lines.append("- Models that did not run:")
         lines.extend(f"  - {reason}" for reason in manifest.skipped_models)
-    if manifest.judge_skipped:
-        lines.append(
-            f"- The judge did not run ({manifest.judge_skipped}); scores that "
-            "need a judge are missing."
+    skipped_judges = manifest.judge_skip_reasons
+    if skipped_judges:
+        lines.append("- Judges that did not run:")
+        lines.extend(
+            f"  - {label}: {reason}" for label, reason in skipped_judges.items()
         )
+    if manifest.panel and not manifest.judges_that_ran:
+        lines.append("- No judge ran, so every score that needs a judge is missing.")
     failed = sum(s.n - round(s.n * s.ok_rate) for s in summaries)
     if failed:
         noun = "record" if failed == 1 else "records"
         lines.append(f"- {failed} {noun} failed (see `results.jsonl`).")
     return ["## Caveats", "", *lines]
+
+
+def _judge_panel_section(
+    manifest: RunManifest, summaries: Sequence[StageSummary]
+) -> list[str]:
+    lines = [
+        "## Judge panel",
+        "",
+        "Every judge that ran scores each judged output, and the output's score "
+        "is their mean. A model's quality score leaves out the judge from its own "
+        "provider whenever another judge scored it, to remove self-preference; "
+        "the *All judges* column keeps every judge.",
+        "",
+    ]
+    judged = sum(s.judged_outputs for s in summaries)
+    if len(manifest.judges_that_ran) < 2 or not judged:
+        return [*lines, "One judge (or none) ran, so there is no agreement to report."]
+    agreeing = sum((s.judge_agreement or 0.0) * s.judged_outputs for s in summaries)
+    spread = sum((s.judge_spread or 0.0) * s.judged_outputs for s in summaries)
+    lines.append(
+        f"The judges were within {AGREEMENT_SPREAD} of each other on "
+        f"{agreeing / judged:.0%} of {judged} judged outputs (mean spread "
+        f"{spread / judged:.2f})."
+    )
+    rows = _judge_means(manifest.panel, summaries)
+    if rows:
+        columns = ("Stage", *(judge.label for judge in manifest.panel))
+        lines.extend(
+            [
+                "",
+                "Mean primary score each judge gave, across the stage's models:",
+                "",
+                *_table(columns, rows),
+            ]
+        )
+    return lines
+
+
+def _judge_means(
+    panel: Sequence[JudgeConfig], summaries: Sequence[StageSummary]
+) -> list[tuple[str, ...]]:
+    rows: list[tuple[str, ...]] = []
+    for stage in EVALUATED_STAGES:
+        stage_rows = [s for s in summaries if s.stage is stage and s.primary_by_judge]
+        if not stage_rows:
+            continue
+        cells = []
+        for judge in panel:
+            values = [
+                s.primary_by_judge[judge.label]
+                for s in stage_rows
+                if judge.label in s.primary_by_judge
+            ]
+            cells.append(_score(statistics.fmean(values)) if values else "-")
+        rows.append((stage.value, *cells))
+    return rows
 
 
 def _cost_section(summaries: Sequence[StageSummary]) -> list[str]:
@@ -182,11 +248,17 @@ def _stage_row(s: StageSummary) -> tuple[str, ...]:
         _percent(s.fabrication_rate.get("faithfulness_judge")),
         _score(s.mean.get("faithfulness_judge")),
         _score(s.primary_score),
+        _score(s.mean.get(PRIMARY_METRIC.get(s.stage, ""))) if _is_judged(s) else "-",
+        _score(s.judge_spread),
         _usd(s.cost_mean_usd),
         _seconds(s.latency_p50_s),
         "yes" if s.eligible else "no",
         ", ".join(_notes(s)),
     )
+
+
+def _is_judged(s: StageSummary) -> bool:
+    return PRIMARY_METRIC.get(s.stage, "") in JUDGED_GRADES
 
 
 def _notes(s: StageSummary) -> list[str]:

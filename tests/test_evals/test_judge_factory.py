@@ -5,7 +5,11 @@ from collections.abc import Callable
 import pytest
 from dynaconf import Dynaconf
 
-from evals.harness.judge_factory import create_judge, judge_unavailable_reason
+from evals.harness.judge_factory import (
+    create_judge,
+    judge_unavailable_reason,
+    split_judges,
+)
 from evals.models.judge_config import JudgeConfig
 from mkcv.adapters.factory import create_provider_registry
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
@@ -79,3 +83,29 @@ class TestCreation:
     ) -> None:
         with pytest.raises(ConfigurationError, match="no API key"):
             create_judge(registry, CLAUDE)
+
+
+class TestSplitJudges:
+    def test_judges_with_credentials_run_in_panel_order(
+        self, registry: ProviderRegistry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        runnable, skipped = split_judges(registry, [STUB, CLAUDE])
+        assert (runnable, skipped) == ([STUB, CLAUDE], {})
+
+    def test_a_judge_without_credentials_is_skipped_with_its_reason(
+        self, registry: ProviderRegistry
+    ) -> None:
+        runnable, skipped = split_judges(registry, [CLAUDE, STUB])
+        assert runnable == [STUB]
+        assert skipped == {
+            "anthropic/claude-opus-5-5": (
+                "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY)"
+            )
+        }
+
+    def test_an_unknown_provider_is_a_configuration_error(
+        self, registry: ProviderRegistry
+    ) -> None:
+        with pytest.raises(ConfigurationError):
+            split_judges(registry, [JudgeConfig(provider="nope", model="m")])

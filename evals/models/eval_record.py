@@ -24,4 +24,9 @@ class EvalRecord(BaseModel):
     cost_usd: float = 0.0
     latency_s: float = 0.0
     grades: list[Grade] = Field(default_factory=list)
-    judge: str | None = None
+    judge: str | None = Field(
+        default=None, description="The judges that scored the record, comma-separated"
+    )
+    judges: list[str] = Field(
+        default_factory=list, description="'provider/model' of each judge that scored"
+    )

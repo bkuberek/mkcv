@@ -72,11 +72,11 @@ def make_context(
     )
 
 
-def judging_stub() -> StubLLMAdapter:
+def judging_stub(rubric_score: int = 4) -> StubLLMAdapter:
     """A stub that answers every pipeline stage and every judge request.
 
     The judge answers: every recorded tailored bullet supported, every rubric
-    criterion 4 of 5, and every defect detected.
+    criterion ``rubric_score`` of 5, and every defect detected.
     """
     tailored = recorded(TailoredContent)
     assert isinstance(tailored, TailoredContent)
@@ -96,7 +96,7 @@ def judging_stub() -> StubLLMAdapter:
             ),
             RubricJudgement: RubricJudgement(
                 criteria=[
-                    CriterionScore(name=name, score=4, rationale="ok")
+                    CriterionScore(name=name, score=rubric_score, rationale="ok")
                     for name in JUDGED_CRITERIA
                 ],
                 summary="Good.",

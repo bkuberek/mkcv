@@ -9,6 +9,7 @@ from evals.harness.case_loader import load_cases, load_matrix, select_cases
 from evals.models.eval_case import EvalCase
 from mkcv.adapters.llm.builtin_providers import BUILTIN_PROVIDERS
 from mkcv.core.models.model_catalog import ModelCatalog
+from mkcv.core.models.model_tier import ModelTier
 from mkcv.core.models.stage_key import PIPELINE_STAGES, StageKey
 from tests.test_evals.conftest import JD_TEXT, PERSONA_TEXT
 
@@ -22,6 +23,16 @@ def _write_matrix(tmp_path: Path, body: str) -> Path:
     path.write_text(body, encoding="utf-8")
     return path
 
+
+_PANEL = """
+[[judges]]
+provider = "anthropic"
+model = "claude-opus-5-5"
+
+[[judges]]
+provider = "google"
+model = "gemini-4-argon"
+"""
 
 _MINIMAL_MATRIX = """
 [judge]
@@ -224,16 +235,73 @@ class TestLoadMatrix:
     def test_the_shipped_matrix_runs_every_pipeline_stage(self) -> None:
         assert tuple(load_matrix(DEFAULT_MATRIX).run.stages) == PIPELINE_STAGES
 
-    def test_the_shipped_judge_and_reference_models(self) -> None:
+    def test_the_shipped_reference_model(self) -> None:
         matrix = load_matrix(DEFAULT_MATRIX)
-        assert (matrix.judge.provider, matrix.judge.model) == (
-            "anthropic",
-            "claude-opus-5-5",
-        )
         assert (matrix.reference.provider, matrix.reference.model) == (
             "anthropic",
             "claude-opus-5-5",
         )
+
+    def test_the_shipped_judge_panel_has_one_judge_per_provider(self) -> None:
+        panel = load_matrix(DEFAULT_MATRIX).panel
+        assert [j.label for j in panel] == [
+            "anthropic/claude-opus-5-5",
+            "openai/gpt-6-astra",
+            "google/gemini-4-argon",
+        ]
+
+    def test_every_shipped_judge_is_its_providers_top_tier(self) -> None:
+        catalog = ModelCatalog.builtin()
+        tiers = {
+            j.label: resolved.tier
+            if (resolved := catalog.lookup(j.provider, j.model))
+            else None
+            for j in load_matrix(DEFAULT_MATRIX).panel
+        }
+        assert set(tiers.values()) == {ModelTier.FRONTIER}
+
+    def test_every_shipped_judge_is_priced(self) -> None:
+        catalog = ModelCatalog.builtin()
+        assert all(
+            catalog.price_for(j.model, provider=j.provider) is not None
+            for j in load_matrix(DEFAULT_MATRIX).panel
+        )
+
+    def test_a_single_judge_table_is_a_panel_of_one(self, tmp_path: Path) -> None:
+        matrix = load_matrix(_write_matrix(tmp_path, _MINIMAL_MATRIX))
+        assert [j.label for j in matrix.panel] == ["anthropic/claude-opus-5-5"]
+
+    def test_a_judges_array_is_the_panel(self, tmp_path: Path) -> None:
+        body = _MINIMAL_MATRIX.replace(
+            '[judge]\nprovider = "anthropic"\nmodel = "claude-opus-5-5"\n',
+            _PANEL,
+        )
+        matrix = load_matrix(_write_matrix(tmp_path, body))
+        assert [j.label for j in matrix.panel] == [
+            "anthropic/claude-opus-5-5",
+            "google/gemini-4-argon",
+        ]
+
+    def test_a_judge_table_and_a_judges_array_together_are_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ValueError, match=r"\[judge\] or \[\[judges\]\]"):
+            load_matrix(_write_matrix(tmp_path, _MINIMAL_MATRIX + _PANEL))
+
+    def test_a_matrix_without_any_judge_is_rejected(self, tmp_path: Path) -> None:
+        body = _MINIMAL_MATRIX.replace(
+            '[judge]\nprovider = "anthropic"\nmodel = "claude-opus-5-5"\n', ""
+        )
+        with pytest.raises(ValueError, match="judge"):
+            load_matrix(_write_matrix(tmp_path, body))
+
+    def test_the_same_judge_twice_is_rejected(self, tmp_path: Path) -> None:
+        body = _MINIMAL_MATRIX.replace(
+            '[judge]\nprovider = "anthropic"\nmodel = "claude-opus-5-5"\n',
+            _PANEL + _PANEL,
+        )
+        with pytest.raises(ValueError, match="judges listed more than once"):
+            load_matrix(_write_matrix(tmp_path, body))
 
     def test_every_shipped_model_is_priced_in_the_builtin_catalog(self) -> None:
         catalog = ModelCatalog.builtin()

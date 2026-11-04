@@ -18,7 +18,7 @@ from rich.console import Console
 from evals.harness.case_loader import load_cases, load_matrix, select_cases
 from evals.harness.cost_estimator import estimate_matrix_cost
 from evals.harness.credentials import split_by_credentials
-from evals.harness.judge_factory import judge_unavailable_reason
+from evals.harness.judge_factory import split_judges
 from evals.harness.logging_setup import configure_logging
 from evals.harness.run_files import REPORT_FILE
 from evals.models.cost_estimate import CostEstimate
@@ -165,7 +165,10 @@ def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
         help="evaluate these models instead of the matrix's",
     )
     parser.add_argument(
-        "--judge", metavar="PROVIDER:MODEL", help="judge model (default: the matrix's)"
+        "--judge",
+        nargs="+",
+        metavar="PROVIDER:MODEL",
+        help="judge panel: one or more judge models (default: the matrix's judges)",
     )
 
 
@@ -180,7 +183,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="exit instead of skipping models (or the judge) with no credentials",
+        help="exit instead of skipping models (or judges) with no credentials",
     )
     _add_verbose_argument(parser)
 
@@ -243,19 +246,16 @@ def _run(args: argparse.Namespace, config: "Configuration") -> int:
         return _fail("--strict: some models have no credentials (see warnings above)")
 
     effective = matrix.model_copy(update={"models": runnable})
+    _, skipped_judges = split_judges(registry, effective.panel)
     estimate = estimate_matrix_cost(
-        effective,
-        cases,
-        registry.catalog,
-        judge_skipped=judge_unavailable_reason(registry, effective.judge),
+        effective, cases, registry.catalog, skipped_judges=skipped_judges
     )
-    if estimate.judge_skipped:
-        _err(
-            f"warning: judge {effective.judge.label} skipped "
-            f"({estimate.judge_skipped}); scores that need a judge will be missing"
-        )
-        if args.strict:
-            return _fail("--strict: the judge has no credentials (see warning above)")
+    for label, reason in estimate.skipped_judges.items():
+        _err(f"warning: judge {label} skipped ({reason})")
+    if estimate.skipped_judges and not estimate.judges:
+        _err("warning: no judge can run; scores that need a judge will be missing")
+    if estimate.skipped_judges and args.strict:
+        return _fail("--strict: some judges have no credentials (see warnings above)")
     for line in _estimate_lines(estimate, case_count=len(cases)):
         _out(line)
     if not args.yes and not _confirmed():
@@ -317,7 +317,7 @@ def _load_plan(
         stages=args.stages,
         cases=args.cases,
         models=args.models,
-        judge=args.judge,
+        judges=args.judge,
         concurrency=getattr(args, "concurrency", None),
     )
     matrix = overrides.apply(load_matrix(args.matrix))
@@ -362,15 +362,28 @@ def _estimate_lines(estimate: CostEstimate, *, case_count: int) -> list[str]:
         (label, str(estimate.runs_per_model), _usd(cost))
         for label, cost in estimate.model_costs.items()
     )
-    skipped = " (skipped)" if estimate.judge_skipped else ""
-    rows.append(
-        (
-            f"Judge {estimate.judge}{skipped}",
-            f"{estimate.judge_calls} calls",
-            _usd(estimate.judge_cost_usd),
-        )
+    rows.extend(
+        (f"Judge {label}", f"{estimate.judge_calls} calls", _usd(cost))
+        for label, cost in estimate.judge_costs.items()
     )
+    rows.extend(
+        (f"Judge {label} (skipped)", "0 calls", _usd(0.0))
+        for label in estimate.skipped_judges
+    )
+    if not estimate.judge_costs and not estimate.skipped_judges:
+        rows.append(("Judges (no judged stage)", "0 calls", _usd(0.0)))
     lines = _aligned(rows)
+    if estimate.provider_costs:
+        lines.append("By provider (models and judges):")
+        lines.extend(
+            "  " + line
+            for line in _aligned(
+                [
+                    (provider, _usd(cost))
+                    for provider, cost in estimate.provider_costs.items()
+                ]
+            )
+        )
     note = " (some prices unknown)" if estimate.is_partial else ""
     lines.append(f"Total{note}: {_usd(estimate.total_usd)}")
     return lines

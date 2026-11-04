@@ -7,6 +7,7 @@ from evals.harness.cost_estimator import (
     JUDGE_OUTPUT_TOKENS,
     estimate_matrix_cost,
 )
+from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import EvalCase
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
@@ -79,6 +80,7 @@ class TestEvaluatedModelCost:
             _matrix([StageKey.ANALYZE]), [_case()], ModelCatalog.builtin()
         )
         assert (estimate.judge_calls, estimate.judge_cost_usd) == (0, 0.0)
+        assert estimate.judges == []
 
     def test_total_is_the_evaluated_cost_when_there_are_no_judge_calls(self) -> None:
         estimate = estimate_matrix_cost(
@@ -210,9 +212,87 @@ class TestJudgeCost:
         assert estimate.judge_cost_usd is None
 
     def test_the_judge_is_named_in_the_estimate(self) -> None:
-        assert self._estimate(StageKey.SELECT, [_case()]).judge == (
+        assert self._estimate(StageKey.SELECT, [_case()]).judges == [
             "anthropic/claude-opus-5-5"
+        ]
+
+
+PANEL = [
+    JudgeConfig(provider="anthropic", model="claude-opus-5-5"),
+    JudgeConfig(provider="openai", model="gpt-6-astra"),
+    JudgeConfig(provider="google", model="gemini-4-argon"),
+]
+
+
+class TestJudgePanelCost:
+    def _estimate(self, **options: object) -> CostEstimate:
+        matrix = MatrixConfig(
+            run=RunSettings(stages=[StageKey.TAILOR]),
+            judges=PANEL,
+            reference=JUDGE,
+            models=[MatrixModel(provider="openai", model="gpt-6-luna")],
         )
+        return estimate_matrix_cost(
+            matrix,
+            [_case()],
+            ModelCatalog.builtin(),
+            **options,  # type: ignore[arg-type]
+        )
+
+    def _per_call(self, provider: str, model: str) -> float:
+        price = ModelCatalog.builtin().price_for(model, provider=provider)
+        assert price is not None
+        return (JUDGE_INPUT_TOKENS * price[0] + JUDGE_OUTPUT_TOKENS * price[1]) / (
+            PER_MILLION
+        )
+
+    def test_every_judge_makes_every_judge_call(self) -> None:
+        estimate = self._estimate()
+        assert estimate.judge_calls == 2
+        assert list(estimate.judge_costs) == [j.label for j in PANEL]
+
+    def test_each_judge_is_priced_at_its_own_model(self) -> None:
+        estimate = self._estimate()
+        assert estimate.judge_costs["openai/gpt-6-astra"] == pytest.approx(
+            2 * self._per_call("openai", "gpt-6-astra")
+        )
+
+    def test_the_judge_cost_is_the_sum_over_the_panel(self) -> None:
+        estimate = self._estimate()
+        assert estimate.judge_cost_usd == pytest.approx(
+            sum(2 * self._per_call(j.provider, j.model) for j in PANEL)
+        )
+
+    def test_the_total_includes_every_judge(self) -> None:
+        estimate = self._estimate()
+        model = estimate.model_costs["openai/gpt-6-luna"]
+        assert model is not None and estimate.judge_cost_usd is not None
+        assert estimate.total_usd == pytest.approx(model + estimate.judge_cost_usd)
+
+    def test_costs_are_broken_down_by_provider(self) -> None:
+        estimate = self._estimate()
+        luna = estimate.model_costs["openai/gpt-6-luna"]
+        astra = estimate.judge_costs["openai/gpt-6-astra"]
+        assert luna is not None and astra is not None
+        assert estimate.provider_costs["openai"] == pytest.approx(luna + astra)
+        assert (
+            estimate.provider_costs["google"]
+            == estimate.judge_costs["google/gemini-4-argon"]
+        )
+        assert sorted(estimate.provider_costs) == ["anthropic", "google", "openai"]
+
+    def test_the_provider_costs_add_up_to_the_total(self) -> None:
+        estimate = self._estimate()
+        assert sum(
+            cost for cost in estimate.provider_costs.values() if cost is not None
+        ) == pytest.approx(estimate.total_usd)
+
+    def test_a_skipped_judge_is_left_out_and_named(self) -> None:
+        reason = "no API key for provider 'openai' (set OPENAI_API_KEY)"
+        estimate = self._estimate(skipped_judges={"openai/gpt-6-astra": reason})
+        assert estimate.judges == ["anthropic/claude-opus-5-5", "google/gemini-4-argon"]
+        assert "openai/gpt-6-astra" not in estimate.judge_costs
+        assert estimate.skipped_judges == {"openai/gpt-6-astra": reason}
 
 
 class TestNothingToRun:
@@ -226,34 +306,36 @@ class TestJudgeSkipped:
     """A judge without credentials makes no calls, so it costs nothing."""
 
     REASON = "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY)"
+    LABEL = "anthropic/claude-opus-5-5"
 
-    def _estimate(self, stages: list[StageKey], reason: str | None) -> object:
+    def _estimate(self, stages: list[StageKey], reason: str | None) -> CostEstimate:
         return estimate_matrix_cost(
             _matrix(stages),
             [_case()],
             ModelCatalog.builtin(),
-            judge_skipped=reason,
+            skipped_judges={self.LABEL: reason} if reason else None,
         )
 
     def test_a_skipped_judge_makes_no_calls_and_costs_nothing(self) -> None:
         estimate = self._estimate([StageKey.TAILOR], self.REASON)
-        assert (estimate.judge_calls, estimate.judge_cost_usd) == (0, 0.0)  # type: ignore[attr-defined]
+        assert (estimate.judges, estimate.judge_cost_usd) == ([], 0.0)
 
     def test_the_reason_is_reported(self) -> None:
         estimate = self._estimate([StageKey.TAILOR], self.REASON)
-        assert estimate.judge_skipped == self.REASON  # type: ignore[attr-defined]
+        assert estimate.skipped_judges == {self.LABEL: self.REASON}
 
     def test_the_total_leaves_the_judge_out(self) -> None:
         skipped = self._estimate([StageKey.TAILOR], self.REASON)
         priced = self._estimate([StageKey.TAILOR], None)
-        assert skipped.total_usd < priced.total_usd  # type: ignore[attr-defined]
-        assert skipped.total_usd == skipped.model_costs[HAIKU]  # type: ignore[attr-defined]
+        assert skipped.total_usd is not None and priced.total_usd is not None
+        assert skipped.total_usd < priced.total_usd
+        assert skipped.total_usd == skipped.model_costs[HAIKU]
 
     def test_a_stage_without_judge_calls_has_nothing_to_skip(self) -> None:
         estimate = self._estimate([StageKey.ANALYZE], self.REASON)
-        assert estimate.judge_skipped is None  # type: ignore[attr-defined]
+        assert estimate.skipped_judges == {}
 
     def test_an_available_judge_is_priced_as_before(self) -> None:
         estimate = self._estimate([StageKey.TAILOR], None)
-        assert estimate.judge_calls == 2  # type: ignore[attr-defined]
-        assert estimate.judge_skipped is None  # type: ignore[attr-defined]
+        assert estimate.judge_calls == 2
+        assert estimate.skipped_judges == {}

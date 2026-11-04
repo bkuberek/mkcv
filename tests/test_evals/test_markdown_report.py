@@ -2,6 +2,7 @@
 
 import re
 
+from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.recommendation_settings import RecommendationSettings
 from evals.report.markdown_report import render_markdown
@@ -16,8 +17,14 @@ from tests.test_evals.report_support import (
 
 TABLE_HEADER = (
     "| Provider | Model | n | OK | Schema | Fabricated (det) | Fabricated (judge) | "
-    "Faithfulness (judge) | Quality | Cost/run | p50 latency | Eligible | Notes |"
+    "Faithfulness (judge) | Quality | All judges | Judge spread | Cost/run | "
+    "p50 latency | Eligible | Notes |"
 )
+PANEL = [
+    JudgeConfig(provider="anthropic", model="claude-opus-5-5"),
+    JudgeConfig(provider="openai", model="gpt-6-astra"),
+    JudgeConfig(provider="google", model="gemini-4-argon"),
+]
 
 
 def _headings(report: str) -> list[str]:
@@ -50,6 +57,7 @@ class TestStructure:
         assert _headings(_render()) == [
             "## Run",
             "## Caveats",
+            "## Judge panel",
             "## Cost",
             "## Stage: tailor",
             "## Recommendations",
@@ -75,6 +83,7 @@ class TestStructure:
         assert _headings(report) == [
             "## Run",
             "## Caveats",
+            "## Judge panel",
             "## Cost",
             "## Recommendations",
             "## Suggested profile changes",
@@ -99,6 +108,22 @@ class TestRunSection:
 
     def test_it_counts_the_cases(self) -> None:
         assert "case-a, case-b" in _section(_render(), "Run")
+
+    def test_it_lists_the_judges_and_those_that_ran(self) -> None:
+        report = _render(
+            manifest=manifest(
+                judges=PANEL, skipped_judges={"openai/gpt-6-astra": "no key"}
+            )
+        )
+        section = _section(report, "Run")
+        assert (
+            "| Judges | anthropic/claude-opus-5-5, openai/gpt-6-astra, "
+            "google/gemini-4-argon |" in section
+        )
+        assert (
+            "| Judges that ran | anthropic/claude-opus-5-5, google/gemini-4-argon |"
+            in section
+        )
 
 
 class TestCaveats:
@@ -128,10 +153,24 @@ class TestCaveats:
         assert "google/gemini-4-argon: no API key for provider 'google'" in section
 
     def test_a_judge_that_did_not_run_is_called_out(self) -> None:
-        reason = "no API key for provider 'anthropic' (set ANTHROPIC_API_KEY)"
-        section = _section(_render(manifest=manifest(judge_skipped=reason)), "Caveats")
-        assert "judge" in section
-        assert reason in section
+        reason = "no API key for provider 'openai' (set OPENAI_API_KEY)"
+        report = _render(
+            manifest=manifest(
+                judges=PANEL, skipped_judges={"openai/gpt-6-astra": reason}
+            )
+        )
+        section = _section(report, "Caveats")
+        assert f"openai/gpt-6-astra: {reason}" in section
+
+    def test_a_run_where_no_judge_ran_says_judged_scores_are_missing(self) -> None:
+        report = _render(
+            manifest=manifest(skipped_judges={"anthropic/claude-opus-5-5": "no key"})
+        )
+        assert "No judge ran" in _section(report, "Caveats")
+
+    def test_self_judged_rows_say_only_their_own_judge_scored_them(self) -> None:
+        report = _render(summaries=[summary(model="gpt-6.1-sol", self_judged=True)])
+        assert "only a judge from" in _section(report, "Caveats")
 
     def test_one_failed_record_reads_in_the_singular(self) -> None:
         report = _render(summaries=[summary(n=10, ok_rate=0.9)])
@@ -140,6 +179,49 @@ class TestCaveats:
     def test_failed_records_are_counted(self) -> None:
         report = _render(summaries=[summary(n=10, ok_rate=0.7)])
         assert "3 records failed" in _section(report, "Caveats")
+
+
+class TestJudgePanelSection:
+    def _panel_summary(self) -> object:
+        return summary(model="gpt-x").model_copy(
+            update={
+                "primary_by_judge": {
+                    "anthropic/claude-opus-5-5": 0.9,
+                    "google/gemini-4-argon": 0.7,
+                },
+                "judge_spread": 0.2,
+                "judge_agreement": 0.5,
+                "judged_outputs": 4,
+            }
+        )
+
+    def test_it_explains_how_the_panel_scores(self) -> None:
+        section = _section(_render(manifest=manifest(judges=PANEL)), "Judge panel")
+        assert "mean" in section
+        assert "own provider" in section
+
+    def test_it_reports_how_often_the_judges_agree(self) -> None:
+        report = _render(
+            manifest=manifest(judges=PANEL), summaries=[self._panel_summary()]
+        )
+        section = _section(report, "Judge panel")
+        assert "within 0.1 of each other on 50% of 4 judged outputs" in section
+        assert "mean spread 0.20" in section
+
+    def test_it_shows_the_mean_primary_score_each_judge_gave(self) -> None:
+        report = _render(
+            manifest=manifest(judges=PANEL), summaries=[self._panel_summary()]
+        )
+        section = _section(report, "Judge panel")
+        assert (
+            "| Stage | anthropic/claude-opus-5-5 | openai/gpt-6-astra | "
+            "google/gemini-4-argon |" in section
+        )
+        assert "| tailor | 0.90 | - | 0.70 |" in section
+
+    def test_with_a_single_judge_there_is_no_agreement_to_report(self) -> None:
+        section = _section(_render(), "Judge panel")
+        assert "One judge" in section
 
 
 class TestCost:
@@ -191,9 +273,18 @@ class TestStageTables:
         )
         section = _section(_render(summaries=[row_summary]), "Stage: tailor")
         assert (
-            "| openai | gpt-x | 8 | 88% | 1.00 | 0% | 12% | 0.92 | 0.85 | $0.0512 "
-            "| 3.5s | yes |" in section
+            "| openai | gpt-x | 8 | 88% | 1.00 | 0% | 12% | 0.92 | 0.85 | - | - "
+            "| $0.0512 | 3.5s | yes |" in section
         )
+
+    def test_a_judged_row_shows_the_all_judge_mean_and_the_spread(self) -> None:
+        row_summary = summary(
+            model="gpt-x",
+            mean={"schema": 1.0, "tailoring_judge": 0.8},
+            primary_score=0.75,
+        ).model_copy(update={"judge_spread": 0.15})
+        section = _section(_render(summaries=[row_summary]), "Stage: tailor")
+        assert "| 0.75 | 0.80 | 0.15 |" in section
 
     def test_values_a_model_does_not_have_show_as_a_dash(self) -> None:
         row_summary = summary(
@@ -205,7 +296,7 @@ class TestStageTables:
             eligible=False,
         )
         section = _section(_render(summaries=[row_summary]), "Stage: tailor")
-        assert "| 1.00 | - | - | - | - | - | - | no |" in section
+        assert "| 1.00 | - | - | - | - | - | - | - | - | no |" in section
 
     def test_notes_flag_self_judging_and_small_samples(self) -> None:
         row_summary = summary(model="gpt-x", n=3, self_judged=True)

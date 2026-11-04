@@ -8,7 +8,7 @@ from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.stage_summary import StageSummary
 from evals.report.aggregator import aggregate
 from mkcv.core.models.stage_key import StageKey
-from tests.test_evals.report_support import grade, record
+from tests.test_evals.report_support import grade, panel_grade, record
 
 
 def _one(records: list[EvalRecord]) -> StageSummary:
@@ -324,14 +324,27 @@ class TestFabricationGate:
 
 
 class TestSelfJudged:
-    """REQ-EV-15, summary side."""
+    """REQ-EV-15, summary side, for single-judge records."""
 
-    def test_a_self_judged_grade_marks_the_summary(self) -> None:
+    def test_a_grade_only_its_own_provider_judged_marks_the_summary(self) -> None:
         records = [
             record(grades=[grade("tailoring_judge", 0.8, self_judged=True)]),
-            record(grades=[grade("tailoring_judge", 0.8, self_judged=False)], repeat=1),
+            record(grades=[grade("tailoring_judge", 0.6, self_judged=True)], repeat=1),
         ]
         assert _one(records).self_judged is True
+
+    def test_its_quality_then_falls_back_to_the_self_judged_score(self) -> None:
+        records = [record(grades=[grade("tailoring_judge", 0.8, self_judged=True)])]
+        assert _one(records).primary_score == pytest.approx(0.8)
+
+    def test_one_independently_judged_run_is_enough(self) -> None:
+        records = [
+            record(grades=[grade("tailoring_judge", 0.9, self_judged=True)]),
+            record(grades=[grade("tailoring_judge", 0.6, self_judged=False)], repeat=1),
+        ]
+        summary = _one(records)
+        assert summary.self_judged is False
+        assert summary.primary_score == pytest.approx(0.6)
 
     def test_grades_judged_by_another_provider_do_not(self) -> None:
         records = [record(grades=[grade("tailoring_judge", 0.8, self_judged=False)])]
@@ -339,3 +352,79 @@ class TestSelfJudged:
 
     def test_grades_without_a_judge_do_not(self) -> None:
         assert _one([record(grades=[grade("schema", 1.0)])]).self_judged is False
+
+
+class TestJudgePanel:
+    """Panel grades: self-preference removed, spread and agreement measured."""
+
+    def _tailor(self, **scores: float | None) -> list[EvalRecord]:
+        return [
+            record(
+                provider="openai",
+                grades=[grade("schema", 1.0), panel_grade("tailoring_judge", scores)],
+            )
+        ]
+
+    def test_quality_leaves_out_the_models_own_providers_judge(self) -> None:
+        summary = _one(self._tailor(anthropic=0.6, openai=1.0, google=0.8))
+        assert summary.primary_score == pytest.approx(0.7)
+
+    def test_the_all_judge_mean_is_still_reported(self) -> None:
+        summary = _one(self._tailor(anthropic=0.6, openai=1.0, google=0.8))
+        assert summary.mean["tailoring_judge"] == pytest.approx(0.8)
+        assert summary.independent_mean["tailoring_judge"] == pytest.approx(0.7)
+
+    def test_a_row_is_self_judged_only_when_its_own_judge_was_alone(self) -> None:
+        assert _one(self._tailor(openai=1.0, google=0.8)).self_judged is False
+        assert _one(self._tailor(openai=1.0, google=None)).self_judged is True
+
+    def test_a_self_judged_row_falls_back_to_its_own_judges_score(self) -> None:
+        summary = _one(self._tailor(openai=1.0, google=None))
+        assert summary.primary_score == pytest.approx(1.0)
+
+    def test_each_judges_mean_primary_score_is_kept(self) -> None:
+        summary = _one(self._tailor(anthropic=0.6, openai=1.0, google=0.8))
+        assert summary.primary_by_judge == {
+            "anthropic/judge": pytest.approx(0.6),
+            "openai/judge": pytest.approx(1.0),
+            "google/judge": pytest.approx(0.8),
+        }
+
+    def test_the_spread_is_averaged_over_judged_outputs(self) -> None:
+        records = [
+            *self._tailor(anthropic=0.6, google=0.8),
+            *(
+                r.model_copy(update={"repeat": 1})
+                for r in self._tailor(anthropic=0.8, google=0.8)
+            ),
+        ]
+        summary = _one(records)
+        assert summary.judge_spread == pytest.approx(0.1)
+        assert summary.judged_outputs == 2
+
+    def test_agreement_is_the_share_of_outputs_within_a_tenth(self) -> None:
+        records = [
+            *self._tailor(anthropic=0.6, google=0.8),
+            *(
+                r.model_copy(update={"repeat": 1})
+                for r in self._tailor(anthropic=0.75, google=0.8)
+            ),
+        ]
+        assert _one(records).judge_agreement == pytest.approx(0.5)
+
+    def test_one_judge_gives_no_spread_or_agreement(self) -> None:
+        summary = _one(self._tailor(anthropic=0.6))
+        assert (summary.judge_spread, summary.judge_agreement) == (None, None)
+        assert summary.judged_outputs == 0
+
+    def test_the_faithfulness_floor_uses_the_independent_judges(self) -> None:
+        records = [
+            record(
+                provider="openai",
+                grades=[
+                    grade("schema", 1.0),
+                    panel_grade("faithfulness_judge", {"openai": 1.0, "google": 0.8}),
+                ],
+            )
+        ]
+        assert "faithfulness_judge below 0.9" in _one(records).gate_failures

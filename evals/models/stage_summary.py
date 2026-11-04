@@ -19,10 +19,37 @@ class StageSummary(BaseModel):
     n: int
     ok_rate: float = Field(ge=0.0, le=1.0)
     mean: dict[str, float] = Field(
-        default_factory=dict, description="Mean score per grade name"
+        default_factory=dict,
+        description="Mean score per grade name (judged grades: every judge)",
+    )
+    independent_mean: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Mean of each judged grade without the judge of the model's own "
+            "provider; a grade only that judge scored is missing"
+        ),
     )
     primary_score: float | None = Field(
-        default=None, description="Mean of the stage's primary quality metric"
+        default=None,
+        description=(
+            "Mean of the stage's primary quality metric: the independent mean "
+            "for a judged metric, unless only the model's own judge scored it"
+        ),
+    )
+    primary_by_judge: dict[str, float] = Field(
+        default_factory=dict,
+        description="Mean primary score each judge gave, by 'provider/model'",
+    )
+    judge_spread: float | None = Field(
+        default=None,
+        description="Mean gap between the highest and lowest judge score",
+    )
+    judge_agreement: float | None = Field(
+        default=None,
+        description="Share of judged outputs whose judges were within 0.1",
+    )
+    judged_outputs: int = Field(
+        default=0, description="Judged grades that more than one judge scored"
     )
     cost_mean_usd: float | None = None
     latency_p50_s: float | None = None
@@ -40,6 +67,6 @@ class StageSummary(BaseModel):
         default_factory=list, description="The hard gates the model missed"
     )
     self_judged: bool = Field(
-        description="A judge from the model's own provider scored it"
+        description="Only a judge from the model's own provider scored a judged grade"
     )
     low_sample: bool = Field(description="Fewer than 6 runs")

@@ -513,8 +513,8 @@ class TestJudge:
         manifest = RunManifest.model_validate_json(
             (tmp_path / "out" / "run.json").read_text()
         )
-        assert manifest.judge_skipped is not None
-        assert "no API key for provider 'anthropic'" in manifest.judge_skipped
+        reason = manifest.skipped_judges["anthropic/claude-opus-5-5"]
+        assert "no API key for provider 'anthropic'" in reason
 
     async def test_the_manifest_has_no_skip_reason_when_the_judge_ran(
         self,
@@ -529,7 +529,7 @@ class TestJudge:
         manifest = RunManifest.model_validate_json(
             (tmp_path / "out" / "run.json").read_text()
         )
-        assert manifest.judge_skipped is None
+        assert manifest.skipped_judges == {}
 
     async def test_a_judge_failure_is_recorded_on_the_grade_and_the_run_goes_on(
         self,
@@ -564,6 +564,172 @@ class TestJudge:
         install_adapter(stub)
         await make_runner().run(_matrix([STUB], [StageKey.ANALYZE]), judged_cases)
         assert [c["response_model"] for c in stub.call_log] == ["JDAnalysis"]
+
+
+PANEL = [
+    JudgeConfig(provider="anthropic", model="claude-opus-5-5"),
+    JudgeConfig(provider="openai", model="gpt-6-astra"),
+    JudgeConfig(provider="google", model="gemini-4-argon"),
+]
+PANEL_LABELS = [judge.label for judge in PANEL]
+
+
+class TestJudgePanel:
+    """Every judge of the panel scores each judged output."""
+
+    @pytest.fixture
+    def panel_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for variable in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+            monkeypatch.setenv(variable, "test-key")
+
+    @pytest.fixture
+    def judged_cases(
+        self, cases: list[EvalCase], add_reference: Callable[..., None]
+    ) -> list[EvalCase]:
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT])
+        return cases[:1]
+
+    @pytest.fixture
+    def judges(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        """Anthropic's judge gives 5, OpenAI's 4, Google's 3; record who was made."""
+        created: list[str] = []
+        by_provider = {
+            "anthropic": judging_stub(rubric_score=5),
+            "openai": judging_stub(rubric_score=4),
+            "google": judging_stub(rubric_score=3),
+        }
+        pipeline = judging_stub()
+
+        def create(self: ProviderRegistry, name: str, **_: object) -> LLMPort:
+            created.append(name)
+            return by_provider.get(name, pipeline)
+
+        monkeypatch.setattr(ProviderRegistry, "create_adapter", create)
+        return created
+
+    def _panel(self, models: list[MatrixModel]) -> MatrixConfig:
+        return MatrixConfig(
+            run=RunSettings(stages=[StageKey.TAILOR]),
+            judges=PANEL,
+            reference=JUDGE,
+            models=models,
+        )
+
+    async def _tailoring(
+        self, runner: EvalRunner, models: list[MatrixModel], cases: list[EvalCase]
+    ) -> dict[str, Grade]:
+        records = await runner.run(self._panel(models), cases)
+        return {
+            r.provider: next(g for g in r.grades if g.name == "tailoring_judge")
+            for r in records
+        }
+
+    async def test_every_judge_scores_each_judged_output(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        panel_keys: None,
+    ) -> None:
+        grade = (await self._tailoring(make_runner(), [STUB], judged_cases))["stub"]
+        assert [s.judge for s in grade.judge_scores] == PANEL_LABELS
+
+    async def test_the_grade_is_the_mean_of_the_panel(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        panel_keys: None,
+    ) -> None:
+        grade = (await self._tailoring(make_runner(), [STUB], judged_cases))["stub"]
+        assert grade.score == pytest.approx(0.8)
+        assert [s.score for s in grade.judge_scores] == [1.0, 0.8, 0.6]
+
+    async def test_the_independent_score_leaves_out_the_models_own_judge(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        panel_keys: None,
+    ) -> None:
+        grade = (await self._tailoring(make_runner(), [HAIKU], judged_cases))[
+            "anthropic"
+        ]
+        assert grade.independent_score == pytest.approx(0.7)
+        assert grade.details["self_judged"] is False
+
+    async def test_the_record_lists_every_judge(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        panel_keys: None,
+    ) -> None:
+        [record] = await make_runner().run(self._panel([STUB]), judged_cases)
+        assert record.judges == PANEL_LABELS
+
+    async def test_each_judge_is_created_once_for_the_run(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        panel_keys: None,
+    ) -> None:
+        matrix = self._panel([STUB]).model_copy(
+            update={"run": RunSettings(stages=[StageKey.TAILOR], repeats=3)}
+        )
+        await make_runner().run(matrix, judged_cases)
+        assert [judges.count(p) for p in ("anthropic", "openai", "google")] == [1, 1, 1]
+
+    async def test_a_judge_without_credentials_is_skipped(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        grade = (await self._tailoring(make_runner(), [STUB], judged_cases))["stub"]
+        assert [s.judge for s in grade.judge_scores] == [
+            "anthropic/claude-opus-5-5",
+            "google/gemini-4-argon",
+        ]
+
+    async def test_the_manifest_records_the_panel_and_the_skipped_judges(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        await make_runner().run(self._panel([STUB]), judged_cases)
+        manifest = RunManifest.model_validate_json(
+            (tmp_path / "out" / "run.json").read_text()
+        )
+        assert manifest.panel == PANEL
+        assert sorted(manifest.skipped_judges) == [
+            "google/gemini-4-argon",
+            "openai/gpt-6-astra",
+        ]
+        assert "OPENAI_API_KEY" in manifest.skipped_judges["openai/gpt-6-astra"]
+        assert manifest.judges_that_ran == ["anthropic/claude-opus-5-5"]
+
+    async def test_every_judge_is_priced_in_the_manifest(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        judges: list[str],
+        panel_keys: None,
+        tmp_path: Path,
+    ) -> None:
+        await make_runner().run(self._panel([STUB]), judged_cases)
+        manifest = RunManifest.model_validate_json(
+            (tmp_path / "out" / "run.json").read_text()
+        )
+        assert set(PANEL_LABELS) <= set(manifest.catalog_prices)
 
 
 class TestFiles:
@@ -603,7 +769,7 @@ class TestFiles:
         )
         assert manifest.run_id == RUN_ID
         assert manifest.matrix == matrix
-        assert manifest.judge == JUDGE
+        assert manifest.panel == [JUDGE]
         assert manifest.cases == ["alpha-match", "alpha-probe"]
 
     async def test_the_run_ends_with_all_four_files(

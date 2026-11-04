@@ -1,4 +1,4 @@
-# Default eval matrix: the models to evaluate, the judge, and the reference model.
+# Default eval matrix: the models to evaluate, the judges, and the reference model.
 # Mkcv providers, keys, and catalog overrides come from the normal mkcv settings.
 
 [run]
@@ -15,9 +15,21 @@ preset = "standard"
 tie_epsilon = 0.01
 max_fabrication_rate = 0.0
 
-[judge]
+# Every judged output is scored by each judge below (the top tier of each
+# provider in the model catalog) and gets their mean. A judge whose provider
+# has no credentials is skipped. One [judge] table instead of [[judges]] is a
+# panel of one.
+[[judges]]
 provider = "anthropic"
 model = "claude-opus-5-5"
+
+[[judges]]
+provider = "openai"
+model = "gpt-6-astra"
+
+[[judges]]
+provider = "google"
+model = "gemini-4-argon"
 
 [reference]
 provider = "anthropic"

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from evals.graders.judge_panel import PanelVerdict, combine_panel
 from evals.models.eval_record import EvalRecord
 from evals.models.grade import Grade
 from evals.models.judge_config import JudgeConfig
@@ -23,6 +24,32 @@ def grade(
 ) -> Grade:
     """A grade with the given score, pass flag, and details."""
     return Grade(name=name, score=score, passed=passed, details=details)
+
+
+def panel_grade(
+    name: str,
+    scores: dict[str, float | None],
+    *,
+    evaluated: str = "openai",
+    passed: dict[str, bool] | None = None,
+) -> Grade:
+    """A panel grade from judges named ``<provider>/judge``, keyed by provider."""
+    verdicts = [
+        PanelVerdict(
+            judge=f"{provider}/judge",
+            provider=provider,
+            grade=Grade(
+                name=name,
+                score=score,
+                passed=(passed or {}).get(provider),
+                details={} if score is not None else {"error": "down"},
+            ),
+        )
+        for provider, score in scores.items()
+    ]
+    combined = combine_panel(name, verdicts, evaluated_provider=evaluated)
+    assert combined is not None
+    return combined
 
 
 def record(
@@ -130,10 +157,12 @@ def manifest(
     *,
     models: list[MatrixModel] | None = None,
     skipped_models: list[str] | None = None,
-    judge_skipped: str | None = None,
+    judges: list[JudgeConfig] | None = None,
+    skipped_judges: dict[str, str] | None = None,
     cases: list[str] | None = None,
 ) -> RunManifest:
-    """A finished run manifest."""
+    """A finished run manifest with one judge unless ``judges`` says otherwise."""
+    panel = judges or [JUDGE]
     return RunManifest(
         run_id=RUN_ID,
         started_at=datetime(2026, 11, 4, 1, 2, 3, tzinfo=UTC),
@@ -142,12 +171,12 @@ def manifest(
         git_sha="abc1234",
         matrix=MatrixConfig(
             run=RunSettings(),
-            judge=JUDGE,
+            judges=panel,
             reference=JUDGE,
             models=models or [MatrixModel(provider="openai", model="gpt-6.1-sol")],
         ),
-        judge=JUDGE,
+        judges=panel,
         cases=cases or ["case-a", "case-b"],
         skipped_models=skipped_models or [],
-        judge_skipped=judge_skipped,
+        skipped_judges=skipped_judges or {},
     )

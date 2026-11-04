@@ -12,6 +12,7 @@ from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.matrix_overrides import MatrixOverrides
+from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.run_settings import RunSettings
 from mkcv.adapters.factory import create_provider_registry
 from mkcv.core.models.stage_key import PIPELINE_STAGES, StageKey
@@ -82,21 +83,44 @@ class TestMatrixOverrides:
             MatrixOverrides(models=["gpt-6"]).apply(_matrix())
 
     def test_the_judge_is_replaced(self) -> None:
-        result = MatrixOverrides(judge="openai:gpt-6.1-sol").apply(_matrix())
-        assert result.judge == JudgeConfig(provider="openai", model="gpt-6.1-sol")
+        result = MatrixOverrides(judges=["openai:gpt-6.1-sol"]).apply(_matrix())
+        assert result.panel == [JudgeConfig(provider="openai", model="gpt-6.1-sol")]
+
+    def test_several_judges_make_a_panel(self) -> None:
+        result = MatrixOverrides(
+            judges=["openai:gpt-6-astra", "google:gemini-4-argon"]
+        ).apply(_matrix())
+        assert [j.label for j in result.panel] == [
+            "openai/gpt-6-astra",
+            "google/gemini-4-argon",
+        ]
+
+    def test_the_override_replaces_a_matrix_panel(self) -> None:
+        matrix = MatrixConfig(
+            judges=[JUDGE, JudgeConfig(provider="google", model="gemini-4-argon")],
+            reference=JUDGE,
+            models=[HAIKU],
+        )
+        result = MatrixOverrides(judges=["openai:gpt-6-astra"]).apply(matrix)
+        assert [j.label for j in result.panel] == ["openai/gpt-6-astra"]
 
     def test_a_judge_without_a_colon_is_a_usage_error(self) -> None:
         with pytest.raises(ValueError, match=r"--judge expects provider:model"):
-            MatrixOverrides(judge="gpt-6.1-sol").apply(_matrix())
+            MatrixOverrides(judges=["gpt-6.1-sol"]).apply(_matrix())
 
     @pytest.mark.parametrize("value", [":model", "provider:"])
     def test_a_judge_with_an_empty_side_is_a_usage_error(self, value: str) -> None:
         with pytest.raises(ValueError, match="--judge expects provider:model"):
-            MatrixOverrides(judge=value).apply(_matrix())
+            MatrixOverrides(judges=[value]).apply(_matrix())
 
     def test_the_reference_model_is_not_touched_by_the_judge_override(self) -> None:
-        result = MatrixOverrides(judge="openai:gpt-6.1-sol").apply(_matrix())
+        result = MatrixOverrides(judges=["openai:gpt-6.1-sol"]).apply(_matrix())
         assert result.reference == JUDGE
+
+    def test_the_recommendation_settings_are_kept(self) -> None:
+        settings = RecommendationSettings(tie_epsilon=0.02)
+        matrix = _matrix().model_copy(update={"recommendation": settings})
+        assert MatrixOverrides(cases=["a"]).apply(matrix).recommendation == settings
 
 
 class TestSplitByCredentials:

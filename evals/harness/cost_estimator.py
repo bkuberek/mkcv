@@ -1,14 +1,14 @@
 """Estimate what a matrix run would cost before any model is called."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
+from evals.graders.stage_graders import judge_calls
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import EvalCase
 from evals.models.matrix_config import MatrixConfig
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.model_report import summarize_costs
-from mkcv.core.models.stage_key import StageKey
 
 JUDGE_INPUT_TOKENS = 6000
 JUDGE_OUTPUT_TOKENS = 1500
@@ -16,33 +16,28 @@ JUDGE_OUTPUT_TOKENS = 1500
 
 _TOKENS_PER_MILLION = 1_000_000
 
-_JUDGE_CALLS_PER_RUN: dict[StageKey, int] = {
-    StageKey.SELECT: 1,  # selection_judge
-    StageKey.TAILOR: 2,  # faithfulness_judge and tailoring_judge
-}
-"""Judge calls one evaluated run makes, per the grader table in design 9.6."""
-
 
 def estimate_matrix_cost(
     matrix: MatrixConfig,
     cases: Sequence[EvalCase],
     catalog: ModelCatalog,
     *,
-    judge_skipped: str | None = None,
+    skipped_judges: Mapping[str, str] | None = None,
 ) -> CostEstimate:
     """Estimate the cost of running ``matrix`` over ``cases``.
 
     Each model is charged the stage requirements' token estimates for every
-    (case, stage, repeat) it runs; judge calls are charged at the judge
-    model's price. A model without a catalog price costs None.
+    (case, stage, repeat) it runs. Every judge of the panel scores every
+    judged output, so each judge is charged every judge call at its own
+    price. A model or judge without a catalog price costs None.
 
     Args:
-        matrix: The models, stages, and judge to price.
+        matrix: The models, stages, and judges to price.
         cases: The cases to run.
         catalog: Where prices come from.
-        judge_skipped: Why the judge will not run (no API key). Its calls are
-            then left out; the reason is kept only if the run would have made
-            judge calls.
+        skipped_judges: Judges that will not run (no credentials), with the
+            reason, by ``provider/model``. Their calls are left out; the
+            reasons are kept only if the run would have made judge calls.
     """
     runs = [
         (case, stage)
@@ -67,33 +62,43 @@ def estimate_matrix_cost(
         for model in matrix.models
     }
 
-    planned_judge_calls = (
-        len(matrix.models) * repeats * sum(_judge_calls(c, s) for c, s in runs)
+    calls = len(matrix.models) * repeats * sum(judge_calls(c, s) for c, s in runs)
+    skipped = dict(skipped_judges or {}) if calls else {}
+    judges = [] if not calls else [j for j in matrix.panel if j.label not in skipped]
+    judge_costs = {
+        judge.label: _judge_cost(
+            catalog.price_for(judge.model, provider=judge.provider), calls
+        )
+        for judge in judges
+    }
+    judge_total, _ = (
+        summarize_costs(list(judge_costs.values())) if judge_costs else (0.0, False)
     )
-    skipped = judge_skipped if planned_judge_calls else None
-    judge_calls = 0 if skipped else planned_judge_calls
-    judge_cost = _judge_cost(
-        catalog.price_for(matrix.judge.model, provider=matrix.judge.provider),
-        judge_calls,
-    )
-    known_costs = [*model_costs.values(), *([judge_cost] if judge_calls else [])]
+    known_costs = [*model_costs.values(), *judge_costs.values()]
     total, is_partial = summarize_costs(known_costs) if known_costs else (0.0, False)
     return CostEstimate(
         runs_per_model=len(runs) * repeats,
         model_costs=model_costs,
-        judge=matrix.judge.label,
-        judge_calls=judge_calls,
-        judge_cost_usd=judge_cost,
+        judges=[judge.label for judge in judges],
+        judge_calls=calls,
+        judge_costs=judge_costs,
+        judge_cost_usd=judge_total,
+        provider_costs=_by_provider(model_costs, judge_costs),
         total_usd=total,
         is_partial=is_partial,
-        judge_skipped=skipped,
+        skipped_judges=skipped,
     )
 
 
-def _judge_calls(case: EvalCase, stage: StageKey) -> int:
-    if stage is StageKey.REVIEW:
-        return 1 if case.review_probe_defects else 0
-    return _JUDGE_CALLS_PER_RUN.get(stage, 0)
+def _by_provider(*costs: Mapping[str, float | None]) -> dict[str, float | None]:
+    """Sum ``provider/model`` costs per provider, in first-seen order."""
+    grouped: dict[str, list[float | None]] = {}
+    for table in costs:
+        for label, cost in table.items():
+            grouped.setdefault(label.partition("/")[0], []).append(cost)
+    return {
+        provider: summarize_costs(values)[0] for provider, values in grouped.items()
+    }
 
 
 def _judge_cost(price: tuple[float, float] | None, calls: int) -> float | None:

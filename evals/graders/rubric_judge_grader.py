@@ -9,13 +9,14 @@ from evals.graders.judge_call import (
     judge_details,
     load_rubric,
 )
+from evals.graders.judged_grader import JudgedGrader
 from evals.models.grade import Grade
 from evals.models.rubric_judgement import RubricJudgement
 
 MAX_SCORE = 5
 
 
-class RubricJudgeGrader:
+class RubricJudgeGrader(JudgedGrader):
     """Base for the judges that score a stage output on named criteria.
 
     The grade is the mean criterion score divided by 5. It has no pass

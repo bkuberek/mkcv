@@ -3,8 +3,10 @@
 import statistics
 from collections.abc import Sequence
 
+from evals.graders.judge_panel import AGREEMENT_SPREAD
 from evals.graders.stage_graders import PRIMARY_METRIC
 from evals.models.eval_record import EvalRecord
+from evals.models.grade import Grade
 from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.stage_summary import StageSummary
 from evals.stages import stage_position
@@ -87,9 +89,13 @@ def _summarize(
     ok = [record for record in records if record.status == "ok"]
     ok_rate = len(ok) / len(records)
     mean = _grade_means(ok)
+    independent, self_only = _independent_means(ok)
+    ranking = {**mean, **self_only, **independent}
     fabrication = _fabrication_rates(ok)
-    failures = gate_failures(ok_rate, mean, fabrication, settings)
+    failures = gate_failures(ok_rate, ranking, fabrication, settings)
     latencies = sorted(record.latency_s for record in ok)
+    metric = PRIMARY_METRIC.get(stage, "")
+    spreads = _spreads(ok)
     return StageSummary(
         stage=stage,
         provider=provider,
@@ -97,7 +103,17 @@ def _summarize(
         n=len(records),
         ok_rate=ok_rate,
         mean=mean,
-        primary_score=mean.get(PRIMARY_METRIC.get(stage, "")),
+        independent_mean=independent,
+        primary_score=ranking.get(metric),
+        primary_by_judge=_by_judge(ok, metric),
+        judge_spread=statistics.fmean(spreads) if spreads else None,
+        judge_agreement=(
+            sum(1 for gap in spreads if gap <= AGREEMENT_SPREAD + _EPSILON)
+            / len(spreads)
+            if spreads
+            else None
+        ),
+        judged_outputs=len(spreads),
         cost_mean_usd=statistics.fmean(r.cost_usd for r in ok) if ok else None,
         latency_p50_s=_percentile(latencies, MEDIAN),
         latency_p90_s=_percentile(latencies, P90),
@@ -106,11 +122,7 @@ def _summarize(
         fabrication_rate=fabrication,
         eligible=not failures,
         gate_failures=failures,
-        self_judged=any(
-            grade.details.get("self_judged") is True
-            for record in ok
-            for grade in record.grades
-        ),
+        self_judged=bool(self_only),
         low_sample=len(records) < LOW_SAMPLE_BELOW,
     )
 
@@ -122,6 +134,70 @@ def _grade_means(ok_records: list[EvalRecord]) -> dict[str, float]:
             if grade.score is not None:
                 scores.setdefault(grade.name, []).append(grade.score)
     return {name: statistics.fmean(values) for name, values in scores.items()}
+
+
+def _independent_means(
+    ok_records: list[EvalRecord],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Means of each judged grade without, and (where needed) only with, self-judging.
+
+    Returns ``(independent, self_only)``. ``independent`` averages the scores
+    that judges from other providers gave. ``self_only`` holds the plain mean
+    of each judged grade that no other provider's judge ever scored.
+    """
+    independent: dict[str, list[float]] = {}
+    own: dict[str, list[float]] = {}
+    for record in ok_records:
+        for grade in record.grades:
+            if not _is_judged(grade) or grade.score is None:
+                continue
+            outside = _independent_score(grade)
+            if outside is not None:
+                independent.setdefault(grade.name, []).append(outside)
+            else:
+                own.setdefault(grade.name, []).append(grade.score)
+    return (
+        {name: statistics.fmean(values) for name, values in independent.items()},
+        {
+            name: statistics.fmean(values)
+            for name, values in own.items()
+            if name not in independent
+        },
+    )
+
+
+def _is_judged(grade: Grade) -> bool:
+    return bool(grade.judge_scores) or "self_judged" in grade.details
+
+
+def _independent_score(grade: Grade) -> float | None:
+    """The score without self-judging; a pre-panel grade knows only its flag."""
+    if grade.judge_scores:
+        return grade.independent_score
+    return None if grade.details.get("self_judged") is True else grade.score
+
+
+def _by_judge(ok_records: list[EvalRecord], metric: str) -> dict[str, float]:
+    scores: dict[str, list[float]] = {}
+    for record in ok_records:
+        for grade in record.grades:
+            if grade.name != metric:
+                continue
+            for verdict in grade.judge_scores:
+                if verdict.score is not None:
+                    scores.setdefault(verdict.judge, []).append(verdict.score)
+    return {judge: statistics.fmean(values) for judge, values in scores.items()}
+
+
+def _spreads(ok_records: list[EvalRecord]) -> list[float]:
+    """The judges' spread on every judged grade that several judges scored."""
+    return [
+        float(spread)
+        for record in ok_records
+        for grade in record.grades
+        if grade.judge_scores
+        and isinstance(spread := grade.details.get("spread"), int | float)
+    ]
 
 
 def _fabrication_rates(ok_records: list[EvalRecord]) -> dict[str, float]:

@@ -9,13 +9,15 @@ from evals.graders.judge_call import (
     judge_details,
     load_rubric,
 )
+from evals.graders.judged_grader import JudgedGrader
 from evals.graders.text_normalization import normalize_text
 from evals.models.defect_finding import DefectFinding
 from evals.models.defect_judgement import DefectJudgement
+from evals.models.eval_case import EvalCase
 from evals.models.grade import Grade
 
 
-class ReviewDefectGrader:
+class ReviewDefectGrader(JudgedGrader):
     """Recall of the probe's seeded defects in the review, according to a judge.
 
     Only the review probe case has seeded defects; for any other case, and
@@ -25,6 +27,10 @@ class ReviewDefectGrader:
     """
 
     name = "review_defect_recall"
+
+    def applies_to(self, case: EvalCase) -> bool:
+        """Only a case with seeded defects is judged."""
+        return bool(case.review_probe_defects)
 
     async def grade(self, ctx: GradingContext) -> Grade | None:
         """Ask the judge which seeded defects ``ctx.output`` identifies."""
