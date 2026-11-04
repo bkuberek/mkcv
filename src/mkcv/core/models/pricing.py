@@ -14,6 +14,7 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-6": (0.003, 0.015),
     "claude-haiku-4-5": (0.001, 0.005),
     "claude-haiku-4-5-20251001": (0.001, 0.005),
+    "claude-opus-4-20250514": (0.015, 0.075),
     "claude-sonnet-4-20250514": (0.003, 0.015),
     "claude-haiku-4-20250414": (0.0008, 0.004),
     # OpenAI GPT-4o

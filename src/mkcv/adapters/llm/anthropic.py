@@ -27,24 +27,28 @@ from mkcv.core.models.token_usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
-_CLAUDE_5_PREFIXES = (
+_STRICT_REQUEST_PREFIXES = (
     "claude-opus-5",
     "claude-sonnet-5",
     "claude-haiku-5",
     "claude-fable-",
+    "claude-mythos-",
+    # Opus 4.7/4.8 already reject sampling parameters
+    "claude-opus-4-7",
+    "claude-opus-4-8",
 )
 
 CLAUDE_5_MIN_MAX_TOKENS = 16_000
 """Output floor for Claude 5.x, whose always-on thinking counts against max_tokens."""
 
 
-def is_claude_5_family(model: str) -> bool:
-    """Return True for Claude 5.x models.
+def uses_strict_request_rules(model: str) -> bool:
+    """Return True for models with the Claude 5.x request rules (incl. Opus 4.7/4.8).
 
     These models reject sampling parameters and forced ``tool_choice``,
     and always think before answering.
     """
-    return model.startswith(_CLAUDE_5_PREFIXES)
+    return model.startswith(_STRICT_REQUEST_PREFIXES)
 
 
 def _build_request(
@@ -56,7 +60,7 @@ def _build_request(
     """Build the request kwargs shared by plain and structured calls."""
     system, user_messages = split_system_message(messages)
     request: dict[str, Any] = {"model": model, "messages": user_messages}
-    if is_claude_5_family(model):
+    if uses_strict_request_rules(model):
         request["max_tokens"] = max(max_tokens, CLAUDE_5_MIN_MAX_TOKENS)
     else:
         request["temperature"] = temperature
@@ -132,7 +136,7 @@ class AnthropicAdapter:
         """Send a streaming structured completion and return a Pydantic model."""
         request = _build_request(messages, model, temperature, max_tokens)
         try:
-            if is_claude_5_family(model):
+            if uses_strict_request_rules(model):
                 return await self._complete_with_output_format(request, response_model)
             return await self._complete_with_forced_tool(request, response_model)
         except (

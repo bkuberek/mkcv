@@ -49,31 +49,31 @@
 # Stage 1: Analyze the job description -- extract requirements, keywords, priorities
 [pipeline.stages.analyze]
 # provider = "anthropic"
-# model = "claude-haiku-4-5-20251001"
+# model = "claude-haiku-5-5"
 # temperature = 0.2
 
 # Stage 2: Select the most relevant experience from your knowledge base
 [pipeline.stages.select]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.3
 
 # Stage 3: Tailor bullet points -- rewrite with XYZ formula, weave in keywords
 [pipeline.stages.tailor]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.5
 
 # Stage 4: Structure the resume into RenderCV-compatible YAML
 [pipeline.stages.structure]
 # provider = "anthropic"
-# model = "claude-sonnet-4-20250514"
+# model = "claude-sonnet-5-5"
 # temperature = 0.1
 
 # Stage 5: Review for ATS compliance, scoring, improvement suggestions
 [pipeline.stages.review]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.3
 
 # ---------------------------------------------------------------------------
@@ -86,12 +86,12 @@
 # LLM configuration for cover letter stages
 [cover_letter.stages.generate]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.6
 
 [cover_letter.stages.review]
 # provider = "anthropic"
-# model = "claude-haiku-4-5-20251001"
+# model = "claude-haiku-5-5"
 # temperature = 0.2
 
 # Cover letter layout and design

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import anthropic
 import pytest
 
-from mkcv.adapters.llm.anthropic import AnthropicAdapter, is_claude_5_family
+from mkcv.adapters.llm.anthropic import AnthropicAdapter, uses_strict_request_rules
 from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.rate_limit import RateLimitError
@@ -199,10 +199,13 @@ class TestIsClaude5Family:
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-fable-5-1",
+            "claude-mythos-5-1",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
         ],
     )
-    def test_claude_5_models_match(self, model: str) -> None:
-        assert is_claude_5_family(model)
+    def test_strict_rule_models_match(self, model: str) -> None:
+        assert uses_strict_request_rules(model)
 
     @pytest.mark.parametrize(
         "model",
@@ -216,7 +219,7 @@ class TestIsClaude5Family:
         ],
     )
     def test_older_models_do_not_match(self, model: str) -> None:
-        assert not is_claude_5_family(model)
+        assert not uses_strict_request_rules(model)
 
 
 class TestAnthropicRequestShape:
