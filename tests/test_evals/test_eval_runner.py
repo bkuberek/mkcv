@@ -12,18 +12,22 @@ import pytest
 from dynaconf import Dynaconf
 from pydantic import BaseModel
 
+from evals.graders.grading_context import GradingContext
 from evals.harness.case_loader import load_cases
 from evals.harness.eval_runner import EvalRunner, current_git_sha, new_run_id
 from evals.models.eval_case import EvalCase
 from evals.models.eval_record import EvalRecord
+from evals.models.grade import Grade
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.run_manifest import RunManifest
 from evals.models.run_settings import RunSettings
 from mkcv.adapters.llm.stub import StubLLMAdapter
+from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.stage_key import StageKey
+from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.ports.llm import LLMPort
 from tests.test_evals.conftest import FailingStub, UsageStub, recorded
 
@@ -157,19 +161,6 @@ class TestRecords:
         )
         assert record.latency_s >= 0.04
 
-    async def test_records_have_no_grades_before_graders_exist(
-        self,
-        make_runner: Callable[..., EvalRunner],
-        cases: list[EvalCase],
-        canned_stub: StubLLMAdapter,
-        install_adapter: Callable[[LLMPort], LLMPort],
-    ) -> None:
-        install_adapter(canned_stub)
-        [record] = await make_runner().run(
-            _matrix([STUB], [StageKey.ANALYZE]), cases[:1]
-        )
-        assert (record.grades, record.judge) == ([], None)
-
     async def test_a_stage_without_a_reference_is_recorded_as_skipped(
         self,
         make_runner: Callable[..., EvalRunner],
@@ -199,6 +190,177 @@ class TestRecords:
         assert [(r.status, r.repeat) for r in records] == [("error", 0), ("error", 1)]
         assert records[0].error is not None
         assert "boom" in records[0].error
+
+
+class RecordingGrader:
+    """A grader that keeps the contexts it was given."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.contexts: list[GradingContext] = []
+
+    async def grade(self, ctx: GradingContext) -> Grade:
+        self.contexts.append(ctx)
+        return Grade(name=self.name, score=0.5, passed=False)
+
+
+class ExplodingGrader:
+    name = "exploding"
+
+    async def grade(self, ctx: GradingContext) -> Grade:
+        raise ProviderError("judge is down")
+
+
+class TestGrading:
+    """T15: ok records are graded by the stage's graders."""
+
+    async def test_an_ok_analysis_carries_the_deterministic_grades(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        install_adapter(canned_stub)
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.ANALYZE]), cases[:1]
+        )
+        assert [g.name for g in record.grades] == ["schema", "jd_keyword_recall"]
+
+    async def test_an_ok_tailor_record_carries_schema_and_faithfulness_grades(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        add_reference: Callable[..., None],
+    ) -> None:
+        install_adapter(canned_stub)
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT])
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.TAILOR]), cases[:1]
+        )
+        assert record.status == "ok"
+        assert {g.name for g in record.grades} >= {"schema", "faithfulness_extraction"}
+
+    async def test_the_schema_grade_of_a_valid_artifact_is_one(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        install_adapter(canned_stub)
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.ANALYZE]), cases[:1]
+        )
+        assert record.grades[0].score == 1.0
+
+    async def test_a_structure_record_is_graded_on_its_yaml(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        add_reference: Callable[..., None],
+    ) -> None:
+        install_adapter(canned_stub)
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT, StageKey.TAILOR])
+        [record] = await make_runner().run(
+            _matrix([STUB], [StageKey.STRUCTURE]), cases[:1]
+        )
+        grades = {g.name: g for g in record.grades}
+        assert set(grades) == {
+            "schema",
+            "ats_rules",
+            "structure",
+            "faithfulness_extraction",
+        }
+        assert grades["schema"].score == 1.0
+        assert grades["structure"].score == 1.0
+
+    async def test_failed_and_skipped_records_are_not_graded(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        install_adapter(FailingStub())
+        records = await make_runner().run(
+            _matrix([STUB], [StageKey.ANALYZE, StageKey.TAILOR]), cases[:1]
+        )
+        assert {r.status for r in records} == {"error", "skipped"}
+        assert [r.grades for r in records] == [[], []]
+
+    async def test_graders_see_the_case_the_output_and_the_upstream_references(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        add_reference: Callable[..., None],
+    ) -> None:
+        install_adapter(canned_stub)
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT, StageKey.TAILOR])
+        recorder = RecordingGrader()
+        runner = make_runner(graders={StageKey.TAILOR: [recorder]})
+        await runner.run(_matrix([HAIKU], [StageKey.TAILOR]), cases[:1])
+        [ctx] = recorder.contexts
+        assert ctx.case.id == "alpha-match"
+        assert (ctx.kb_text, ctx.jd_text) == (cases[0].kb_text, cases[0].jd_text)
+        assert ctx.output == recorded(TailoredContent).model_dump()
+        assert sorted(ctx.reference) == ["stage1_analysis", "stage2_selection"]
+        assert ctx.evaluated_provider == "anthropic"
+
+    async def test_the_reference_artifacts_of_the_stage_itself_are_withheld(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        add_reference: Callable[..., None],
+    ) -> None:
+        install_adapter(canned_stub)
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT, StageKey.TAILOR])
+        recorder = RecordingGrader()
+        runner = make_runner(graders={StageKey.ANALYZE: [recorder]})
+        await runner.run(_matrix([STUB], [StageKey.ANALYZE]), cases[:1])
+        assert recorder.contexts[0].reference == {}
+
+    async def test_a_grader_that_fails_is_recorded_and_the_run_continues(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        install_adapter(canned_stub)
+        runner = make_runner(
+            graders={StageKey.ANALYZE: [ExplodingGrader(), RecordingGrader()]}
+        )
+        [record] = await runner.run(
+            _matrix([STUB], [StageKey.ANALYZE], repeats=1), cases[:1]
+        )
+        failed, recorded_grade = record.grades
+        assert (failed.name, failed.score, failed.passed) == ("exploding", None, None)
+        assert "judge is down" in failed.details["error"]
+        assert recorded_grade.name == "recording"
+        assert record.status == "ok"
+
+    async def test_grades_are_written_to_results_jsonl(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        install_adapter(canned_stub)
+        await make_runner().run(_matrix([STUB], [StageKey.ANALYZE]), cases[:1])
+        line = (tmp_path / "out" / "results.jsonl").read_text().splitlines()[0]
+        written = EvalRecord.model_validate_json(line)
+        assert [g.name for g in written.grades] == ["schema", "jd_keyword_recall"]
 
 
 class TestFiles:

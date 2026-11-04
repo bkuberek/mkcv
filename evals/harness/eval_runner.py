@@ -1,24 +1,30 @@
 """Run a model matrix over eval cases and write the run's result files."""
 
 import asyncio
+import json
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
 import mkcv
+from evals.graders.grader import Grader
+from evals.graders.grading_context import GradingContext
+from evals.graders.stage_graders import STAGE_GRADERS
 from evals.harness.stage_run import StageRun
 from evals.harness.stage_runner import StageRunner, work_dir_for
-from evals.models.eval_case import EvalCase
+from evals.models.eval_case import REFERENCE_FILES, EvalCase
 from evals.models.eval_record import EvalRecord
+from evals.models.grade import Grade
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.run_manifest import RunManifest
 from mkcv.adapters.factory import create_provider_registry
 from mkcv.config.configuration import Configuration
+from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.model_catalog import ModelCatalog
-from mkcv.core.models.stage_key import StageKey
+from mkcv.core.models.stage_key import PIPELINE_STAGE_NUMBERS, PIPELINE_STAGES, StageKey
 
 if TYPE_CHECKING:
     from evals.models.judge_config import JudgeConfig
@@ -63,11 +69,13 @@ class EvalRunner:
         out_dir: Path,
         run_id: str,
         on_record: Callable[[EvalRecord], None] | None = None,
+        graders: Mapping[StageKey, Sequence[Grader]] | None = None,
     ) -> None:
         self._config = config
         self._out_dir = out_dir
         self._run_id = run_id
         self._on_record = on_record
+        self._graders = STAGE_GRADERS if graders is None else graders
 
     async def run(
         self,
@@ -121,12 +129,44 @@ class EvalRunner:
         async with gate:
             work_dir = work_dir_for(self._out_dir, case.id, stage, model, repeat)
             result = await runner.run(case, stage, model, repeat, work_dir)
-            record = self._record(case, stage, model, repeat, result)
+            grades = await self._grade(case, stage, model, result)
+            record = self._record(case, stage, model, repeat, result, grades)
             sink.write(record.model_dump_json() + "\n")
             sink.flush()
         if self._on_record is not None:
             self._on_record(record)
         return record
+
+    async def _grade(
+        self,
+        case: EvalCase,
+        stage: StageKey,
+        model: MatrixModel,
+        result: StageRun,
+    ) -> list[Grade]:
+        """Run the stage's graders on an ``ok`` output; other results have none.
+
+        A grader that fails with an mkcv error (a judge call, say) leaves a
+        grade without a score that names the error, so the run goes on.
+        """
+        if result.status != "ok":
+            return []
+        context = GradingContext(
+            case=case,
+            stage=stage,
+            kb_text=case.kb_text,
+            jd_text=case.jd_text,
+            output=result.payload,
+            reference=_upstream_reference(case, stage),
+            evaluated_provider=model.provider,
+        )
+        grades: list[Grade] = []
+        for grader in self._graders.get(stage, ()):
+            try:
+                grades.append(await grader.grade(context))
+            except MkcvError as error:
+                grades.append(Grade(name=grader.name, details={"error": str(error)}))
+        return grades
 
     def _record(
         self,
@@ -135,6 +175,7 @@ class EvalRunner:
         model: MatrixModel,
         repeat: int,
         result: StageRun,
+        grades: list[Grade],
     ) -> EvalRecord:
         metadata = result.metadata
         return EvalRecord(
@@ -150,6 +191,7 @@ class EvalRunner:
             output_tokens=metadata.output_tokens if metadata else 0,
             cost_usd=metadata.cost_usd if metadata else 0.0,
             latency_s=metadata.duration_seconds if metadata else 0.0,
+            grades=grades,
         )
 
     def _manifest(
@@ -175,6 +217,24 @@ class EvalRunner:
         (self._out_dir / MANIFEST_FILE).write_text(
             manifest.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
+
+
+def _upstream_reference(case: EvalCase, stage: StageKey) -> dict[str, Any]:
+    """Load the case's JSON reference artifacts of the stages before ``stage``.
+
+    Keys are the artifact names (``stage1_analysis``, ...). The stage 4 resume
+    is YAML, not an artifact, so it is not included.
+    """
+    number = PIPELINE_STAGE_NUMBERS[stage]
+    reference: dict[str, Any] = {}
+    for earlier in PIPELINE_STAGES:
+        if PIPELINE_STAGE_NUMBERS[earlier] >= number:
+            break
+        for name in REFERENCE_FILES[earlier]:
+            path = case.reference_dir / name
+            if path.suffix == ".json" and path.is_file():
+                reference[path.stem] = json.loads(path.read_text(encoding="utf-8"))
+    return reference
 
 
 def _catalog_prices(
