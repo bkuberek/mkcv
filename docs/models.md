@@ -28,7 +28,19 @@ or an API key to check.
 
 Put your keys in your user config file, `~/.config/mkcv/settings.toml`. It is
 read for every workspace, lives outside every repository and your shell
-environment, and survives upgrades (including Homebrew):
+environment, and survives upgrades (including Homebrew).
+
+You do not have to create it. The first time you run any `mkcv` command, mkcv
+creates the file from a commented template, with mode `0600` (private to you),
+and prints one line to stderr:
+
+```text
+Created ~/.config/mkcv/settings.toml — add your API key there (see docs/models.md#api-keys).
+```
+
+The template holds an empty `api_key = ""` for `anthropic`, `openai`, `google`,
+and `openrouter`, plus every other option commented out. Fill in the keys you
+need:
 
 ```toml
 [default.providers.anthropic]
@@ -44,14 +56,27 @@ api_key = "..."
 api_key = "sk-or-..."
 ```
 
-Add only the providers you use, then make the file private:
+Leave the providers you do not use as they are. An empty `api_key` counts as
+not set, so mkcv falls back to the provider's environment variable.
 
-```bash
-chmod 600 ~/.config/mkcv/settings.toml
-```
+mkcv only ever creates the file when it is missing or empty (zero bytes or
+whitespace). A file with any content is never changed, and its permissions are
+left alone; run `chmod 600 ~/.config/mkcv/settings.toml` yourself if you made
+the file another way. Set `MKCV_NO_USER_CONFIG=1` to stop mkcv creating it (CI,
+tests, and packaging do this so they never write to `HOME`). If mkcv cannot
+write the file (a read-only home, for example), it carries on without it.
 
 > **Never put `api_key` in a workspace `mkcv.toml` that is committed to git.**
 > Keep keys in the user config file above.
+
+#### User config or workspace config
+
+Any option can live in either file. The user config applies to every workspace;
+a workspace `mkcv.toml` applies to that workspace and overrides the user config.
+Put what you want everywhere (keys, your usual model profile, your theme) in the
+user config, and what is specific to one workspace in its `mkcv.toml`. Both files
+start with the same commented list of options; `mkcv init` writes the workspace
+one, and an empty `mkcv.toml` is filled with it the first time mkcv finds it.
 
 Environment variables work as an alternative, which suits CI and one-off
 overrides. Use the provider's own variable (the table above lists them), or

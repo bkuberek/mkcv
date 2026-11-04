@@ -394,12 +394,18 @@ All env vars use the `MKCV_` prefix (Dynaconf convention):
 | `MKCV_PIPELINE__STAGES__ANALYZE__MODEL` | Model for one stage (any stage section works the same way) |
 | `MKCV_RENDERING__THEME` | Default theme |
 | `MKCV_GENERAL__VERBOSE` | Enable verbose logging |
+| `MKCV_NO_USER_CONFIG` | Set to `1` to stop mkcv creating `~/.config/mkcv/settings.toml` (and filling an empty `mkcv.toml`) on first run |
 
 Dynaconf uses double underscores for nested keys:
 `MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5`
 
-API keys belong in the user config file `~/.config/mkcv/settings.toml`
-(`[default.providers.<name>] api_key = "..."`, then `chmod 600`); see
+The first mkcv command you run creates `~/.config/mkcv/settings.toml` (mode
+0600, commented template) if it is missing or empty, and prints one line to
+stderr; `--version` and `MKCV_NO_USER_CONFIG=1` skip this. Any option can live in
+that file or in a workspace `mkcv.toml`, which overrides it.
+
+API keys belong in the user config file
+(`[default.providers.<name>] api_key = "..."`); see
 [API keys](../models.md#api-keys). Never put `api_key` in a committed workspace
 `mkcv.toml`. A key in config takes precedence over the environment variable.
 

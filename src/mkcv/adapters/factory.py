@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from mkcv.core.services.regeneration import RegenerationService
 
 from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
+from mkcv.adapters.filesystem.config_bootstrap import ConfigBootstrap
 from mkcv.adapters.filesystem.pdf_reader import PyPdfReader
 from mkcv.adapters.filesystem.prompt_loader import FileSystemPromptLoader
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
@@ -444,6 +445,15 @@ def create_validation_service(config: Configuration) -> ValidationService:
         model=assignment.model,
         temperature=assignment.temperature,
     )
+
+
+def create_config_bootstrap() -> ConfigBootstrap:
+    """Create the writer of the first-run config files.
+
+    Returns:
+        ConfigBootstrap that honours ``MKCV_NO_USER_CONFIG``.
+    """
+    return ConfigBootstrap()
 
 
 def create_workspace_service() -> WorkspaceService:

@@ -109,6 +109,17 @@ class TestRenderFormula:
         assert "${" not in formula
         assert 'bin.install_symlink libexec/"bin/mkcv"' in formula
 
+    def test_caveats_say_mkcv_creates_the_user_config_file(
+        self, files: render_formula.ReleaseFiles
+    ) -> None:
+        template = render_formula.TEMPLATE.read_text(encoding="utf-8")
+
+        formula = render_formula.render_formula(files, template)
+
+        assert "first mkcv command" in formula
+        assert "~/.config/mkcv/settings.toml" in formula
+        assert "MKCV_NO_USER_CONFIG=1" in formula
+
     def test_rejects_a_platform_wheel(self, tmp_path: Path) -> None:
         wheel = tmp_path / "mkcv-1.5.1-cp313-cp313-macosx_11_0_arm64.whl"
         requirements = tmp_path / "requirements.txt"

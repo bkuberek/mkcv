@@ -213,8 +213,9 @@ class TestWarningsSection:
     def test_a_missing_key_is_listed(self, run: Callable[..., str]) -> None:
         output = run(_WEAK_TAILOR)
         assert (
-            "  openai: no API key found (set OPENAI_API_KEY); a run that uses "
-            "it stops with a configuration error.\n" in output
+            "  openai: no API key found (set OPENAI_API_KEY, or api_key in "
+            "[default.providers.openai] in ~/.config/mkcv/settings.toml); "
+            "a run that uses it stops with a configuration error.\n" in output
         )
 
     def test_bracketed_config_paths_in_warnings_survive(
