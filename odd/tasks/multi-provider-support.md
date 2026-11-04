@@ -59,7 +59,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 - [x] T14: Synthetic eval fixtures (route: delegated; 3 personas, 6 job descriptions, cases.toml, probe reference, 133-test fixture file) - `c714e9c`
 - [x] T15: Deterministic graders (route: delegated; 11 grader modules, runner wiring, 8 recorded failing fixtures, 7 test files) - `9b5259b`
 - [x] T16: LLM-judge graders and rubrics (route: delegated; 6 response models, judge factory, 4 judge graders + base, 4 rubrics, logging setup, runner/CLI/estimate wiring, 3 new test files) - `1a43724`
-- [ ] T17: Aggregation, recommendations, report, and eval docs (route: delegated)
+- [x] T17: Aggregation, recommendations, report, and eval docs (route: delegated; 2 models, aggregator, recommender, report renderer and writer, `evals/README.md`, docs edits, 6 new test files) - `0d49422`
 
 ## Acceptance criteria
 
@@ -111,6 +111,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T14 | `c714e9c` | `FileNotFoundError: [Errno 2] No such file or directory: '.../evals/fixtures/cases.toml'` (test_fixtures.py fails to collect; hiding the fixtures reproduces it) | 133 focused (tests/test_evals/test_fixtures.py), 3416 full | pending (parent runs `gentle-ai review assess`) |
 | T15 | `9b5259b` | `ModuleNotFoundError: No module named 'evals.graders'` (7 test modules fail to collect; `test_eval_runner.py` imports `evals.graders.grading_context` first) | 197 added (3416 to 3613 full) | pending (parent runs `gentle-ai review assess`) |
 | T16 | `1a43724` | `ModuleNotFoundError: No module named 'evals.models.criterion_score'` (the shared `grading_support` helper imports the judge models, so every grader test and the runner and CLI tests fail to collect) | 112 added (3613 to 3725 full) | pending (parent runs `gentle-ai review assess`) |
+| T17 | `0d49422` | `ModuleNotFoundError: No module named 'evals.models.stage_summary'` (the shared `report_support` helper imports it, so the aggregator, recommender, report, and writer tests fail to collect) | 145 added (3725 to 3884 full) | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -305,6 +306,20 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Judge token usage and cost are not measured (the judge adapter's usage is not read), so the report's cost figures cover the evaluated models only; the estimate does include the judge.
 - Extra files (all inside the allowed surfaces): `evals/graders/judge_call.py` (rubric loading, the deterministic judge request, provenance details), `evals/graders/rubric_judge_grader.py` (the base of the two rubric judges), `evals/harness/logging_setup.py`, `tests/test_evals/test_judge_factory.py`, `tests/test_evals/test_logging_setup.py`; `evals/harness/credentials.py` gained `missing_key_reason`, which `split_by_credentials` and the judge check share.
 
+**T17** (route: delegated writer, trigger: 2 models, 5 report modules, a file-name module, runner and CLI wiring, `evals/README.md`, 2 docs edits, and 6 new test files).
+
+- Verification: `uv run pytest tests/test_evals`: 864 passed; `uv run ruff check src/ tests/ evals/` and `uv run ruff format --check src/ tests/ evals/`: clean; `uv run mypy` (223 files): clean; `uv run pytest`: 3884 passed, exit 0; `uv lock --check`: consistent. `uv run python -m evals estimate`: $36.40 for the shipped matrix, no `n/a`.
+- Test strength: 55 one-line mutations of the aggregator, recommender, renderer, writer, runner, and CLI; 46 were caught at first. Eight survivors were killed by new tests (the 0.95 schema boundary, the economy-floor sentence, the singular "1 record failed", threshold notes on ineligible rows, a stage measured on one side only, a run ID that is not a plain folder name, no half-published folder after a refused publish, and the published directory itself). The ninth, the clamp in the percentile interpolation, is an equivalent mutation for the quantiles used (0.5 and 0.9), so it stays.
+- Offline end-to-end (scratch script, not committed): a canned fake adapter that answers by model name, real fixtures, three models (`claude-sonnet-5-5` faithful, `claude-haiku-5-5` with a first-person bullet in its YAML, `gpt-6.1-terra` with the recorded `$2.4M` and PyTorch fabrications), the judge `claude-opus-5-5`, 6 repeats on `backend-platform-match` and `review-probe`, and dummy keys. `python -m evals run --yes` wrote 108 `ok` records and the four files, `report DIR --publish` copied the four files (no `raw/`) to a `published/<run id>/` folder, and the report gave the expected picture: `gpt-6.1-terra` ineligible on tailor ("faithfulness_judge below 0.9") so `tailor / openai` read "no eligible model"; Anthropic rows marked self-judged; the haiku structure row scored 0.86 on `ats_rules` (R3). With every key absent (clean environment and home), the real CLI exited 0, skipped all ten models with one warning each, priced the run at `$0.0000`, and wrote the four files with a report that lists the skipped models and shows no rows.
+- Files: `results.jsonl` and `run.json` are written as before; `EvalRunner.run` now ends by calling `write_report_files`, which reads them back from disk and writes `summary.json` (a list of `StageSummary`) and `report.md`. `report DIR` calls the same function, so a published report is exactly reproducible from `results.jsonl` and `run.json`. File names live in `evals/harness/run_files.py` (extra module; it breaks an import cycle between the runner and the report package).
+- Aggregation (design 9.9, with these readings): `n` counts `ok` plus `error` records; cost, latency, and token medians use `ok` records only; `p50` and `p90` interpolate linearly; `primary_score` is the mean of `PRIMARY_METRIC[stage]` and is None when that grade is absent; eligibility is evaluated on grade means, with a 1e-9 tolerance so exact thresholds pass. A (stage, provider, model) group with only skipped records produces no summary. `aggregator.ineligible_reasons` is shared with the renderer's Notes column.
+- Recommendation: models without a primary score cannot be ranked (reason "no quality score for any eligible model (is the judge available?)" instead of "no eligible model"); an unknown cost or latency ranks after a known one; `recommended` breaks cost ties toward the higher score. The recommendation's reason names the metric, the best model, and the recommended model with its cost.
+- Report: sections and the stage-table columns follow REQ-EV-18 exactly. Cost totals use `cost_mean_usd` times completed runs per summary; judge calls are not measured and the report says so. "Suggested profile changes" compares every built-in profile with the recommendation for its provider (base profiles with `recommended`, economy profiles with `economy`, via `profile_stage_model` so `extends` is followed) and prints `<profile> / <stage>: <current> → <recommended>`; it never writes to the catalog. `StageSummary` carries no failure count, so the caveat derives it as `n - round(n * ok_rate)`.
+- Estimate fix found by the offline run: a run whose models are all skipped printed `Total: n/a`; with nothing to price the total is now `$0.0000`.
+- CLI: `report DIR [--publish]` (the placeholder is gone); `run` also prints `Report: <path>`. `evals.cli.PUBLISHED_DIR` (`evals/results/published`) is a module constant so tests can redirect it. A truncated last line in `results.jsonl` (an interrupted run) makes `report` exit 2 naming the line, rather than guessing.
+- Docs: `evals/README.md` (keys including the judge's, estimate, bootstrap and the human review of references, the one-command run, cost, how to read each report section, publishing, and applying results by hand); `docs/models.md` "Evidence" became "How recommendations are made" (eligibility, best/recommended/economy with the spec's "within 0.05 of the best" wording, provisional status, caveats) and the intro link follows; `docs/DEVELOPMENT.md` gained "Evaluating Models". `tests/test_evals/test_docs.py` pins the REQ-EV-22 content. `evals/results/published/.gitkeep` exists; `.gitignore` already handled the rest. No profile's `evidence` or `eval_run` was set: no eval has run.
+- Observation for the owner (design rule, not changed): eligibility compares grade means with 0.95, so a model can stay eligible while fabricating roughly one claim in twenty (the offline run's `gpt-6.1-terra` scored 0.95 on `faithfulness_extraction` with one `$2.4M` per output and was only caught by the judge column). Consider requiring zero deterministic violations in most outputs once real data exists.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -323,10 +338,74 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Follow-ups (not in this feature)
 
-- Owner: first live eval run and adoption of eval-backed profiles (steps at the end of `tasks.md`).
+- Owner: first live eval run and adoption of eval-backed profiles (steps in "Next step" below and at the end of `tasks.md`).
+- Judge token usage and cost are not measured; the report's cost columns cover the evaluated models only.
+- Consider a stricter faithfulness eligibility rule once real eval data exists (see the T17 observation).
 - Owner: update `CLAUDE.md` "LLM providers (Anthropic/OpenAI/Ollama/OpenRouter/Stub)" to include Google and OpenAI-compatible endpoints.
 - Evaluate the OpenAI Responses API and per-stage reasoning effort once evals exist.
 
+## Changelog summary (for the PR and `CHANGELOG.md`)
+
+**Features**
+
+- Any pipeline stage can run on Anthropic, OpenAI, Google Gemini, or any OpenAI-compatible endpoint (Ollama and OpenRouter are built in; Groq, Together, vLLM, LM Studio, and the like are defined under `[default.providers.<name>]`). Providers are data in a registry; `adapters/factory.py` no longer dispatches on a provider name or hard-codes a model.
+- A model capability catalog (`core/catalog/`, with `[[default.model_catalog]]` overrides) describes tier, prices, and how each model wants requests shaped; cost estimates come from it.
+- OpenAI uses strict structured outputs (`json_schema`); the OpenAI-compatible adapter degrades through a fallback chain; a new Gemini adapter uses `google-genai`; the Anthropic adapter shapes requests from the catalog (no `temperature` where a model rejects it).
+- Model profiles (`anthropic`, `openai`, `google`, `local`, plus `anthropic-economy`, `openai-economy`, `google-economy`) pick a model per stage. `--model-profile`, `[default.pipeline] model_profile`, and per-stage config choose between them; `--provider` and `--model-profile` are mutually exclusive.
+- `mkcv models` shows the models, tiers, and estimated cost per stage (`--profiles`, `--catalog`, `--json`).
+- Non-blocking warnings in `generate` and `cover-letter` for weak, unknown, or deprecated stage models (`[default.pipeline] model_warnings`).
+- `mkcv init` workspaces get a commented `mkcv.toml` and a README that cover providers, profiles, and `mkcv models`.
+- An offline eval harness (`uv run python -m evals`, top-level `evals/`, not shipped): stage-isolated runs over a model matrix on synthetic personas and job descriptions, seven rule-based graders (including a faithfulness check that catches numbers, employers, titles, and skills the knowledge base does not support), four LLM-judge graders, aggregation with eligibility rules, per-stage recommendations, a Markdown report with suggested profile changes, and `--publish`. No eval has been run yet, so every profile is still labelled provisional.
+
+**Behaviour changes**
+
+- Per-stage `provider` and `model` in `mkcv.toml` are now honoured by `generate`; before, the `standard` preset replaced them. Precedence is CLI flags, then per-stage config, then the model profile.
+- Density and model choice are separate axes: `--preset` (`concise`, `standard`, `comprehensive`) sets density only and the old `--profile` flag is deprecated in its favour; the deprecated `budget` preset still pins the `ollama` provider.
+- A Claude model unknown to the catalog now gets strict request defaults (no `temperature`, 16000 output floor) where the old prefix check treated it as a 4.x model.
+- A stage whose provider has no catalog price for its model is priced at 0.0 (pricing is per provider).
+- Unresolvable provider, profile, or model settings now fail with `ConfigurationError` (exit code 3) before any LLM call. The `stub` provider has the model `stub-model`.
+
+**Fixes**
+
+- CLI error messages containing brackets (`[default.pipeline.stages.select]`) are no longer eaten by Rich markup; an AST test guards every print site.
+- `validate` no longer sends a hard-coded Claude model to whichever provider the analyze stage uses.
+- Documentation claims that were never true are corrected (`mkcv.toml` sections need the `default.` prefix; the env var table; the `--profile` flag in the workspace README).
+
+**Dependencies and tooling**
+
+- Adds `google-genai`. Ruff and mypy now also cover `evals/`; CI lint runs on it; `pytest` gets `pythonpath = ["."]`.
+
 ## Next step
 
-T01-T16 are implemented and committed on `feat/multi-provider-support`. Next: T17 (aggregation, recommendations, report, and eval docs), then the owner actions at the end of `tasks.md`.
+T01-T17 are implemented and committed on `feat/multi-provider-support`; nothing is pushed. Everything below is for the owner, because it spends money or needs real keys.
+
+1. **Review and open the PR** (single PR, `single-pr` strategy). Run the native review per RDD if it is enabled; the work-unit commits are listed in the checklist above.
+2. **Live smoke test of the adapters** (none has been called against a real provider; every test uses mocks). With keys exported, in a scratch workspace (`uv run mkcv init /tmp/ws`), run each of these and read the warnings and the PDF:
+
+   ```bash
+   uv run mkcv models                                   # offline: today's Anthropic models, no warnings
+   uv run mkcv generate --jd JD.txt --kb KB.md                       # Anthropic, as before
+   uv run mkcv generate --jd JD.txt --kb KB.md --model-profile openai
+   uv run mkcv generate --jd JD.txt --kb KB.md --model-profile google
+   uv run mkcv generate --jd JD.txt --kb KB.md --model-profile local  # needs Ollama
+   ```
+
+   Watch for a 400 about `temperature` or `max_tokens` (the adapters adapt once and log it), refused structured output, or an empty Gemini reply. The model IDs in the catalog (`gpt-6.1-sol`, `gemini-4-argon`, ...) were verified against vendor pages on 2026-11-03; confirm they still resolve.
+3. **First paid eval run** (about $36 by `estimate`; start smaller):
+
+   ```bash
+   export ANTHROPIC_API_KEY=... OPENAI_API_KEY=... GEMINI_API_KEY=...
+   uv run python -m evals estimate
+   uv run python -m evals bootstrap-reference --yes      # reference model: claude-opus-5-5
+   ```
+
+   Read every file under `evals/fixtures/reference/` for fabricated facts, then `git add` and commit them. Then a cheap trial and the full run:
+
+   ```bash
+   uv run python -m evals run --models anthropic:claude-haiku-5-5 --cases backend-platform-match review-probe --yes
+   uv run python -m evals run --yes
+   ```
+
+   Read `evals/results/<run id>/report.md`. If the review probe's `review_defect_recall` or any `faithfulness_*` column looks wrong, fix the grader or the fixture before trusting the recommendations. A run with no judge key still completes but has no quality scores for select, tailor, and review.
+4. **Publish and apply.** `uv run python -m evals report evals/results/<run id> --publish`, commit `evals/results/published/<run id>/`, then edit `src/mkcv/core/catalog/builtin_model_profiles.py` per "Suggested profile changes" (set `evidence="eval"` and `eval_run="<run id>"` on each updated profile) and `docs/models.md`. Commit as `feat(catalog): adopt eval-backed model recommendations`.
+5. Update `CLAUDE.md` (owner-maintained): its provider line still says "Anthropic/OpenAI/Ollama/OpenRouter/Stub".
