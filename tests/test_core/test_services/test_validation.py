@@ -1,7 +1,7 @@
 """Tests for ValidationService."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -282,6 +282,79 @@ class TestModelSelection:
         with pytest.raises(TypeError):
             ValidationService(  # type: ignore[misc]
                 stub_llm_no_jd, FileSystemPromptLoader(), None, "gpt-6.1-terra"
+            )
+
+
+# ------------------------------------------------------------------
+# Test: Temperature
+# ------------------------------------------------------------------
+
+
+class TestTemperature:
+    """The ``validate`` stage temperature drives the review, not the JD analysis."""
+
+    @staticmethod
+    def _service(
+        sample_review_report: ReviewReport,
+        sample_jd_analysis: JDAnalysis,
+        **options: float,
+    ) -> tuple[ValidationService, AsyncMock]:
+        llm = MagicMock()
+        llm.complete_structured = AsyncMock(
+            side_effect=[sample_jd_analysis, sample_review_report]
+        )
+        service = ValidationService(
+            llm=llm, prompts=FileSystemPromptLoader(), **options
+        )
+        return service, llm.complete_structured
+
+    @staticmethod
+    def _temperatures(mock: AsyncMock) -> list[float]:
+        return [call.kwargs["temperature"] for call in mock.call_args_list]
+
+    async def test_the_review_defaults_to_todays_temperature(
+        self,
+        sample_review_report: ReviewReport,
+        sample_jd_analysis: JDAnalysis,
+        resume_yaml_file: Path,
+        jd_file: Path,
+    ) -> None:
+        service, mock = self._service(sample_review_report, sample_jd_analysis)
+        await service.validate(resume_yaml_file, jd_path=jd_file)
+        assert self._temperatures(mock)[-1] == 0.3
+
+    async def test_the_constructor_temperature_reaches_the_review(
+        self,
+        sample_review_report: ReviewReport,
+        sample_jd_analysis: JDAnalysis,
+        resume_yaml_file: Path,
+        jd_file: Path,
+    ) -> None:
+        service, mock = self._service(
+            sample_review_report, sample_jd_analysis, temperature=0.7
+        )
+        await service.validate(resume_yaml_file, jd_path=jd_file)
+        assert self._temperatures(mock)[-1] == 0.7
+
+    async def test_the_jd_analysis_keeps_its_own_temperature(
+        self,
+        sample_review_report: ReviewReport,
+        sample_jd_analysis: JDAnalysis,
+        resume_yaml_file: Path,
+        jd_file: Path,
+    ) -> None:
+        service, mock = self._service(
+            sample_review_report, sample_jd_analysis, temperature=0.7
+        )
+        await service.validate(resume_yaml_file, jd_path=jd_file)
+        assert self._temperatures(mock)[0] == 0.2
+
+    async def test_the_constructor_temperature_is_keyword_only(
+        self, stub_llm_no_jd: StubLLMAdapter
+    ) -> None:
+        with pytest.raises(TypeError):
+            ValidationService(  # type: ignore[misc]
+                stub_llm_no_jd, FileSystemPromptLoader(), None, "m", 0.7
             )
 
 

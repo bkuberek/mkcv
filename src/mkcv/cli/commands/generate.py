@@ -21,13 +21,16 @@ if TYPE_CHECKING:
 
 from mkcv.adapters.factory import (
     create_cover_letter_service,
+    create_model_report,
     create_pipeline_service,
     create_regeneration_service,
     create_render_service,
     create_workspace_service,
 )
+from mkcv.cli.model_warnings import print_model_warnings
 from mkcv.config import settings
 from mkcv.core.exceptions import MkcvError
+from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.models.kb_validation import KBValidationResult
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.run_metadata import RunMetadata
@@ -143,8 +146,20 @@ def generate_command(
         str | None,
         cyclopts.Parameter(
             help=(
-                "Override AI provider for all stages "
-                "(anthropic/openai/openrouter/ollama)."
+                "Run every stage on this provider with its recommended models "
+                "(anthropic/openai/google/ollama/openrouter or a provider from "
+                "your config)."
+            ),
+        ),
+    ] = None,
+    model_profile: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name="--model-profile",
+            help=(
+                "Model profile for all stages: anthropic, anthropic-economy, "
+                "openai, openai-economy, google, google-economy, local. "
+                "Run 'mkcv models --profiles'."
             ),
         ),
     ] = None,
@@ -229,6 +244,19 @@ def generate_command(
     effective_cv_preset = cv_preset or resolved_preset
     effective_cl_preset = cl_preset or resolved_preset
 
+    # ---- Resolve models and warn about weak choices (before any LLM call) ----
+    if settings.get("pipeline.model_warnings", True):
+        print_model_warnings(
+            create_model_report(
+                settings,
+                preset_name=effective_cv_preset,
+                model_profile=model_profile,
+                provider_override=resolved_provider,
+                include_cover_letter=cover_letter,
+            ),
+            console,
+        )
+
     # ---- Resolve interactive default from TTY ----
     if interactive is None:
         interactive = sys.stdin.isatty()
@@ -242,6 +270,7 @@ def generate_command(
             theme=effective_theme,
             preset=effective_cv_preset,
             provider=resolved_provider,
+            model_profile=model_profile,
             from_stage=from_stage,
             render_pdf=render,
             interactive=interactive,
@@ -269,6 +298,7 @@ def generate_command(
             jd_text,
             preset=effective_cv_preset,
             provider_override=resolved_provider,
+            model_profile=model_profile,
             theme=effective_theme,
         )
         if not company:
@@ -294,6 +324,7 @@ def generate_command(
             theme=effective_theme,
             preset=effective_cv_preset,
             provider=resolved_provider,
+            model_profile=model_profile,
             from_stage=from_stage,
             render_pdf=render,
             interactive=interactive,
@@ -315,6 +346,7 @@ def generate_command(
             theme=effective_theme,
             preset=effective_cv_preset,
             provider=resolved_provider,
+            model_profile=model_profile,
             from_stage=from_stage,
             render_pdf=render,
             interactive=interactive,
@@ -452,6 +484,7 @@ def _extract_jd_metadata(
     *,
     preset: str,
     provider_override: str | None,
+    model_profile: str | None = None,
     theme: str,
 ) -> tuple[str | None, str | None]:
     """Use a lightweight LLM call to extract company and position from JD text.
@@ -460,10 +493,15 @@ def _extract_jd_metadata(
         jd_text: Raw job description text.
         preset: Preset name for pipeline creation.
         provider_override: Optional provider override.
+        model_profile: Optional model profile.
         theme: Theme name for pipeline creation.
 
     Returns:
         Tuple of (company, position), either may be None.
+
+    Raises:
+        ConfigurationError: If the models cannot be resolved; that is a setup
+            error, not a failed extraction.
     """
     console.print("  [dim]Extracting company/position from JD via LLM...[/dim]")
 
@@ -472,9 +510,12 @@ def _extract_jd_metadata(
             settings,
             preset_name=preset,
             provider_override=provider_override,
+            model_profile=model_profile,
             theme=theme,
         )
         metadata = asyncio.run(pipeline.extract_jd_metadata(jd_text))
+    except ConfigurationError:
+        raise
     except MkcvError as exc:
         logger.warning("JD metadata extraction failed: %s", exc)
         return None, None
@@ -645,6 +686,7 @@ def _generate_from_app_dir(
     theme: str,
     preset: str,
     provider: str | None,
+    model_profile: str | None = None,
     from_stage: int,
     render_pdf: bool,
     interactive: bool,
@@ -780,6 +822,7 @@ def _generate_from_app_dir(
         output_dir=run_dir,
         preset_name=preset,
         provider_override=provider,
+        model_profile=model_profile,
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
@@ -802,6 +845,7 @@ def _generate_workspace_mode(
     theme: str,
     preset: str,
     provider: str | None,
+    model_profile: str | None = None,
     from_stage: int,
     render_pdf: bool,
     interactive: bool,
@@ -879,6 +923,7 @@ def _generate_workspace_mode(
         output_dir=run_dir,
         preset_name=preset,
         provider_override=provider,
+        model_profile=model_profile,
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
@@ -899,6 +944,7 @@ def _generate_standalone_mode(
     theme: str,
     preset: str,
     provider: str | None,
+    model_profile: str | None = None,
     from_stage: int,
     render_pdf: bool,
     interactive: bool,
@@ -940,6 +986,7 @@ def _generate_standalone_mode(
         output_dir=run_dir,
         preset_name=preset,
         provider_override=provider,
+        model_profile=model_profile,
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
@@ -957,6 +1004,7 @@ def _run_pipeline(
     output_dir: Path,
     preset_name: str,
     provider_override: str | None = None,
+    model_profile: str | None = None,
     from_stage: int,
     render_pdf: bool = True,
     theme: str,
@@ -981,6 +1029,7 @@ def _run_pipeline(
             output_dir=output_dir,
             preset_name=preset_name,
             provider_override=provider_override,
+            model_profile=model_profile,
             from_stage=from_stage,
             render_pdf=render_pdf,
             theme=theme,
@@ -997,6 +1046,7 @@ def _run_pipeline(
         output_dir=output_dir,
         preset_name=preset_name,
         provider_override=provider_override,
+        model_profile=model_profile,
         from_stage=from_stage,
         render_pdf=render_pdf,
         theme=theme,
@@ -1014,6 +1064,7 @@ def _run_standard_pipeline(
     output_dir: Path,
     preset_name: str,
     provider_override: str | None = None,
+    model_profile: str | None = None,
     from_stage: int = 1,
     render_pdf: bool = True,
     theme: str,
@@ -1027,6 +1078,7 @@ def _run_standard_pipeline(
         settings,
         preset_name=preset_name,
         provider_override=provider_override,
+        model_profile=model_profile,
         theme=theme,
     )
 
@@ -1055,6 +1107,7 @@ def _run_standard_pipeline(
         output_dir=output_dir,
         preset_name=preset_name,
         provider_override=provider_override,
+        model_profile=model_profile,
         render_pdf=render_pdf,
         theme=theme,
         chain_cover_letter=chain_cover_letter,
@@ -1071,6 +1124,7 @@ def _run_interactive_pipeline(
     output_dir: Path,
     preset_name: str,
     provider_override: str | None = None,
+    model_profile: str | None = None,
     from_stage: int = 1,
     render_pdf: bool = True,
     theme: str,
@@ -1097,6 +1151,7 @@ def _run_interactive_pipeline(
         settings,
         preset_name=preset_name,
         provider_override=provider_override,
+        model_profile=model_profile,
         theme=theme,
     )
 
@@ -1160,6 +1215,7 @@ def _run_interactive_pipeline(
                 settings,
                 preset_name=preset_name,
                 provider_override=provider_override,
+                model_profile=model_profile,
             )
             logger.debug("Regeneration service created for interactive session")
         except Exception:
@@ -1208,6 +1264,7 @@ def _run_interactive_pipeline(
         settings,
         preset_name=preset_name,
         provider_override=provider_override,
+        model_profile=model_profile,
         theme=theme,
     )
 
@@ -1240,6 +1297,7 @@ def _run_interactive_pipeline(
         output_dir=output_dir,
         preset_name=preset_name,
         provider_override=provider_override,
+        model_profile=model_profile,
         render_pdf=render_pdf,
         theme=theme,
         chain_cover_letter=chain_cover_letter,
@@ -1255,6 +1313,7 @@ def _finalize_pipeline(
     output_dir: Path,
     preset_name: str,
     provider_override: str | None,
+    model_profile: str | None = None,
     render_pdf: bool,
     theme: str,
     chain_cover_letter: bool,
@@ -1292,6 +1351,7 @@ def _finalize_pipeline(
             jd_text=jd_text,
             output_dir=output_dir,
             provider_override=provider_override,
+            model_profile=model_profile,
             cl_preset=cl_preset,
             app_dir=app_dir,
         )
@@ -1497,6 +1557,7 @@ def _chain_cover_letter(
     jd_text: str,
     output_dir: Path,
     provider_override: str | None,
+    model_profile: str | None = None,
     cl_preset: str,
     app_dir: Path | None = None,
 ) -> None:
@@ -1536,7 +1597,10 @@ def _chain_cover_letter(
 
     try:
         cl_service = create_cover_letter_service(
-            settings, provider_override=provider_override
+            settings,
+            provider_override=provider_override,
+            model_profile=model_profile,
+            preset_name=cl_preset,
         )
     except MkcvError as exc:
         console.print(

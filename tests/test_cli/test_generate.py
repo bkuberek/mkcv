@@ -1,20 +1,56 @@
 """Tests for the mkcv generate CLI command."""
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from dynaconf import Dynaconf
 
+import mkcv
+from mkcv.adapters.factory import create_model_report
+from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.exceptions.pipeline_stage import PipelineStageError
 from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.workspace import WorkspaceError
 from mkcv.core.models.kb_validation import KBValidationResult
+from mkcv.core.models.model_report import ModelReport
+from mkcv.core.models.model_warning import ModelWarning
+from mkcv.core.models.model_warning_kind import ModelWarningKind
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.ports.renderer import RenderedOutput
 
 _CMD = "mkcv.cli.commands.generate"
+_BUNDLED_SETTINGS = Path(mkcv.__file__).resolve().parent / "config" / "settings.toml"
+_KEY_VARIABLES = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+
+
+def _empty_report() -> ModelReport:
+    return ModelReport(
+        profile_name="anthropic",
+        profile_evidence="provisional",
+        profile_source="default",
+        preset_name="standard",
+        stages=[],
+        warnings=[],
+        estimated_total_usd=None,
+        estimate_is_partial=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_model_report() -> Iterator[MagicMock]:
+    """Most tests patch ``settings`` with a mock, which cannot be resolved."""
+    with patch(f"{_CMD}.create_model_report", return_value=_empty_report()) as report:
+        yield report
 
 
 def _make_stage(stage_number: int) -> StageMetadata:
@@ -97,6 +133,7 @@ class TestGenerateStandaloneMode:
             mock_settings,
             preset_name="standard",
             provider_override=None,
+            model_profile=None,
             theme=mock_settings.rendering.theme,
         )
 
@@ -179,6 +216,7 @@ class TestGenerateStandaloneMode:
             mock_settings,
             preset_name="comprehensive",
             provider_override=None,
+            model_profile=None,
             theme=mock_settings.rendering.theme,
         )
 
@@ -663,6 +701,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="concise",
             provider_override=None,
+            model_profile=None,
             theme=mock_settings.rendering.theme,
         )
 
@@ -690,6 +729,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="concise",
             provider_override="ollama",
+            model_profile=None,
             theme=mock_settings.rendering.theme,
         )
 
@@ -717,6 +757,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="standard",
             provider_override=None,
+            model_profile=None,
             theme=mock_settings.rendering.theme,
         )
 
@@ -769,6 +810,7 @@ class TestPresetAndProfileFlags:
             mock_settings,
             preset_name="comprehensive",
             provider_override="openrouter",
+            model_profile=None,
             theme=mock_settings.rendering.theme,
         )
 
@@ -1666,3 +1708,438 @@ class TestInteractivePipelinePromptFnWiring:
         mock_session_cls.assert_called_once()
         call_kwargs = mock_session_cls.call_args
         assert call_kwargs.kwargs["prompt_fn"] is None
+
+
+def _real_settings(tmp_path: Path, user_toml: str = "") -> Dynaconf:
+    """The bundled defaults plus a user layer, as the real ``settings`` behaves."""
+    layers = [str(_BUNDLED_SETTINGS)]
+    if user_toml:
+        user_file = tmp_path / "user.toml"
+        user_file.write_text(user_toml)
+        layers.append(str(user_file))
+    config = Dynaconf(
+        settings_files=layers,
+        environments=True,
+        default_env="default",
+        merge_enabled=True,
+    )
+    config.set("in_workspace", False)
+    config.set("workspace_root", None)
+    return config
+
+
+class _GenerateRun:
+    """Runs ``generate_command`` in standalone mode with the pipeline patched."""
+
+    def __init__(self, tmp_path: Path, settings: object) -> None:
+        self.tmp_path = tmp_path
+        self.settings = settings
+        self.jd = _jd_path(tmp_path)
+        self.kb = tmp_path / "kb.md"
+        self.kb.write_text("Knowledge base content")
+        self.result = _make_pipeline_result(tmp_path)
+        self.create_pipeline = MagicMock(return_value=MagicMock())
+
+    def run(self, **options: object) -> None:
+        from mkcv.cli.commands.generate import generate_command
+
+        with (
+            patch(f"{_CMD}.settings", self.settings),
+            patch(f"{_CMD}.create_pipeline_service", self.create_pipeline),
+            patch(f"{_CMD}.asyncio.run", return_value=self.result),
+            patch(f"{_CMD}.validate_kb", return_value=_valid_kb_result()),
+            patch(f"{_CMD}._resolve_jd", return_value=("JD text", str(self.jd))),
+            patch(f"{_CMD}._write_jd_file", return_value=self.jd),
+        ):
+            generate_command(jd=str(self.jd), kb=self.kb, **options)  # type: ignore[arg-type]
+
+
+class TestModelProfileFlag:
+    """REQ-MP-3: ``generate --model-profile``."""
+
+    def test_the_profile_reaches_the_pipeline_factory(self, tmp_path: Path) -> None:
+        run = _GenerateRun(tmp_path, MagicMock(in_workspace=False))
+        run.run(model_profile="google")
+        assert run.create_pipeline.call_args.kwargs["model_profile"] == "google"
+
+    def test_the_profile_reaches_the_model_report(
+        self, tmp_path: Path, _no_model_report: MagicMock
+    ) -> None:
+        settings = MagicMock(in_workspace=False)
+        _GenerateRun(tmp_path, settings).run(model_profile="google")
+        _no_model_report.assert_called_once_with(
+            settings,
+            preset_name="standard",
+            model_profile="google",
+            provider_override=None,
+            include_cover_letter=False,
+        )
+
+    def test_the_provider_reaches_the_model_report(
+        self, tmp_path: Path, _no_model_report: MagicMock
+    ) -> None:
+        settings = MagicMock(in_workspace=False)
+        _GenerateRun(tmp_path, settings).run(provider="openai")
+        assert _no_model_report.call_args.kwargs["provider_override"] == "openai"
+
+    def test_the_cv_preset_reaches_the_model_report(
+        self, tmp_path: Path, _no_model_report: MagicMock
+    ) -> None:
+        settings = MagicMock(in_workspace=False)
+        _GenerateRun(tmp_path, settings).run(cv_preset="concise")
+        assert _no_model_report.call_args.kwargs["preset_name"] == "concise"
+
+    def test_chaining_a_cover_letter_reports_its_models_too(
+        self, tmp_path: Path, _no_model_report: MagicMock
+    ) -> None:
+        settings = MagicMock(in_workspace=False)
+        with patch(f"{_CMD}._chain_cover_letter"):
+            _GenerateRun(tmp_path, settings).run(cover_letter=True)
+        assert _no_model_report.call_args.kwargs["include_cover_letter"] is True
+
+    def test_the_profile_reaches_the_chained_cover_letter(self, tmp_path: Path) -> None:
+        run = _GenerateRun(tmp_path, MagicMock(in_workspace=False))
+        with patch(f"{_CMD}._chain_cover_letter") as chain:
+            run.run(model_profile="openai", cover_letter=True, cl_preset="concise")
+        assert (
+            chain.call_args.kwargs["model_profile"],
+            chain.call_args.kwargs["cl_preset"],
+        ) == ("openai", "concise")
+
+
+class TestChainedCoverLetterModels:
+    """The chained cover letter resolves models like the resume does."""
+
+    def test_the_preset_provider_and_profile_reach_the_cover_letter_factory(
+        self, tmp_path: Path
+    ) -> None:
+        from mkcv.cli.commands.generate import _chain_cover_letter
+
+        resume = tmp_path / "resume.yaml"
+        resume.write_text("cv:\n  name: Test\n", encoding="utf-8")
+        result = MagicMock(output_paths={"resume_yaml": str(resume)})
+        with (
+            patch(f"{_CMD}.settings") as mock_settings,
+            patch(f"{_CMD}.create_cover_letter_service") as create_cover_letter,
+            patch(f"{_CMD}.asyncio.run", return_value=MagicMock(stages=[])),
+        ):
+            _chain_cover_letter(
+                result=result,
+                jd_text="JD",
+                output_dir=tmp_path,
+                provider_override=None,
+                model_profile="openai",
+                cl_preset="concise",
+            )
+        create_cover_letter.assert_called_once_with(
+            mock_settings,
+            provider_override=None,
+            model_profile="openai",
+            preset_name="concise",
+        )
+
+
+class TestModelProfilePassThrough:
+    """Every pipeline entry point hands the profile to the factory."""
+
+    def test_the_standard_pipeline_passes_it_on(self, tmp_path: Path) -> None:
+        from mkcv.cli.commands.generate import _run_standard_pipeline
+
+        with (
+            patch(f"{_CMD}.settings"),
+            patch(f"{_CMD}.create_pipeline_service") as create_pipeline,
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch(f"{_CMD}._finalize_pipeline") as finalize,
+        ):
+            _run_standard_pipeline(
+                jd=tmp_path / "jd.txt",
+                kb=tmp_path / "kb.md",
+                output_dir=tmp_path,
+                preset_name="standard",
+                model_profile="local",
+                theme="sb2nov",
+            )
+        assert create_pipeline.call_args.kwargs["model_profile"] == "local"
+        assert finalize.call_args.kwargs["model_profile"] == "local"
+
+    def test_the_interactive_pipeline_passes_it_to_every_factory(
+        self, tmp_path: Path
+    ) -> None:
+        import json
+
+        from mkcv.cli.commands.generate import _run_interactive_pipeline
+
+        output_dir = tmp_path / "output"
+        (output_dir / ".mkcv").mkdir(parents=True)
+        (tmp_path / "kb.md").write_text("Knowledge base content")
+        stage3 = TestInteractivePipelineRegenWiring._stage3_data()
+        (output_dir / ".mkcv" / "stage3_content.json").write_text(json.dumps(stage3))
+        (output_dir / ".mkcv" / "stage1_analysis.json").write_text(
+            json.dumps(TestInteractivePipelineRegenWiring._stage1_data())
+        )
+        session = MagicMock()
+        session.return_value.run.return_value = None
+        with (
+            patch(f"{_CMD}.settings"),
+            patch(f"{_CMD}.create_pipeline_service") as create_pipeline,
+            patch(f"{_CMD}.create_regeneration_service") as create_regeneration,
+            patch(f"{_CMD}.asyncio.run", return_value=_make_pipeline_result(tmp_path)),
+            patch("mkcv.cli.interactive.InteractiveSession", session),
+            pytest.raises(SystemExit),
+        ):
+            _run_interactive_pipeline(
+                jd=tmp_path / "jd.txt",
+                kb=tmp_path / "kb.md",
+                output_dir=output_dir,
+                preset_name="standard",
+                model_profile="local",
+                theme="sb2nov",
+            )
+        assert create_pipeline.call_args.kwargs["model_profile"] == "local"
+        assert create_regeneration.call_args.kwargs["model_profile"] == "local"
+
+    def test_the_jd_metadata_extraction_passes_it_on(self) -> None:
+        from mkcv.cli.commands.generate import _extract_jd_metadata
+
+        with (
+            patch(f"{_CMD}.create_pipeline_service") as create_pipeline,
+            patch(f"{_CMD}.asyncio.run", return_value=MagicMock()),
+            patch(f"{_CMD}.settings"),
+        ):
+            _extract_jd_metadata(
+                "JD text",
+                preset="standard",
+                provider_override=None,
+                model_profile="google",
+                theme="sb2nov",
+            )
+        assert create_pipeline.call_args.kwargs["model_profile"] == "google"
+
+    def test_a_configuration_error_is_not_swallowed_as_a_failed_extraction(
+        self,
+    ) -> None:
+        from mkcv.cli.commands.generate import _extract_jd_metadata
+
+        with (
+            patch(
+                f"{_CMD}.create_pipeline_service",
+                side_effect=ConfigurationError("Unknown model profile 'nope'"),
+            ),
+            patch(f"{_CMD}.settings"),
+            pytest.raises(ConfigurationError, match="Unknown model profile"),
+        ):
+            _extract_jd_metadata(
+                "JD text",
+                preset="standard",
+                provider_override=None,
+                model_profile="nope",
+                theme="sb2nov",
+            )
+
+    def test_other_pipeline_errors_still_just_skip_the_extraction(self) -> None:
+        from mkcv.cli.commands.generate import _extract_jd_metadata
+
+        with (
+            patch(f"{_CMD}.create_pipeline_service"),
+            patch(
+                f"{_CMD}.asyncio.run",
+                side_effect=ProviderError("API key invalid", provider="anthropic"),
+            ),
+            patch(f"{_CMD}.settings"),
+        ):
+            assert _extract_jd_metadata(
+                "JD text",
+                preset="standard",
+                provider_override=None,
+                model_profile=None,
+                theme="sb2nov",
+            ) == (None, None)
+
+
+class TestModelWarnings:
+    """REQ-MP-12: warnings printed by ``generate`` without blocking it."""
+
+    _WEAK_TAILOR = """
+[default.pipeline.stages.tailor]
+provider = "openai"
+model = "gpt-6.1-terra"
+"""
+
+    @pytest.fixture(autouse=True)
+    def _keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for variable in _KEY_VARIABLES:
+            monkeypatch.delenv(variable, raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+
+    @pytest.fixture
+    def real_report(self) -> Iterator[None]:
+        with patch(f"{_CMD}.create_model_report", create_model_report):
+            yield
+
+    def test_a_weak_configured_model_is_warned_about(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        real_report: None,
+    ) -> None:
+        run = _GenerateRun(tmp_path, _real_settings(tmp_path, self._WEAK_TAILOR))
+        run.run()
+        assert (
+            "Warning: tailor: openai/gpt-6.1-terra is tier 'efficient'"
+            in capsys.readouterr().out
+        )
+
+    def test_the_hint_to_run_mkcv_models_follows(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        real_report: None,
+    ) -> None:
+        run = _GenerateRun(tmp_path, _real_settings(tmp_path, self._WEAK_TAILOR))
+        run.run()
+        assert (
+            "Run 'mkcv models' for recommended models per stage."
+            in capsys.readouterr().out
+        )
+
+    def test_the_pipeline_still_runs(self, tmp_path: Path, real_report: None) -> None:
+        run = _GenerateRun(tmp_path, _real_settings(tmp_path, self._WEAK_TAILOR))
+        run.run()
+        run.create_pipeline.assert_called_once()
+
+    def test_warnings_are_printed_before_the_pipeline_is_created(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        real_report: None,
+    ) -> None:
+        run = _GenerateRun(tmp_path, _real_settings(tmp_path, self._WEAK_TAILOR))
+        seen: list[str] = []
+        run.create_pipeline.side_effect = lambda *a, **k: (
+            seen.append(capsys.readouterr().out),
+            MagicMock(),
+        )[1]
+        run.run()
+        assert "Warning: tailor:" in seen[0]
+
+    def test_disabled_warnings_print_nothing(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        real_report: None,
+    ) -> None:
+        run = _GenerateRun(
+            tmp_path,
+            _real_settings(
+                tmp_path,
+                "[default.pipeline]\nmodel_warnings = false\n" + self._WEAK_TAILOR,
+            ),
+        )
+        run.run()
+        assert "mkcv models" not in capsys.readouterr().out
+
+    def test_disabled_warnings_skip_the_report(
+        self, tmp_path: Path, _no_model_report: MagicMock
+    ) -> None:
+        run = _GenerateRun(
+            tmp_path,
+            _real_settings(tmp_path, "[default.pipeline]\nmodel_warnings = false\n"),
+        )
+        run.run()
+        _no_model_report.assert_not_called()
+
+    def test_an_empty_user_config_prints_no_warnings(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        real_report: None,
+    ) -> None:
+        run = _GenerateRun(tmp_path, _real_settings(tmp_path))
+        run.run()
+        out = capsys.readouterr().out
+        assert "Warning:" not in out
+        assert "mkcv models" not in out
+
+    def test_a_missing_key_is_warned_about_once(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+        real_report: None,
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        run = _GenerateRun(tmp_path, _real_settings(tmp_path))
+        run.run()
+        assert capsys.readouterr().out.count("anthropic: no API key found") == 1
+
+    def test_a_warning_from_the_report_is_printed_as_is(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        report = _empty_report().model_copy(
+            update={
+                "warnings": [
+                    ModelWarning(
+                        kind=ModelWarningKind.MISSING_API_KEY,
+                        stage=None,
+                        provider="openai",
+                        model=None,
+                        message="openai: no API key found (set OPENAI_API_KEY)",
+                    )
+                ]
+            }
+        )
+        with patch(f"{_CMD}.create_model_report", return_value=report):
+            _GenerateRun(tmp_path, MagicMock(in_workspace=False)).run()
+        assert "Warning: openai: no API key found" in capsys.readouterr().out
+
+
+class TestModelFlagErrorsExitWithCode3:
+    """REQ-MP-3: a bad flag combination stops the run before any LLM call."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> Iterator[None]:
+        monkeypatch.chdir(tmp_path)
+        for variable in _KEY_VARIABLES:
+            monkeypatch.delenv(variable, raising=False)
+        with (
+            patch(f"{_CMD}.create_model_report", create_model_report),
+            patch("mkcv.cli.app.logging.basicConfig"),
+        ):
+            yield
+
+    @staticmethod
+    def _invoke(tmp_path: Path, *flags: str) -> int:
+        from mkcv.cli.app import app
+
+        jd = _jd_path(tmp_path)
+        kb = tmp_path / "kb.md"
+        kb.write_text("Knowledge base content")
+        with pytest.raises(SystemExit) as exit_info:
+            app.meta(["generate", "--jd", str(jd), "--kb", str(kb), *flags])
+        return int(exit_info.value.code or 0)
+
+    def test_profile_and_provider_cannot_be_combined(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code = self._invoke(
+            tmp_path, "--model-profile", "google", "--provider", "openai"
+        )
+        assert code == 3
+        assert "cannot be used together" in capsys.readouterr().err
+
+    def test_an_unknown_profile_is_rejected(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code = self._invoke(tmp_path, "--model-profile", "nope")
+        assert code == 3
+        assert "Unknown model profile 'nope'" in capsys.readouterr().err
+
+    def test_the_failure_comes_before_the_job_description_is_read(
+        self, tmp_path: Path
+    ) -> None:
+        with patch(f"{_CMD}._resolve_jd") as resolve_jd:
+            self._invoke(tmp_path, "--model-profile", "nope")
+        resolve_jd.assert_not_called()

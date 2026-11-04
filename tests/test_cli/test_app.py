@@ -92,3 +92,7 @@ class TestMkcvGenerate:
     def test_generate_help_mentions_jd(self) -> None:
         result = _run_mkcv("generate", "--help")
         assert "jd" in result.stdout.lower()
+
+    def test_generate_help_mentions_model_profile(self) -> None:
+        result = _run_mkcv("generate", "--help")
+        assert "--model-profile" in result.stdout

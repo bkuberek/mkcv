@@ -153,6 +153,7 @@ class TestPrintedErrorsKeepBracketedPaths:
         kb.write_text("# KB", encoding="utf-8")
         with (
             patch("mkcv.cli.commands.cover_letter.settings") as mock_settings,
+            patch("mkcv.cli.commands.cover_letter._warn_about_models"),
             patch(
                 "mkcv.cli.commands.cover_letter.create_cover_letter_service",
                 side_effect=ConfigurationError(BRACKETED_MESSAGE),

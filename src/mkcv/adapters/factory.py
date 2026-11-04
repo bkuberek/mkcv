@@ -10,10 +10,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     from mkcv.config.configuration import Configuration
+    from mkcv.core.models.model_report import ModelReport
     from mkcv.core.models.stage_config import StageConfig
     from mkcv.core.ports.llm import LLMPort
     from mkcv.core.services.batch_render import BatchRenderService
@@ -33,6 +34,8 @@ from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.models.cover_letter_design import CoverLetterDesign
 from mkcv.core.models.entry_layout import EntryLayout
 from mkcv.core.models.header_layout import HeaderLayout
+from mkcv.core.models.model_warning import ModelWarning
+from mkcv.core.models.model_warning_kind import ModelWarningKind
 from mkcv.core.models.page_layout import PageLayout
 from mkcv.core.models.profile_preset import resolve_preset
 from mkcv.core.models.resume_design import ResumeDesign
@@ -44,6 +47,7 @@ from mkcv.core.models.stage_key import (
 )
 from mkcv.core.models.typography_layout import TypographyLayout
 from mkcv.core.services.cover_letter import CoverLetterService
+from mkcv.core.services.model_advisor import ModelAdvisor
 from mkcv.core.services.pipeline import PipelineService
 from mkcv.core.services.render import RenderService
 from mkcv.core.services.validation import ValidationService
@@ -378,6 +382,7 @@ def create_validation_service(config: Configuration) -> ValidationService:
         prompts=prompt_loader,
         pdf_reader=PyPdfReader(),
         model=assignment.model,
+        temperature=assignment.temperature,
     )
 
 
@@ -518,6 +523,91 @@ def create_regeneration_service(
         prompts=_create_prompt_loader(config),
         model=tailor.model,
         temperature=tailor.temperature,
+    )
+
+
+def create_model_report(
+    config: Configuration,
+    *,
+    preset_name: str = "default",
+    model_profile: str | None = None,
+    provider_override: str | None = None,
+    include_pipeline: bool = True,
+    include_cover_letter: bool = False,
+    extra_stages: Sequence[StageKey] = (),
+) -> ModelReport:
+    """Report which model every requested stage will use, with warnings.
+
+    Resolves the stages exactly as the matching ``create_*`` functions do, so
+    the report describes what a run would use. Nothing is called on a provider.
+
+    Args:
+        config: Application configuration.
+        preset_name: Preset or legacy profile name.
+        model_profile: ``--model-profile`` value, if given.
+        provider_override: ``--provider`` value, if given.
+        include_pipeline: Include the five resume pipeline stages.
+        include_cover_letter: Include the two cover letter stages.
+        extra_stages: Further stages to include (for example KB and validate).
+
+    Returns:
+        A ``ModelReport`` with per-stage advice, provider-level warnings first,
+        and a cost estimate.
+
+    Raises:
+        ConfigurationError: If a stage cannot be resolved.
+    """
+    stages: list[StageKey] = []
+    if include_pipeline:
+        stages.extend(PIPELINE_STAGES)
+    if include_cover_letter:
+        stages.extend(COVER_LETTER_STAGES)
+    stages.extend(extra_stages)
+    ordered = tuple(dict.fromkeys(stages))
+
+    registry = _registry(config)
+    resolved = StageResolver(config, registry).resolve(
+        ordered,
+        ResolutionRequest(
+            preset_name=preset_name,
+            model_profile=model_profile,
+            provider_override=provider_override,
+        ),
+    )
+    assignments = [resolved.assignments[stage] for stage in ordered]
+    providers = tuple(dict.fromkeys(a.provider for a in assignments))
+
+    return ModelAdvisor(registry.catalog).advise(
+        assignments,
+        profile=resolved.profile,
+        profile_source=resolved.profile_source,
+        preset_name=resolved.preset_name,
+        provider_warnings=[
+            _missing_key_warning(registry, name)
+            for name in providers
+            if not registry.has_credentials(name)
+        ],
+        provider_defaults={name: registry.defaults_for(name) for name in providers},
+    )
+
+
+def _missing_key_warning(registry: ProviderRegistry, provider: str) -> ModelWarning:
+    """Build the warning for a provider whose API key cannot be found."""
+    variables = registry.get(provider).api_key_env
+    where = (
+        " or ".join(variables)
+        if variables
+        else f"api_key in [default.providers.{provider}]"
+    )
+    return ModelWarning(
+        kind=ModelWarningKind.MISSING_API_KEY,
+        stage=None,
+        provider=provider,
+        model=None,
+        message=(
+            f"{provider}: no API key found (set {where}); "
+            "mkcv will use the offline stub and produce empty output."
+        ),
     )
 
 

@@ -11,6 +11,7 @@ from mkcv.adapters import factory as factory_module
 from mkcv.adapters.factory import (
     _create_llm_adapter,
     create_cover_letter_service,
+    create_model_report,
     create_pipeline_service,
     create_regeneration_service,
     create_validation_service,
@@ -22,8 +23,12 @@ from mkcv.adapters.llm.openai_compatible import OpenAICompatibleAdapter
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.llm.stub import StubLLMAdapter
+from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.exceptions.configuration import ConfigurationError
+from mkcv.core.models.model_catalog import ModelCatalog
+from mkcv.core.models.model_warning_kind import ModelWarningKind
 from mkcv.core.models.profile_preset import ContentDensity
+from mkcv.core.models.stage_key import COVER_LETTER_STAGES, PIPELINE_STAGES, StageKey
 from mkcv.core.services.regeneration import RegenerationService
 from mkcv.core.services.workspace import WorkspaceService
 
@@ -696,6 +701,16 @@ class TestCreateValidationService:
         with pytest.raises(ConfigurationError, match="Unknown LLM provider 'nope'"):
             create_validation_service(config)
 
+    def test_the_review_temperature_defaults_to_todays_value(self) -> None:
+        service = create_validation_service(_blank_config())
+        assert service._temperature == 0.3
+
+    def test_a_configured_validate_temperature_reaches_the_service(self) -> None:
+        service = create_validation_service(
+            _blank_config(validate={"temperature": 0.7})
+        )
+        assert service._temperature == 0.7
+
 
 class TestCreateCoverLetterService:
     def test_defaults_reproduce_todays_cover_letter_models(self) -> None:
@@ -756,3 +771,315 @@ class TestCreateCoverLetterService:
     def test_unknown_profile_is_a_configuration_error(self) -> None:
         with pytest.raises(ConfigurationError, match="Unknown model profile"):
             create_cover_letter_service(_blank_config(), model_profile="nope")
+
+
+_KEY_VARIABLES = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GROQ_API_KEY",
+)
+_EMPTY_USER_CONFIG = "[default.pipeline]\nmodel_warnings = true\n"
+_TERRA_TAILOR = """
+[default.pipeline.stages.tailor]
+provider = "openai"
+model = "gpt-6.1-terra"
+"""
+
+
+class TestCreateModelReport:
+    """REQ-MP-5 to MP-11: the report behind warnings and ``mkcv models``."""
+
+    @pytest.fixture(autouse=True)
+    def _keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for variable in _KEY_VARIABLES:
+            monkeypatch.delenv(variable, raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+
+    def test_an_empty_user_config_has_no_warnings(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        assert create_model_report(config, preset_name="standard").warnings == []
+
+    def test_the_concise_preset_has_no_warnings_even_on_haiku(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        assert create_model_report(config, preset_name="concise").warnings == []
+
+    def test_a_weak_configured_model_gives_exactly_one_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        config = _real_config(tmp_path, _TERRA_TAILOR)
+        report = create_model_report(config, preset_name="standard")
+        assert [(w.kind, w.stage, w.message) for w in report.warnings] == [
+            (
+                ModelWarningKind.BELOW_RECOMMENDED_TIER,
+                StageKey.TAILOR,
+                "tailor: openai/gpt-6.1-terra is tier 'efficient'; mkcv recommends "
+                "at least 'strong' for this stage "
+                "(recommended: openai/gpt-6-astra).",
+            )
+        ]
+
+    def test_an_unknown_model_is_reported_for_its_stage(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.analyze]
+provider = "openai"
+model = "gpt-7-nova"
+""",
+        )
+        warning = create_model_report(config).warnings[0]
+        assert (warning.kind, warning.stage) == (
+            ModelWarningKind.UNKNOWN_MODEL,
+            StageKey.ANALYZE,
+        )
+        assert warning.message.startswith(
+            "analyze: no capability data for openai/gpt-7-nova"
+        )
+
+    def test_a_catalog_override_without_a_tier_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GROQ_API_KEY", "gsk")
+        config = _real_config(
+            tmp_path,
+            """
+[default.providers.groq]
+type = "openai-compatible"
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+
+[[default.model_catalog]]
+provider = "groq"
+match = "m"
+
+[default.pipeline.stages.select]
+provider = "groq"
+model = "m"
+""",
+        )
+        report = create_model_report(config)
+        assert [(w.kind, w.stage) for w in report.warnings] == [
+            (ModelWarningKind.TIER_UNKNOWN, StageKey.SELECT)
+        ]
+
+    def test_a_deprecated_model_is_reported_with_its_replacement(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "g")
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.analyze]
+provider = "google"
+model = "gemini-2.5-flash"
+""",
+        )
+        deprecated = [
+            w
+            for w in create_model_report(config).warnings
+            if w.kind is ModelWarningKind.DEPRECATED_MODEL
+        ]
+        assert len(deprecated) == 1
+        assert deprecated[0].stage is StageKey.ANALYZE
+        assert "route to gemini-3.5-flash-lite" in deprecated[0].message
+
+    def test_a_missing_key_is_reported_once_per_provider(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, model_profile="openai")
+        assert [
+            (w.kind, w.stage, w.provider, w.model, w.message) for w in report.warnings
+        ] == [
+            (
+                ModelWarningKind.MISSING_API_KEY,
+                None,
+                "openai",
+                None,
+                "openai: no API key found (set OPENAI_API_KEY); mkcv will use the "
+                "offline stub and produce empty output.",
+            )
+        ]
+
+    def test_a_provider_with_two_key_variables_names_both(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, model_profile="google")
+        assert report.warnings[0].message == (
+            "google: no API key found (set GEMINI_API_KEY or GOOGLE_API_KEY); "
+            "mkcv will use the offline stub and produce empty output."
+        )
+
+    def test_a_provider_with_only_a_config_key_says_where_to_set_it(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(
+            tmp_path,
+            """
+[default.providers.keyed]
+type = "openai-compatible"
+base_url = "https://example.test/v1"
+
+[default.pipeline.stages.analyze]
+provider = "keyed"
+model = "m"
+""",
+        )
+        warning = next(
+            w
+            for w in create_model_report(config).warnings
+            if w.kind is ModelWarningKind.MISSING_API_KEY
+        )
+        assert "(set api_key in [default.providers.keyed])" in warning.message
+
+    def test_the_local_profile_never_needs_a_key(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, model_profile="local")
+        assert report.warnings == []
+
+    def test_each_stage_is_advised_with_its_recommended_model_and_cost(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        config = _real_config(tmp_path, _TERRA_TAILOR)
+        tailor = next(
+            a
+            for a in create_model_report(config).stages
+            if a.assignment.stage is StageKey.TAILOR
+        )
+        assert (
+            tailor.recommended_provider,
+            tailor.recommended_model,
+            tailor.estimated_cost_usd,
+        ) == ("openai", "gpt-6-astra", round((15000 * 1.0 + 8000 * 5.0) / 1_000_000, 6))
+
+    def test_the_total_is_the_sum_of_the_five_pipeline_stage_costs(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        catalog = ModelCatalog.builtin()
+        expected = 0.0
+        for stage, model in (
+            (StageKey.ANALYZE, "claude-haiku-5-5"),
+            (StageKey.SELECT, "claude-opus-5-5"),
+            (StageKey.TAILOR, "claude-opus-5-5"),
+            (StageKey.STRUCTURE, "claude-sonnet-5-5"),
+            (StageKey.REVIEW, "claude-opus-5-5"),
+        ):
+            requirement = STAGE_REQUIREMENTS[stage]
+            price_in, price_out = catalog.price_for(model, provider="anthropic") or (
+                0.0,
+                0.0,
+            )
+            expected += round(
+                (
+                    requirement.est_input_tokens * price_in
+                    + requirement.est_output_tokens * price_out
+                )
+                / 1_000_000,
+                6,
+            )
+        report = create_model_report(config)
+        assert report.estimated_total_usd == pytest.approx(expected)
+        assert report.estimate_is_partial is False
+
+    def test_an_unknown_model_makes_the_estimate_partial(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.analyze]
+provider = "openai"
+model = "gpt-7-nova"
+""",
+        )
+        report = create_model_report(config)
+        analyze = report.stages[0]
+        assert analyze.estimated_cost_usd is None
+        assert report.estimate_is_partial is True
+
+    def test_local_models_cost_nothing(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, model_profile="local")
+        assert [a.estimated_cost_usd for a in report.stages] == [0.0] * 5
+
+    def test_the_report_describes_the_profile_and_where_it_came_from(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, preset_name="concise")
+        assert (
+            report.profile_name,
+            report.profile_evidence,
+            report.profile_source,
+            report.preset_name,
+        ) == ("anthropic-economy", "provisional", "default", "concise")
+
+    def test_only_the_pipeline_stages_are_included_by_default(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        stages = [a.assignment.stage for a in create_model_report(config).stages]
+        assert stages == list(PIPELINE_STAGES)
+
+    def test_cover_letter_and_extra_stages_follow_the_pipeline_stages(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(
+            config,
+            include_cover_letter=True,
+            extra_stages=(StageKey.KB, StageKey.VALIDATE),
+        )
+        assert [a.assignment.stage for a in report.stages] == [
+            *PIPELINE_STAGES,
+            *COVER_LETTER_STAGES,
+            StageKey.KB,
+            StageKey.VALIDATE,
+        ]
+
+    def test_the_cover_letter_alone_can_be_reported(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(
+            config, include_pipeline=False, include_cover_letter=True
+        )
+        assert [a.assignment.stage for a in report.stages] == list(COVER_LETTER_STAGES)
+
+    def test_a_stage_listed_twice_is_reported_once(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, extra_stages=(StageKey.ANALYZE,))
+        assert len(report.stages) == 5
+
+    def test_the_provider_flag_selects_that_providers_models(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, provider_override="ollama")
+        assert {a.assignment.provider for a in report.stages} == {"ollama"}
+
+    def test_conflicting_flags_are_a_configuration_error(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        with pytest.raises(ConfigurationError, match="cannot be used together"):
+            create_model_report(
+                config, model_profile="google", provider_override="openai"
+            )
+
+    def test_an_unknown_profile_is_a_configuration_error(self, tmp_path: Path) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        with pytest.raises(ConfigurationError, match="Unknown model profile 'nope'"):
+            create_model_report(config, model_profile="nope")
+
+    def test_an_unresolvable_stage_is_a_configuration_error(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, '[default.pipeline]\nprovider = "openrouter"\n')
+        with pytest.raises(ConfigurationError, match="Cannot resolve models:"):
+            create_model_report(config)
