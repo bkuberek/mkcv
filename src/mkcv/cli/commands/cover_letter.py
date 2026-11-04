@@ -102,7 +102,8 @@ def cover_letter_command(
     render: Annotated[
         bool,
         cyclopts.Parameter(
-            name=["--render", "--no-render"],
+            name=["--render"],
+            negative="--no-render",
             help="Render cover letter to PDF.",
         ),
     ] = True,
