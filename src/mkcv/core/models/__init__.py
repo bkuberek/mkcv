@@ -24,6 +24,7 @@ from mkcv.core.models.languages_section import LanguagesSection
 from mkcv.core.models.mission_statement import MissionStatement
 from mkcv.core.models.model_capability import ModelCapability
 from mkcv.core.models.model_catalog import ModelCatalog
+from mkcv.core.models.model_profile import ModelProfile
 from mkcv.core.models.model_tier import ModelTier
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.pricing import MODEL_PRICING, calculate_cost
@@ -41,7 +42,10 @@ from mkcv.core.models.skill_entry import SkillEntry
 from mkcv.core.models.skill_group import SkillGroup
 from mkcv.core.models.skills_section import SkillsSection
 from mkcv.core.models.social_network import SocialNetwork
+from mkcv.core.models.stage_assignment import StageAssignment
+from mkcv.core.models.stage_key import StageKey
 from mkcv.core.models.stage_metadata import StageMetadata
+from mkcv.core.models.stage_requirement import StageRequirement
 from mkcv.core.models.structured_output_mode import StructuredOutputMode
 from mkcv.core.models.tailored_bullet import TailoredBullet
 from mkcv.core.models.tailored_content import TailoredContent
@@ -76,6 +80,7 @@ __all__ = [
     "MissionStatement",
     "ModelCapability",
     "ModelCatalog",
+    "ModelProfile",
     "ModelTier",
     "PipelineResult",
     "ProviderKind",
@@ -92,7 +97,10 @@ __all__ = [
     "SkillGroup",
     "SkillsSection",
     "SocialNetwork",
+    "StageAssignment",
+    "StageKey",
     "StageMetadata",
+    "StageRequirement",
     "StructuredOutputMode",
     "TailoredBullet",
     "TailoredContent",
