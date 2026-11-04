@@ -173,14 +173,16 @@ def generate_command(
     render: Annotated[
         bool,
         cyclopts.Parameter(
-            name=["--render", "--no-render"],
+            name=["--render"],
+            negative="--no-render",
             help="Auto-render PDF after pipeline completes.",
         ),
     ] = True,
     interactive: Annotated[
         bool | None,
         cyclopts.Parameter(
-            name=["--interactive", "-i", "--no-interactive"],
+            name=["--interactive", "-i"],
+            negative="--no-interactive",
             help="Review and edit resume sections interactively after AI tailoring. "
             "Defaults to on when running in an interactive terminal.",
         ),
@@ -188,7 +190,8 @@ def generate_command(
     cover_letter: Annotated[
         bool,
         cyclopts.Parameter(
-            name=["--cover-letter", "--no-cover-letter"],
+            name=["--cover-letter"],
+            negative="--no-cover-letter",
             help="Chain cover letter generation after resume pipeline.",
         ),
     ] = False,
