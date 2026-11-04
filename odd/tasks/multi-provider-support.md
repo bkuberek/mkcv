@@ -61,6 +61,15 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 - [x] T16: LLM-judge graders and rubrics (route: delegated; 6 response models, judge factory, 4 judge graders + base, 4 rubrics, logging setup, runner/CLI/estimate wiring, 3 new test files) - `1a43724`
 - [x] T17: Aggregation, recommendations, report, and eval docs (route: delegated; 2 models, aggregator, recommender, report renderer and writer, `evals/README.md`, docs edits, 6 new test files) - `0d49422`
 
+### P5: Pre-merge review fixes (autonomous, owner asleep)
+
+- [x] F1: Warn when per-stage config overrides the model profile (route: inline by the single writer; advisor, 2 warning kinds, tests) - `f4033e2`
+- [x] F2: Append `/v1` to a path-less openai-compatible `base_url` - `c9df9ac`
+- [x] F3: Legacy OpenAI chat models (catalog rows, fallback for unknown OpenAI models) - `97be8c5`
+- [x] F4: A missing API key raises `ConfigurationError` instead of using the stub - `c9df9ac`
+- [x] F5: Unknown keys in `[default.providers.*]` warn instead of aborting - `c9df9ac`
+- [x] Docs: "Upgrading from 1.4" in `docs/models.md` and a README pointer - `81e1e56`
+
 ## Acceptance criteria
 
 - Every scenario in `docs/changes/multi-provider-support/specs/*.md` is covered by a passing test (or, for docs, satisfied by inspection).
@@ -112,6 +121,11 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T15 | `9b5259b` | `ModuleNotFoundError: No module named 'evals.graders'` (7 test modules fail to collect; `test_eval_runner.py` imports `evals.graders.grading_context` first) | 197 added (3416 to 3613 full) | pending (parent runs `gentle-ai review assess`) |
 | T16 | `1a43724` | `ModuleNotFoundError: No module named 'evals.models.criterion_score'` (the shared `grading_support` helper imports the judge models, so every grader test and the runner and CLI tests fail to collect) | 112 added (3613 to 3725 full) | pending (parent runs `gentle-ai review assess`) |
 | T17 | `0d49422` | `ModuleNotFoundError: No module named 'evals.models.stage_summary'` (the shared `report_support` helper imports it, so the aggregator, recommender, report, and writer tests fail to collect) | 145 added (3725 to 3884 full) | pending (parent runs `gentle-ai review assess`) |
+| F1 | `f4033e2` | `AttributeError: CONFIG_OVERRIDES_MODEL` (17 new advisor and factory tests fail; the new warning kinds did not exist) | 3936 full | pending |
+| F2 | `c9df9ac` | `assert spec.base_url == "http://localhost:11434/v1"` failed for the bare host (5 new registry tests) | 3898 full | pending |
+| F3 | `97be8c5` | 10 failing: the four new catalog rows absent, `gpt-4-turbo` resolved with no `json_object`, and an unknown OpenAI model raised `ProviderError` after one call on a schema 400 | 3917 full | pending |
+| F4 | `c9df9ac` | `DID NOT RAISE ConfigurationError` for `create_adapter("openrouter")` with no key (5 new registry tests); 55 existing factory tests then needed a fake key because they relied on the stub fallback | 3898 full | pending |
+| F5 | `c9df9ac` | `ConfigurationError: Unknown key 'colour'` where a warning was expected (3 registry tests) | 3898 full | pending |
 
 ### Task notes
 
@@ -320,6 +334,17 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Docs: `evals/README.md` (keys including the judge's, estimate, bootstrap and the human review of references, the one-command run, cost, how to read each report section, publishing, and applying results by hand); `docs/models.md` "Evidence" became "How recommendations are made" (eligibility, best/recommended/economy with the spec's "within 0.05 of the best" wording, provisional status, caveats) and the intro link follows; `docs/DEVELOPMENT.md` gained "Evaluating Models". `tests/test_evals/test_docs.py` pins the REQ-EV-22 content. `evals/results/published/.gitkeep` exists; `.gitignore` already handled the rest. No profile's `evidence` or `eval_run` was set: no eval has run.
 - Observation for the owner (design rule, not changed): eligibility compares grade means with 0.95, so a model can stay eligible while fabricating roughly one claim in twenty (the offline run's `gpt-6.1-terra` scored 0.95 on `faithfulness_extraction` with one `$2.4M` per output and was only caught by the judge column). Consider requiring zero deterministic violations in most outputs once real data exists.
 
+### Pre-merge review fixes
+
+Route: one writer, inline, no delegation (the owner was away; findings were small and independent). No live API calls; all tests use mocks. Fixes F2, F4, and F5 share `provider_registry.py` and its test file, so they ship in one commit (`c9df9ac`).
+
+- **F1.** Added `ModelWarningKind.CONFIG_OVERRIDES_PROVIDER` and `CONFIG_OVERRIDES_MODEL`. `ModelAdvisor` emits one per stage whose assignment source is `config`: the provider one when the stage's provider differs from the active profile's provider (the stub is exempt), else the model one when the profile is an economy profile and the configured model differs from the profile's model for that stage. Both name the stage, the `[default.pipeline.stages.*]` section, and say to remove the keys or pass `--model-profile <name>`. They travel in the existing `ModelReport`, so `generate`, `cover-letter`, and `mkcv models` show them and `pipeline.model_warnings = false` silences the first two. An existing test that expected exactly one warning for an OpenAI stage on the default Anthropic profile now sees the provider warning first.
+- **F2.** `_with_api_path` runs in `_spec_from_section` for openai-compatible providers (built-in overlays and user-defined ones): an empty or `/` path becomes `/v1`, logged at info. Native-kind endpoints (OpenAI proxies) are not touched.
+- **F3.** Rows: `gpt-4-`, `gpt-3.5-`, `chatgpt-` (prefix; JSON mode, fallback allowed, `max_tokens`, temperature, no floor; tiers efficient, minimal, efficient) and exact `gpt-4o-2024-05-13` (JSON mode, fallback allowed). The old `MODEL_PRICING` had no `gpt-4`, `gpt-4-turbo`, or `gpt-3.5` prices, so the rows are unpriced. `OpenAIAdapter._may_degrade` (a hook on the shared adapter) allows fallback when the model is not in the catalog.
+- **F4.** `ProviderRegistry.create_adapter` raises `ConfigurationError` naming the variables and `api_key in [default.providers.<name>]`. Adapters are created only for stages that will run, so nothing else changes; `has_credentials` and the eval harness skip logic are untouched. The `MISSING_API_KEY` warning text now says the run stops with a configuration error. `tests/test_adapters/test_llm/test_factory.py` and `test_kb_factory.py` gained an autouse fixture that sets fake keys.
+- **F5.** Unknown keys log a warning naming the key and section; invalid values of known keys still raise.
+- Not touched (outside the allowed edit surfaces): `docs/specs/cli-interface.md:413` and `docs/specs/architecture.md:150` still say a missing key falls back to the stub, and `design.md` §8.1 quotes the old warning text.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -364,9 +389,14 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - A Claude model unknown to the catalog now gets strict request defaults (no `temperature`, 16000 output floor) where the old prefix check treated it as a 4.x model.
 - A stage whose provider has no catalog price for its model is priced at 0.0 (pricing is per provider).
 - Unresolvable provider, profile, or model settings now fail with `ConfigurationError` (exit code 3) before any LLM call. The `stub` provider has the model `stub-model`.
+- A provider that needs an API key and has none now fails with `ConfigurationError` (exit code 3); before, the run continued on the offline stub and wrote empty output.
+- A warning appears when per-stage config moves a stage to another provider than the active profile, or replaces an economy profile's cheaper model.
+- Older OpenAI chat models (`gpt-4-*`, `gpt-3.5-*`, `chatgpt-*`, `gpt-4o-2024-05-13`) use JSON mode; an OpenAI model the catalog does not know falls back to JSON mode when the API rejects the strict schema.
 
 **Fixes**
 
+- An OpenAI-compatible `base_url` without a path (for example `http://localhost:11434`) gets `/v1` appended.
+- An unknown key in `[default.providers.<name>]` is ignored with a warning instead of aborting every command.
 - CLI error messages containing brackets (`[default.pipeline.stages.select]`) are no longer eaten by Rich markup; an AST test guards every print site.
 - `validate` no longer sends a hard-coded Claude model to whichever provider the analyze stage uses.
 - Documentation claims that were never true are corrected (`mkcv.toml` sections need the `default.` prefix; the env var table; the `--profile` flag in the workspace README).
@@ -377,7 +407,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-T01-T17 are implemented and committed on `feat/multi-provider-support`; nothing is pushed. Everything below is for the owner, because it spends money or needs real keys.
+T01-T17 and the pre-merge fixes F1-F5 are implemented and committed on `feat/multi-provider-support`; nothing is pushed. Everything below is for the owner, because it spends money or needs real keys.
 
 1. **Review and open the PR** (single PR, `single-pr` strategy). Run the native review per RDD if it is enabled; the work-unit commits are listed in the checklist above.
 2. **Live smoke test of the adapters** (none has been called against a real provider; every test uses mocks). With keys exported, in a scratch workspace (`uv run mkcv init /tmp/ws`), run each of these and read the warnings and the PDF:
