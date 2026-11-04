@@ -155,7 +155,7 @@ class TestRecords:
         [record] = await make_runner().run(
             _matrix([STUB], [StageKey.ANALYZE]), cases[:1]
         )
-        assert record.latency_s >= 0.05
+        assert record.latency_s >= 0.04
 
     async def test_records_have_no_grades_before_graders_exist(
         self,

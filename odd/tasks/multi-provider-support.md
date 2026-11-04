@@ -56,7 +56,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 
 - [x] T12: Eval package scaffolding, models, case loading, and cost estimate (route: delegated; new `evals/` package, 10 models, 2 harness modules, CLI, tool config, 5 test files) - `378d9c5`
 - [x] T13: Stage-isolated runner and `run` / `bootstrap-reference` commands (route: delegated; factory function, 7 harness modules, 3 model modules, CLI, recorded fixtures, 6 test files) - `31eef2b`
-- [ ] T14: Synthetic eval fixtures (route: delegated)
+- [x] T14: Synthetic eval fixtures (route: delegated; 3 personas, 6 job descriptions, cases.toml, probe reference, 133-test fixture file) - `c714e9c`
 - [ ] T15: Deterministic graders (route: delegated)
 - [ ] T16: LLM-judge graders and rubrics (route: delegated)
 - [ ] T17: Aggregation, recommendations, report, and eval docs (route: delegated)
@@ -108,6 +108,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T11 | `4ba61b9` (+ `bbd29b9`) | `assert '# model_profile = "anthropic"' in <workspace mkcv.toml>` and the README assertions (14 failed in `test_workspace_manager.py`); advisor fix: `--model-profile anthropic-economy` produced tier warnings (2 failed against the previous advisor) | 70 focused (test_workspace_manager), 3010 full | pending (parent runs `gentle-ai review assess`) |
 | T12 | `378d9c5` | `ModuleNotFoundError: No module named 'evals'` (3 test modules fail to collect) and 7 `test_tooling.py` assertions on pyproject, CI, and `.gitignore` | 97 focused (tests/test_evals), 3107 full | pending (parent runs `gentle-ai review assess`) |
 | T13 | `31eef2b` | `ImportError: cannot import name 'create_pipeline_service_for_stage_configs' from 'mkcv.adapters.factory'`; `ModuleNotFoundError: No module named 'evals.harness.stage_runner'` (5 new test modules fail to collect; hiding the new modules reproduces it) | 176 added (166 under tests/test_evals, 10 factory), 3283 full | pending (parent runs `gentle-ai review assess`) |
+| T14 | `c714e9c` | `FileNotFoundError: [Errno 2] No such file or directory: '.../evals/fixtures/cases.toml'` (test_fixtures.py fails to collect; hiding the fixtures reproduces it) | 133 focused (tests/test_evals/test_fixtures.py), 3416 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -263,6 +264,17 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Recorded fixtures: `tests/test_evals/fixtures/recorded/backend-platform-match/` holds `stage1_analysis.json`, `stage2_selection.json`, `stage3_content.json`, `stage4_structure.json`, and `resume.yaml`, generated through the real Pydantic models and `FileSystemArtifactStore.save` so the formats are exact. The bullets are the Alex Rivera persona's (Initech and Globex roles) so T14's `backend-engineer.md` contains each `original` bullet verbatim.
 - Test helpers for T14-T16 in `tests/test_evals/conftest.py`: `canned_stub` (answers every stage with the recorded artifacts), `install_adapter` (patches `ProviderRegistry.create_adapter`), `add_reference(case, stages)`, `FailingStub`, `UsageStub`, `recorded(model_class)`, `RESUME_YAML`, `REVIEW_REPORT`, and `make_settings` (real Dynaconf from the bundled `settings.toml` plus an optional TOML layer).
 
+**T14** (route: delegated writer, trigger: 11 fixture files plus a 133-test file).
+
+- Verification: `uv run pytest tests/test_evals/test_fixtures.py`: 133 passed; `uv run ruff check src/ tests/ evals/` and `uv run ruff format --check src/ tests/ evals/`: clean; `uv run mypy src/ evals/` (189 files): clean; `uv run pytest`: 3416 passed, exit 0; `uv lock --check`: consistent. `uv run python -m evals list-cases` lists the seven cases (six `no`, the probe `partial: structure`); `uv run python -m evals estimate` prices the shipped matrix with no `n/a`.
+- Test strength: 19 one-line mutations of the personas, job descriptions, `cases.toml`, and the probe YAML (a forbidden term in a persona, a non-example email, phone, or URL domain, a renamed heading, a changed original bullet, an extra metric in the product persona, a removed `stages` limit, each of the three seeded defects undone, a bad date, a bad email); 18 were caught and the survivor is an equivalent mutation (removing one of several `Amplitude` mentions leaves the term in the job description).
+- Fixtures: `backend-engineer.md` (Alex Rivera, 159 lines, 4 roles, 5 to 7 bullets each, more than 12 distinct metrics: percentages, currency, counts, latency, throughput), `product-switcher.md` (Jordan Lee, 124 lines, Associate PM then two design roles, exactly 5 distinct metrics), `data-scientist.md` (Sam Patel, 122 lines, 2 roles, 2 projects, coursework); six job descriptions of 68 to 70 lines at Acme Corp, Umbrella Analytics, and Cyberdyne Systems. Names are invented, emails `@example.com`, phones `(xxx) 555-01xx`, URLs `example.com` or `example.org` (a test scans every fixture file for each rule). Employers are from the design list (Globex also appears as Sam's internship), schools are State University and Riverside Community College.
+- `cases.toml` follows design 9.4: the stretch cases forbid `PyTorch`, `model training`, `MLflow`; `SQL`, `A/B testing platform`, `Amplitude`; `Kubernetes`, `Airflow`, `team lead`. Each term is in the job description and in none of the persona. Every `expected_keywords` entry appears in its job description. The probe case is `stages = ["review"]` with the three design defects as `review_probe_defects`.
+- Probe: `evals/fixtures/reference/review-probe/resume.yaml` is the recorded Alex Rivera resume with a bullet starting `I led the migration`, the Terraform bullet replaced by `Cut cloud infrastructure costs by 73% ...`, and Terraform removed from skills (no mention of it anywhere). Tests assert exactly one first-person bullet, that `73` is the only number in the highlights absent from the knowledge base, that Terraform is the only missing platform keyword, that the YAML validates through RenderCV's `build_rendercv_dictionary_and_model`, and that R1, R2, R4 to R7 hold. It has no `phone` field.
+- The persona quotes the recorded stage 3 artifact: a test checks that every `original` bullet in `tests/test_evals/fixtures/recorded/backend-platform-match/stage3_content.json` is a verbatim line of `backend-engineer.md` and that every number in the rewritten bullets is in the persona.
+- Estimate for the shipped matrix over the seven cases (31 runs per model, 190 judge calls): `$36.40` in total, of which `$10.26` is the Claude judge; the largest model line is `openai/gpt-6-astra` at `$10.40` because of its price table, not its token counts. These are the planning token estimates, not measurements.
+- Not done here: the stage 1 to 3 references for the six real cases and the probe do not exist until the owner runs `bootstrap-reference`; until then the real cases record `skipped` for the downstream stages.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -287,4 +299,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-T01-T13 are implemented and committed on `feat/multi-provider-support`. Next: T14 (synthetic eval fixtures: `cases.toml`, three personas, six JDs, and the `review-probe` reference). Then T15-T17, then the owner actions at the end of `tasks.md`.
+T01-T14 are implemented and committed on `feat/multi-provider-support`. Next: T15 (deterministic graders: schema, JD recall, ATS rules, structure, faithfulness extraction, and the `STAGE_GRADERS` plumbing in `EvalRunner._run_job`). Then T16-T17, then the owner actions at the end of `tasks.md`.
