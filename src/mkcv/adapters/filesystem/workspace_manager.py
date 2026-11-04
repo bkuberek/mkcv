@@ -171,17 +171,18 @@ profile = "standard"
 # guidelines = ""
 
 # ── Providers ───────────────────────────────────────────────────────
-# API keys. Prefer environment variables (ANTHROPIC_API_KEY, etc.)
-# over storing keys here.
+# API keys belong in your user config file, ~/.config/mkcv/settings.toml
+# (run: chmod 600 ~/.config/mkcv/settings.toml), not in this workspace file.
+# Never commit an api_key to git. Use the same table names there:
 #
-# [default.providers.anthropic]
-# api_key = ""           # prefer: export ANTHROPIC_API_KEY=sk-ant-...
+#   [default.providers.anthropic]
+#   api_key = "sk-ant-..."
 #
-# [default.providers.openai]
-# api_key = ""           # prefer: export OPENAI_API_KEY=sk-...
+# Environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+# OPENROUTER_API_KEY) also work, for example in CI. A key in config takes
+# precedence over the environment variable.
 #
 # [default.providers.google]
-# api_key = ""           # prefer: export GEMINI_API_KEY=... (or GOOGLE_API_KEY)
 # # No API key? Use Vertex AI with Application Default Credentials
 # # (run: gcloud auth application-default login):
 # vertexai = true
@@ -189,9 +190,6 @@ profile = "standard"
 # location = "global"
 # # Several Google accounts? Pin one ADC file for this workspace:
 # credentials_file = "~/.config/gcloud-mkcv/application_default_credentials.json"
-#
-# [default.providers.openrouter]
-# api_key = ""           # prefer: export OPENROUTER_API_KEY=sk-or-...
 #
 # Any OpenAI-compatible endpoint (Groq, Together, vLLM, LM Studio, ...) is
 # a provider too. Name it, then use it in a stage or with --provider.
@@ -334,17 +332,23 @@ def _build_readme() -> str:
 
     # Build credentials block from the built-in provider registry
     provider_hints: dict[str, str] = {
-        "anthropic": "# Anthropic (recommended)\nexport ANTHROPIC_API_KEY=sk-ant-...",
-        "openai": "# OpenAI\nexport OPENAI_API_KEY=sk-...",
-        "google": "# Google Gemini\nexport GEMINI_API_KEY=...",
+        "anthropic": (
+            "# Anthropic (recommended)\n[default.providers.anthropic]\n"
+            'api_key = "sk-ant-..."'
+        ),
+        "openai": '# OpenAI\n[default.providers.openai]\napi_key = "sk-..."',
+        "google": ('# Google Gemini\n[default.providers.google]\napi_key = "..."'),
         "openrouter": (
             "# OpenRouter (access Claude, GPT, Gemini, DeepSeek, etc. "
-            "with one key)\nexport OPENROUTER_API_KEY=sk-or-..."
+            "with one key)\n[default.providers.openrouter]\n"
+            'api_key = "sk-or-..."'
         ),
         "ollama": "# Ollama (free, local — no key needed)\n# Just run: ollama serve",
     }
     credential_blocks = [
-        provider_hints.get(name, f"# {name}\nexport {spec.api_key_env[0]}=...")
+        provider_hints.get(
+            name, f'# {name}\n[default.providers.{name}]\napi_key = "..."'
+        )
         for name, spec in BUILTIN_PROVIDERS.items()
         if spec.api_key_env
     ]
@@ -406,13 +410,20 @@ uv tool install mkcv
 
 ### 2. Set up an API key
 
-You need at least one AI provider. Pick one:
+You need at least one AI provider. Put the key in your user config file,
+`~/.config/mkcv/settings.toml`. It applies to every workspace and keeps keys out
+of this repository. Add the provider you use, then run
+`chmod 600 ~/.config/mkcv/settings.toml`:
 
-```bash
+```toml
 {credential_lines}
 ```
 
-Add the export to your shell profile (`~/.zshrc` or `~/.bashrc`) so it persists.
+Never put `api_key` in this workspace's `mkcv.toml` if you commit it to git.
+
+Environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+`OPENROUTER_API_KEY`) also work, for example in CI. A key in config takes
+precedence over the environment variable.
 
 ### 3. Fill in your knowledge base
 
@@ -519,8 +530,8 @@ before a run when a stage uses a weak or unknown model.
 
 ### Using OpenRouter
 
-OpenRouter has no model profile, so name the model for each stage. Set the
-API key and configure your `mkcv.toml`:
+OpenRouter has no model profile, so name the model for each stage. Add the
+API key to your user config (step 2) and configure your `mkcv.toml`:
 
 ```toml
 [default.pipeline.stages.analyze]
@@ -563,7 +574,7 @@ Configuration is resolved in layers (highest priority wins):
 | `[default.pipeline.stages.*]` | AI provider/model/temperature per pipeline stage |
 | `[default.cover_letter]` | Cover letter generation and design settings |
 | `[default.voice]` | Writing-style guidelines |
-| `[default.providers.*]` | API keys (prefer env vars), custom providers |
+| `[default.providers.*]` | Custom providers, Vertex AI (keys: user config) |
 | `[[default.model_catalog]]` | Tier and prices of models mkcv does not know |
 
 ### Rendering (fonts, colours, page size)

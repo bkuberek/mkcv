@@ -93,7 +93,7 @@ Configuration is resolved through 5 layers (later overrides earlier):
 | 4 | Environment variables | `MKCV_` prefix (double underscores for nesting) |
 | 5 (highest) | CLI flags | Applied at runtime |
 
-API keys are always set via environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `OPENROUTER_API_KEY`. A provider you define in config names its own variable with `api_key_env`.
+API keys go in the global user config (`[default.providers.<name>] api_key = "..."` in `~/.config/mkcv/settings.toml`), never in a committed workspace `mkcv.toml`. A key in config takes precedence over the provider's environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`), which stays available for CI and one-off overrides. A provider you define in config names its own variable with `api_key_env`. See [API keys](models.md#api-keys).
 
 In `mkcv.toml` every section header needs the `default.` prefix (for example `[default.pipeline.stages.tailor]`); without it the setting is silently ignored. The models behind each stage are decided by the stage resolver (CLI flags, then per-stage config, then a model profile); see [Models and providers](models.md).
 

@@ -524,25 +524,34 @@ class TestWorkspaceReadmeCredentials:
         WorkspaceManager().create_workspace(target)
         readme = (target / "README.md").read_text()
         section = readme.split("### 2. Set up an API key", 1)[1].split("### 3.", 1)[0]
-        return section.split("```bash", 1)[1].split("```", 1)[0]
+        return section.split("```toml", 1)[1].split("```", 1)[0]
 
     @pytest.mark.parametrize(
-        "export_line",
+        "config_snippet",
         [
-            "export ANTHROPIC_API_KEY=sk-ant-...",
-            "export OPENAI_API_KEY=sk-...",
-            "export GEMINI_API_KEY=...",
-            "export OPENROUTER_API_KEY=sk-or-...",
+            '[default.providers.anthropic]\napi_key = "sk-ant-..."',
+            '[default.providers.openai]\napi_key = "sk-..."',
+            '[default.providers.google]\napi_key = "..."',
+            '[default.providers.openrouter]\napi_key = "sk-or-..."',
         ],
     )
     def test_block_lists_each_keyed_provider(
-        self, tmp_path: Path, export_line: str
+        self, tmp_path: Path, config_snippet: str
     ) -> None:
-        assert export_line in self._credentials_block(tmp_path)
+        assert config_snippet in self._credentials_block(tmp_path)
 
     def test_google_hint_names_gemini(self, tmp_path: Path) -> None:
         block = self._credentials_block(tmp_path)
-        assert "# Google Gemini\nexport GEMINI_API_KEY=..." in block
+        assert "# Google Gemini\n[default.providers.google]" in block
+
+    def test_block_does_not_tell_users_to_export_keys(self, tmp_path: Path) -> None:
+        assert "export" not in self._credentials_block(tmp_path)
+
+    def test_readme_points_at_the_user_config_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "ws"
+        WorkspaceManager().create_workspace(target)
+        readme = (target / "README.md").read_text()
+        assert "~/.config/mkcv/settings.toml" in readme
 
     def test_block_lists_providers_in_registry_order_with_ollama_last(
         self, tmp_path: Path
@@ -550,7 +559,7 @@ class TestWorkspaceReadmeCredentials:
         block = self._credentials_block(tmp_path)
         positions = [
             block.index(marker)
-            for marker in ("ANTHROPIC", "OPENAI", "GEMINI", "OPENROUTER", "Ollama")
+            for marker in ("anthropic", "openai", "google", "openrouter", "Ollama")
         ]
         assert positions == sorted(positions)
 
@@ -607,6 +616,11 @@ class TestWorkspaceConfigTemplate:
         template = self._template(tmp_path)
         assert "# [default.providers.google]" in template
         assert "GEMINI_API_KEY" in template
+
+    def test_points_api_keys_at_the_user_config_file(self, tmp_path: Path) -> None:
+        template = self._template(tmp_path)
+        assert "~/.config/mkcv/settings.toml" in template
+        assert "Prefer environment variables" not in template
 
     def test_documents_a_custom_openai_compatible_provider(
         self, tmp_path: Path

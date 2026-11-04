@@ -132,14 +132,13 @@ profile = "standard"
 # guidelines = ""
 
 # ── Providers ───────────────────────────────────────────────────────
-# API keys. Prefer environment variables (ANTHROPIC_API_KEY, etc.)
-# over storing keys here.
+# API keys belong in your user config file, ~/.config/mkcv/settings.toml
+# (run: chmod 600 ~/.config/mkcv/settings.toml), not in this workspace file.
+# Never commit an api_key to git. Use the same table names there:
 #
-# [default.providers.anthropic]
-# api_key = ""           # prefer: export ANTHROPIC_API_KEY=sk-ant-...
+#   [default.providers.anthropic]
+#   api_key = "sk-ant-..."
 #
-# [default.providers.openai]
-# api_key = ""           # prefer: export OPENAI_API_KEY=sk-...
-#
-# [default.providers.openrouter]
-# api_key = ""           # prefer: export OPENROUTER_API_KEY=sk-or-...
+# Environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+# OPENROUTER_API_KEY) also work, for example in CI. A key in config takes
+# precedence over the environment variable.

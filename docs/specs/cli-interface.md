@@ -375,7 +375,7 @@ mkcv models --json | jq '.estimated_total_usd'
 | 0 | Success |
 | 1 | General error |
 | 2 | Invalid arguments / missing required options |
-| 3 | Configuration error: unknown provider or model profile, `--model-profile` combined with `--provider`, a stage with no model, an invalid `[default.providers.*]` or `[[default.model_catalog]]` entry, or an invalid setting. A missing API key is a warning, not an error. |
+| 3 | Configuration error: unknown provider or model profile, `--model-profile` combined with `--provider`, a stage with no model, an invalid `[default.providers.*]` or `[[default.model_catalog]]` entry, or an invalid setting. A provider that needs an API key and has none stops the command with this code (a warning is shown first). |
 | 4 | Provider error (API failure after retries) |
 | 5 | Pipeline stage error / validation error |
 | 6 | Render error / template error |
@@ -398,8 +398,14 @@ All env vars use the `MKCV_` prefix (Dynaconf convention):
 Dynaconf uses double underscores for nested keys:
 `MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5`
 
-API keys are read from the providers' own variable names, without the `MKCV_`
-prefix:
+API keys belong in the user config file `~/.config/mkcv/settings.toml`
+(`[default.providers.<name>] api_key = "..."`, then `chmod 600`); see
+[API keys](../models.md#api-keys). Never put `api_key` in a committed workspace
+`mkcv.toml`. A key in config takes precedence over the environment variable.
+
+As an alternative (CI, one-off overrides), keys are read from the providers' own
+variable names, without the `MKCV_` prefix, or from
+`MKCV_PROVIDERS__<NAME>__API_KEY`:
 
 | Variable | Provider |
 |----------|----------|
@@ -436,4 +442,5 @@ the command with a configuration error (exit code 3).
 
 A provider you define under `[default.providers.<name>]` names its own
 variable with `api_key_env`. Ollama needs no key. A missing key stops the command
-with a configuration error (exit code 3); use `--provider stub` for offline runs.
+with a configuration error (exit code 3), not just a warning; use `--provider stub`
+for offline runs.
