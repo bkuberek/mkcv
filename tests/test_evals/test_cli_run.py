@@ -362,8 +362,8 @@ class TestCredentials:
         assert run("--stages", "analyze", "--cases", "alpha-match", matrix=shipped) == 0
         manifest = _manifest(out_dir)
         assert manifest.matrix.models == []
-        assert len(manifest.skipped_models) == 10
-        assert capsys.readouterr().err.count("warning") == 10
+        assert len(manifest.skipped_models) == 11
+        assert capsys.readouterr().err.count("warning") == 11
 
 
 class TestOverrides:

@@ -235,7 +235,7 @@ class TestEvalCase:
 class TestLoadMatrix:
     def test_the_shipped_matrix_loads(self) -> None:
         matrix = load_matrix(DEFAULT_MATRIX)
-        assert len(matrix.models) == 10
+        assert len(matrix.models) == 11
 
     def test_the_shipped_run_settings_match_the_design(self) -> None:
         run = load_matrix(DEFAULT_MATRIX).run
