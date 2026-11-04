@@ -447,37 +447,53 @@ pipeline, and quality tiers outside Anthropic are judgements.
 
 The eval harness in the repository's top-level `evals/` directory (not shipped
 with the package; see [evals/README.md](../evals/README.md)) replaces judgement
-with measurement. It runs each of the five resume pipeline stages on its own,
-with the same reference input for every model, across a matrix of models on
-synthetic personas and job descriptions. Each output is graded by rules
-(schema, ATS rules, keyword recall, and whether every number, employer, title,
+with measurement. People use mkcv to get the best resume and cover letter they
+can, so the harness recommends the **best** model for each stage, not the
+cheapest one that is good enough. It runs each of the five resume stages and
+the two cover letter stages on its own, with the same reference input for
+every model, across a matrix of models on synthetic personas and job
+descriptions. Each output is graded by rules (schema, ATS rules, keyword
+recall, cover letter shape, and whether every number, employer, title, name,
 and skill traces back to the knowledge base) and, for the subjective parts, by
-a judge model. Faithfulness, meaning no fact that is absent from the knowledge
-base, is the metric that matters most for a resume.
+a panel of judge models. The KB generation and validate stages are not
+evaluated yet.
 
-A model is **eligible** for a stage only if at least 95% of its runs completed,
-at least 95% of its outputs had the stage's shape, and, where the stage has
-them, its deterministic faithfulness score is at least 0.95 and its judged one
-at least 0.90. For each stage and provider the report then names:
+A model must pass every **hard gate** for a stage: at least 95% of its runs
+completed, at least 95% of its outputs had the stage's shape, and, where the
+stage has faithfulness grades, no run contains a fabricated claim, its
+deterministic faithfulness score is at least 0.95, and its judged one at least
+0.90. Among the models that pass, the one with the **highest primary quality
+score** wins, both across all providers and within each provider. Cost decides
+only between models whose scores are within 0.01 of each other. When the
+winner's lead is smaller than the noise across cases, the report marks the
+call **too close to call** and lists the runners-up.
 
-- **best**: the eligible model with the highest quality score on the stage's
-  primary metric (ties go to the cheaper model, then the faster one).
-- **recommended**: the cheapest eligible model whose score is within 0.05 of the
-  best.
-- **economy**: the cheapest eligible model scoring at least 0.70.
+Each judged output is scored by a **judge panel**: the top model of each
+provider (Anthropic, OpenAI, and Google), averaged. A judge may favour its own
+provider's models, so a model's score leaves out the judge from its own
+provider whenever another judge scored it; a row is marked self-judged only
+when its own provider's judge was the only one. To keep the run affordable, a
+screening round first runs every model once on a few representative cases,
+graded like the finals by every judge but its own provider's, and drops a
+model from a stage only if it fails a gate or trails the leader by more than a
+margin plus the noise; the top three of each stage and
+the best of each provider always reach the finals, which use every case, the
+whole panel, and two repeats. Calls go out as provider batches, and the
+judges' shared prompt prefix is cached; neither changes what a model is asked.
 
-The report ends with the profile changes those results suggest. They are never
-applied automatically: the maintainer edits
-`src/mkcv/core/catalog/builtin_model_profiles.py` (setting `evidence="eval"` and
-the run's ID) and this document, citing the published report under
+The report ends with the profile changes those results suggest: each
+provider profile follows that provider's best model, and a cross-provider
+`recommended` profile takes the best model of every stage. Economy profiles
+are not changed. Nothing is applied automatically: the maintainer edits
+`src/mkcv/core/catalog/builtin_model_profiles.py` (setting `evidence="eval"`
+and the run's ID) and this document, citing the published report under
 `evals/results/published/<run id>/`. A profile that has been updated this way
 reports `eval-backed: <run>` in `mkcv models` instead of `provisional`.
 
-Read an eval-backed row with its caveats in mind: a judge from the same provider
-as the evaluated model may favour it (the report marks those rows as
-self-judged), and a row with fewer than six runs is a low sample. Until the
-first run, treat every recommendation here as a reasonable default, not a
-benchmark result.
+Read an eval-backed row with its caveats in mind: a self-judged row has no
+independent judge, a call that is too close to call could go either way, and
+a row with fewer than six runs is a low sample. Until the first run, treat
+every recommendation here as a reasonable default, not a benchmark result.
 
 ## Verified facts
 

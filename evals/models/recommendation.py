@@ -1,20 +1,52 @@
-"""The models a run recommends for one stage and provider."""
+"""The model a run recommends for one stage, overall or within one provider."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from evals.models.runner_up import RunnerUp
 from mkcv.core.models.stage_key import StageKey
+
+OVERALL = "overall"
+"""The ``scope`` of a recommendation that compares every provider's models."""
 
 
 class Recommendation(BaseModel):
-    """Best, recommended, and economy model for a (stage, provider).
+    """The best eligible model of a stage within a scope, and why.
 
-    The choices are model names and are all None when no model qualified;
-    ``reason`` says why in either case.
+    ``scope`` is ``"overall"`` or a provider name. ``provider``, ``model``,
+    and ``score`` are None when no model qualified; ``reason`` says why in
+    either case.
     """
 
     stage: StageKey
-    provider: str
-    best: str | None = None
-    recommended: str | None = None
-    economy: str | None = None
+    scope: str
+    provider: str | None = None
+    model: str | None = None
+    score: float | None = Field(
+        default=None, description="The winner's primary quality score"
+    )
+    std: float | None = Field(
+        default=None, description="The winner's standard deviation across runs"
+    )
+    decided_by_cost: bool = Field(
+        default=False,
+        description="Other models scored within the tie epsilon; cost chose",
+    )
+    tied_with: list[str] = Field(
+        default_factory=list,
+        description="'provider/model' of the models the winner tied with",
+    )
+    too_close_to_call: bool = Field(
+        default=False,
+        description="The winner's lead over a runner-up is smaller than the noise",
+    )
+    runners_up: list[RunnerUp] = Field(
+        default_factory=list, description="Models within the noise of the winner"
+    )
     reason: str
+
+    @property
+    def label(self) -> str | None:
+        """``provider/model`` of the winner, or None without one."""
+        if self.provider is None or self.model is None:
+            return None
+        return f"{self.provider}/{self.model}"

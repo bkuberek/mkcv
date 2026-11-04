@@ -17,7 +17,12 @@ class RunManifest(BaseModel):
     mkcv_version: str
     git_sha: str | None = None
     matrix: MatrixConfig
-    judge: JudgeConfig
+    judge: JudgeConfig | None = Field(
+        default=None, description="The single judge of runs made before judge panels"
+    )
+    judges: list[JudgeConfig] = Field(
+        default_factory=list, description="The judge panel the run asked for"
+    )
     catalog_prices: dict[str, tuple[float, float]] = Field(
         default_factory=dict,
         description="'provider/model' to (input, output) USD per 1M tokens",
@@ -27,7 +32,33 @@ class RunManifest(BaseModel):
         default_factory=list,
         description="'provider/model: reason' for models that did not run",
     )
+    skipped_judges: dict[str, str] = Field(
+        default_factory=dict,
+        description="'provider/model' of each judge that did not run, and why",
+    )
     judge_skipped: str | None = Field(
         default=None,
-        description="Why the judge did not run (no API key), if it did not",
+        description="Why the single judge of an older run did not run, if it did not",
     )
+
+    @property
+    def panel(self) -> list[JudgeConfig]:
+        """The judges the run asked for (one, for a run before panels)."""
+        if self.judges:
+            return list(self.judges)
+        return [self.judge] if self.judge is not None else []
+
+    @property
+    def judge_skip_reasons(self) -> dict[str, str]:
+        """Why each judge that did not run was skipped, by ``provider/model``."""
+        if self.skipped_judges:
+            return dict(self.skipped_judges)
+        if self.judge is not None and self.judge_skipped:
+            return {self.judge.label: self.judge_skipped}
+        return {}
+
+    @property
+    def judges_that_ran(self) -> list[str]:
+        """``provider/model`` of each judge of the panel that ran."""
+        skipped = self.judge_skip_reasons
+        return [judge.label for judge in self.panel if judge.label not in skipped]

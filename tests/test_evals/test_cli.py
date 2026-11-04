@@ -109,10 +109,45 @@ class TestListCases:
             "stage3_content.json",
             "stage4_structure.json",
             "resume.yaml",
+            "cover_letter_content.json",
         ):
             (reference / name).write_text("{}", encoding="utf-8")
         main(["list-cases", "--fixtures", str(tmp_fixtures)])
         assert "yes" in capsys.readouterr().out.splitlines()[1].split()
+
+    def test_a_case_without_its_cover_letter_is_partial(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        reference = tmp_fixtures / "reference" / "alpha-match"
+        reference.mkdir(parents=True)
+        for name in (
+            "stage1_analysis.json",
+            "stage2_selection.json",
+            "stage3_content.json",
+            "stage4_structure.json",
+            "resume.yaml",
+        ):
+            (reference / name).write_text("{}", encoding="utf-8")
+        main(["list-cases", "--fixtures", str(tmp_fixtures)])
+        row = capsys.readouterr().out.splitlines()[1]
+        assert "partial:" in row
+        assert "cover_letter.generate" not in row
+
+    def test_a_review_probe_needs_no_cover_letter(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        reference = tmp_fixtures / "reference" / "alpha-probe"
+        reference.mkdir(parents=True)
+        for name in (
+            "stage1_analysis.json",
+            "stage2_selection.json",
+            "stage3_content.json",
+            "stage4_structure.json",
+            "resume.yaml",
+        ):
+            (reference / name).write_text("{}", encoding="utf-8")
+        main(["list-cases", "--fixtures", str(tmp_fixtures)])
+        assert capsys.readouterr().out.splitlines()[2].split()[-1] == "yes"
 
     def test_missing_fixtures_directory_is_a_usage_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -287,6 +322,93 @@ class TestEstimate:
         assert (code, "n/a" in capsys.readouterr().out) == (0, False)
 
 
+class TestEstimatePanel:
+    """The estimate prices every judge of the panel, keys or not."""
+
+    PANEL_MATRIX = HAIKU_ANALYZE_MATRIX.replace(
+        'stages = ["analyze"]', 'stages = ["tailor"]'
+    ).replace(
+        '[judge]\nprovider = "anthropic"\nmodel = "claude-opus-5-5"\n',
+        '[[judges]]\nprovider = "anthropic"\nmodel = "claude-opus-5-5"\n\n'
+        '[[judges]]\nprovider = "openai"\nmodel = "gpt-6-astra"\n',
+    )
+
+    def _out(
+        self,
+        tmp_path: Path,
+        fixtures: Path,
+        settings: Dynaconf,
+        capsys: pytest.CaptureFixture[str],
+        *extra: str,
+    ) -> str:
+        matrix = tmp_path / "panel.toml"
+        matrix.write_text(self.PANEL_MATRIX, encoding="utf-8")
+        code = main(
+            ["estimate", "--matrix", str(matrix), "--fixtures", str(fixtures), *extra],
+            config=settings,
+        )
+        assert code == 0
+        return capsys.readouterr().out
+
+    def test_every_judge_has_its_own_line(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        lines = [line for line in out.splitlines() if line.startswith("Judge ")]
+        assert len(lines) == 2
+        assert "anthropic/claude-opus-5-5" in lines[0]
+        assert "openai/gpt-6-astra" in lines[1]
+        assert all("2 calls" in line for line in lines)
+
+    def test_judges_are_priced_without_their_keys(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        assert "(skipped)" not in out
+
+    def test_the_cost_is_broken_down_by_provider(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        lines = out.splitlines()
+        start = lines.index("By provider (models and judges):")
+        providers = [line.split()[0] for line in lines[start + 1 : start + 3]]
+        assert providers == ["anthropic", "openai"]
+
+    def test_the_judge_flag_takes_a_panel(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(
+            tmp_path,
+            tmp_fixtures,
+            make_settings(),
+            capsys,
+            "--judge",
+            "google:gemini-4-argon",
+            "openai:gpt-6-luna",
+        )
+        judges = [
+            line.split()[1] for line in out.splitlines() if line.startswith("Judge ")
+        ]
+        assert judges == ["google/gemini-4-argon", "openai/gpt-6-luna"]
+
+
 class TestUsage:
     def test_no_command_exits_two(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert main([]) == 2
@@ -303,3 +425,104 @@ class TestUsage:
 def test_the_shipped_matrix_file_is_valid_toml() -> None:
     path = REPO_ROOT / "evals" / "config" / "matrix.toml"
     assert tomllib.loads(path.read_text(encoding="utf-8"))["models"]
+
+
+class TestEstimateBatching:
+    BATCHED = HAIKU_ANALYZE_MATRIX + "\n[batch]\nenabled = true\n"
+
+    def _out(
+        self,
+        tmp_path: Path,
+        fixtures: Path,
+        settings: Dynaconf,
+        capsys: pytest.CaptureFixture[str],
+        *extra: str,
+    ) -> str:
+        matrix = tmp_path / "batched.toml"
+        matrix.write_text(self.BATCHED, encoding="utf-8")
+        assert (
+            main(
+                [
+                    "estimate",
+                    "--matrix",
+                    str(matrix),
+                    "--fixtures",
+                    str(fixtures),
+                    *extra,
+                ],
+                config=settings,
+            )
+            == 0
+        )
+        return capsys.readouterr().out
+
+    def test_batching_halves_the_cost_and_shows_the_online_total(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys)
+        assert "Total: $0.0007" in out
+        assert "Online, without batching: $0.0014" in out
+
+    def test_no_batch_prices_online(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys, "--no-batch")
+        assert "Total: $0.0014" in out
+        assert "Online, without batching" not in out
+
+    def test_the_bootstrap_estimate_is_online_and_batched(
+        self,
+        tmp_path: Path,
+        tmp_fixtures: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        out = self._out(tmp_path, tmp_fixtures, make_settings(), capsys, "--bootstrap")
+        assert "Reference model anthropic/claude-opus-5-5" in out
+        assert "online" in out and "batched" in out
+
+
+class TestCheckReference:
+    def test_a_faithful_reference_passes(
+        self,
+        tmp_fixtures: Path,
+        add_reference: Callable[..., None],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from evals.harness.case_loader import load_cases
+
+        add_reference(load_cases(tmp_fixtures)[0])
+        code = main(["check-reference", "--fixtures", str(tmp_fixtures)])
+        out = capsys.readouterr().out
+        assert "reference file(s) checked" in out
+        assert code in (0, 1)
+
+    def test_an_invented_claim_is_listed_and_fails(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        reference = tmp_fixtures / "reference" / "alpha-match"
+        reference.mkdir(parents=True)
+        (reference / "stage3_content.json").write_text(
+            '{"roles": [{"company": "Initech", "position": "Engineer", '
+            '"bullets": [{"rewritten": "Saved $2.4M a year"}]}]}'
+        )
+        code = main(["check-reference", "--fixtures", str(tmp_fixtures)])
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "alpha-match / stage3_content.json" in out
+        assert "number '$2.4M'" in out
+        assert "company 'Initech'" in out
+
+    def test_without_references_it_says_so(
+        self, tmp_fixtures: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["check-reference", "--fixtures", str(tmp_fixtures)]) == 0
+        assert "run bootstrap-reference first" in capsys.readouterr().out

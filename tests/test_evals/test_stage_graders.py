@@ -2,8 +2,16 @@
 
 import pytest
 
-from evals.graders.stage_graders import PRIMARY_METRIC, STAGE_GRADERS
-from mkcv.core.models.stage_key import PIPELINE_STAGES, StageKey
+from evals.graders.stage_graders import (
+    DEFAULT_JUDGED_STAGES,
+    JUDGED_GRADES,
+    PRIMARY_METRIC,
+    STAGE_GRADERS,
+    judge_calls,
+)
+from evals.stages import EVALUATED_STAGES
+from mkcv.core.models.stage_key import StageKey
+from tests.test_evals.grading_support import make_case
 
 DETERMINISTIC = {
     StageKey.ANALYZE: ["schema", "jd_keyword_recall"],
@@ -16,14 +24,20 @@ DETERMINISTIC = {
         "faithfulness_extraction",
     ],
     StageKey.REVIEW: ["schema"],
+    StageKey.COVER_LETTER_GENERATE: [
+        "schema",
+        "cover_letter_rules",
+        "faithfulness_extraction",
+    ],
+    StageKey.COVER_LETTER_REVIEW: ["schema"],
 }
 
 
-def test_every_pipeline_stage_has_graders() -> None:
-    assert set(STAGE_GRADERS) == set(PIPELINE_STAGES)
+def test_every_evaluated_stage_has_graders() -> None:
+    assert set(STAGE_GRADERS) == set(EVALUATED_STAGES)
 
 
-@pytest.mark.parametrize("stage", PIPELINE_STAGES)
+@pytest.mark.parametrize("stage", EVALUATED_STAGES)
 def test_each_stage_registers_its_deterministic_graders_in_order(
     stage: StageKey,
 ) -> None:
@@ -49,8 +63,17 @@ def test_the_judge_graders_follow_the_deterministic_ones() -> None:
             "ats_rules",
             "structure",
             "faithfulness_extraction",
+            "faithfulness_judge",
         ],
         StageKey.REVIEW: ["schema", "review_defect_recall"],
+        StageKey.COVER_LETTER_GENERATE: [
+            "schema",
+            "cover_letter_rules",
+            "faithfulness_extraction",
+            "faithfulness_judge",
+            "cover_letter_judge",
+        ],
+        StageKey.COVER_LETTER_REVIEW: ["schema", "cover_letter_defect_recall"],
     }
 
 
@@ -67,4 +90,56 @@ def test_the_primary_metric_of_each_stage_follows_the_design() -> None:
         StageKey.TAILOR: "tailoring_judge",
         StageKey.STRUCTURE: "ats_rules",
         StageKey.REVIEW: "review_defect_recall",
+        StageKey.COVER_LETTER_GENERATE: "cover_letter_judge",
+        StageKey.COVER_LETTER_REVIEW: "cover_letter_defect_recall",
     }
+
+
+def test_the_judged_grades_are_the_judge_graders_names() -> None:
+    assert {
+        "selection_judge",
+        "faithfulness_judge",
+        "tailoring_judge",
+        "review_defect_recall",
+        "cover_letter_judge",
+        "cover_letter_defect_recall",
+    } == JUDGED_GRADES
+
+
+@pytest.mark.parametrize(
+    ("stage", "calls"),
+    [
+        (StageKey.ANALYZE, 0),
+        (StageKey.SELECT, 1),
+        (StageKey.TAILOR, 2),
+        (StageKey.STRUCTURE, 1),
+        (StageKey.REVIEW, 0),
+        (StageKey.COVER_LETTER_GENERATE, 2),
+        (StageKey.COVER_LETTER_REVIEW, 0),
+    ],
+)
+def test_each_judge_makes_these_calls_per_run(stage: StageKey, calls: int) -> None:
+    assert judge_calls(make_case(), stage, judged=EVALUATED_STAGES) == calls
+
+
+def test_probe_cases_add_their_defect_judgement() -> None:
+    probe = make_case(
+        review_probe_defects=["x"], cover_letter={"review_defects": ["y"]}
+    )
+    assert judge_calls(probe, StageKey.REVIEW) == 1
+    assert judge_calls(probe, StageKey.COVER_LETTER_REVIEW) == 1
+
+
+def test_by_default_only_the_stages_that_gain_from_a_judge_are_judged() -> None:
+    assert DEFAULT_JUDGED_STAGES == (
+        StageKey.SELECT,
+        StageKey.TAILOR,
+        StageKey.REVIEW,
+        StageKey.COVER_LETTER_GENERATE,
+        StageKey.COVER_LETTER_REVIEW,
+    )
+
+
+def test_a_stage_left_out_of_the_judged_stages_makes_no_judge_call() -> None:
+    assert judge_calls(make_case(), StageKey.STRUCTURE, judged=()) == 0
+    assert judge_calls(make_case(), StageKey.TAILOR, judged=()) == 0

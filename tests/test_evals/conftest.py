@@ -18,6 +18,8 @@ from evals.models.eval_case import REFERENCE_FILES, EvalCase
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.adapters.llm.stub import StubLLMAdapter
 from mkcv.core.exceptions.provider import ProviderError
+from mkcv.core.models.cover_letter import CoverLetter
+from mkcv.core.models.cover_letter_review import CoverLetterReview
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.review_report import ReviewReport
@@ -72,6 +74,19 @@ REVIEW_REPORT = ReviewReport.model_validate(
         "low_confidence_items": [],
     }
 )
+COVER_LETTER = CoverLetter.model_validate_json(
+    (RECORDED_DIR / "cover_letter_content.json").read_text(encoding="utf-8")
+)
+COVER_LETTER_REVIEW = CoverLetterReview(
+    overall_score=84,
+    tone_assessment="Professional and direct.",
+    specificity_score=86,
+    keyword_alignment=["Kubernetes", "PostgreSQL", "incident response"],
+    length_assessment="About 250 words in four paragraphs.",
+    strengths=["Concrete metrics from the knowledge base"],
+    improvements=["Mention the Go tooling the role asks for"],
+    red_flags=[],
+)
 PERSONA_TEXT = "# Alex Example\n\n## Professional Summary\nBackend engineer.\n"
 JD_TEXT = "Platform Engineer at Acme Corp\n\nRequires Kubernetes and Go.\n"
 CASES_TOML = """
@@ -80,6 +95,8 @@ id = "alpha-match"
 persona = "personas/alpha.md"
 jd = "jds/alpha-match.md"
 expected_keywords = ["Kubernetes", "Go"]
+
+[cases.cover_letter]
 
 [[cases]]
 id = "alpha-probe"
@@ -138,6 +155,7 @@ def recorded(model_class: type[BaseModel]) -> BaseModel:
         JDAnalysis: "stage1_analysis.json",
         ExperienceSelection: "stage2_selection.json",
         TailoredContent: "stage3_content.json",
+        CoverLetter: "cover_letter_content.json",
     }
     text = (RECORDED_DIR / names[model_class]).read_text(encoding="utf-8")
     return model_class.model_validate_json(text)
@@ -153,6 +171,8 @@ def canned_stub() -> StubLLMAdapter:
             ExperienceSelection: recorded(ExperienceSelection),
             TailoredContent: recorded(TailoredContent),
             ReviewReport: REVIEW_REPORT,
+            CoverLetter: COVER_LETTER,
+            CoverLetterReview: COVER_LETTER_REVIEW,
         },
     )
 

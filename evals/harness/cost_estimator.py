@@ -1,14 +1,20 @@
 """Estimate what a matrix run would cost before any model is called."""
 
-from collections.abc import Sequence
+import math
+from collections.abc import Callable, Mapping, Sequence
 
+from evals.graders.stage_graders import judge_calls
+from evals.harness.tournament import screening_cases, screening_judges
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import EvalCase
+from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
+from evals.models.matrix_model import MatrixModel
+from evals.models.tournament_estimate import TournamentEstimate
+from evals.models.tournament_settings import TournamentSettings
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.model_report import summarize_costs
-from mkcv.core.models.stage_key import StageKey
 
 JUDGE_INPUT_TOKENS = 6000
 JUDGE_OUTPUT_TOKENS = 1500
@@ -16,34 +22,37 @@ JUDGE_OUTPUT_TOKENS = 1500
 
 _TOKENS_PER_MILLION = 1_000_000
 
-_JUDGE_CALLS_PER_RUN: dict[StageKey, int] = {
-    StageKey.SELECT: 1,  # selection_judge
-    StageKey.TAILOR: 2,  # faithfulness_judge and tailoring_judge
-}
-"""Judge calls one evaluated run makes, per the grader table in design 9.6."""
-
 
 def estimate_matrix_cost(
     matrix: MatrixConfig,
     cases: Sequence[EvalCase],
     catalog: ModelCatalog,
     *,
-    judge_skipped: str | None = None,
+    skipped_judges: Mapping[str, str] | None = None,
+    judges_for: Callable[[MatrixModel], Sequence[JudgeConfig]] | None = None,
+    discounts: Mapping[str, float] | None = None,
 ) -> CostEstimate:
-    """Estimate the cost of running ``matrix`` over ``cases``.
+    """Estimate the cost of running ``matrix`` over ``cases`` in one round.
 
     Each model is charged the stage requirements' token estimates for every
-    (case, stage, repeat) it runs; judge calls are charged at the judge
-    model's price. A model without a catalog price costs None.
+    (case, stage, repeat) it runs. By default every judge of the panel
+    scores every judged output, so each judge is charged every judge call at
+    its own price; ``judges_for`` narrows the judges of a model's outputs (the
+    screening round uses one). A model or judge without a catalog price costs
+    None.
 
     Args:
-        matrix: The models, stages, and judge to price.
+        matrix: The models, stages, and judges to price.
         cases: The cases to run.
         catalog: Where prices come from.
-        judge_skipped: Why the judge will not run (no API key). Its calls are
-            then left out; the reason is kept only if the run would have made
-            judge calls.
+        skipped_judges: Judges that will not run (no credentials), with the
+            reason, by ``provider/model``. Their calls are left out; the
+            reasons are kept only if the run would have made judge calls.
+        judges_for: The judges of each model's outputs (default: the panel).
+        discounts: The share taken off each provider's calls (batching), by
+            provider name; ``online_total_usd`` keeps the undiscounted total.
     """
+    off = discounts or {}
     runs = [
         (case, stage)
         for case in cases
@@ -58,7 +67,7 @@ def estimate_matrix_cost(
         STAGE_REQUIREMENTS[s].est_output_tokens for _, s in runs
     )
 
-    model_costs = {
+    online_models = {
         model.label: _price_tokens(
             catalog.price_for(model.model, provider=model.provider),
             input_tokens,
@@ -67,39 +76,194 @@ def estimate_matrix_cost(
         for model in matrix.models
     }
 
-    planned_judge_calls = (
-        len(matrix.models) * repeats * sum(_judge_calls(c, s) for c, s in runs)
+    judged = matrix.run.judged_stages
+    distinct = sum(judge_calls(c, s, judged=judged) for c, s in runs)
+    per_model = repeats * distinct
+    skipped = dict(skipped_judges or {}) if per_model and matrix.models else {}
+    panel = [judge for judge in matrix.panel if judge.label not in skipped]
+    counts: dict[str, int] = {}
+    configs: dict[str, JudgeConfig] = {}
+    for model in matrix.models if per_model else []:
+        for judge in judges_for(model) if judges_for else panel:
+            counts[judge.label] = counts.get(judge.label, 0) + per_model
+            configs[judge.label] = judge
+    online_judges = {
+        label: _judge_cost(
+            catalog.price_for(configs[label].model, provider=configs[label].provider),
+            count,
+            prefixes=distinct,
+            provider=configs[label].provider,
+            matrix=matrix,
+        )
+        for label, count in counts.items()
+    }
+    model_costs = _discounted(online_models, off)
+    judge_costs = _discounted(online_judges, off)
+    judge_total, _ = (
+        summarize_costs(list(judge_costs.values())) if judge_costs else (0.0, False)
     )
-    skipped = judge_skipped if planned_judge_calls else None
-    judge_calls = 0 if skipped else planned_judge_calls
-    judge_cost = _judge_cost(
-        catalog.price_for(matrix.judge.model, provider=matrix.judge.provider),
-        judge_calls,
-    )
-    known_costs = [*model_costs.values(), *([judge_cost] if judge_calls else [])]
+    known_costs = [*model_costs.values(), *judge_costs.values()]
     total, is_partial = summarize_costs(known_costs) if known_costs else (0.0, False)
+    online = [*online_models.values(), *online_judges.values()]
+    online_total = summarize_costs(online)[0] if online else 0.0
     return CostEstimate(
         runs_per_model=len(runs) * repeats,
         model_costs=model_costs,
-        judge=matrix.judge.label,
-        judge_calls=judge_calls,
-        judge_cost_usd=judge_cost,
+        judges=list(counts),
+        judge_calls=max(counts.values(), default=0),
+        judge_call_counts=counts,
+        judge_costs=judge_costs,
+        judge_cost_usd=judge_total,
+        provider_costs=_by_provider(model_costs, judge_costs),
         total_usd=total,
+        online_total_usd=online_total,
         is_partial=is_partial,
-        judge_skipped=skipped,
+        skipped_judges=skipped,
     )
 
 
-def _judge_calls(case: EvalCase, stage: StageKey) -> int:
-    if stage is StageKey.REVIEW:
-        return 1 if case.review_probe_defects else 0
-    return _JUDGE_CALLS_PER_RUN.get(stage, 0)
+def estimate_tournament_cost(
+    matrix: MatrixConfig,
+    cases: Sequence[EvalCase],
+    catalog: ModelCatalog,
+    *,
+    skipped_judges: Mapping[str, str] | None = None,
+    discounts: Mapping[str, float] | None = None,
+) -> TournamentEstimate:
+    """Estimate both rounds of a tournament run.
+
+    Screening runs every model on the screening cases with the screening
+    repeats, each model's outputs judged by every judge but its own
+    provider's. The
+    finals run ``assumed_survivors`` on every case with ``[run] repeats`` and
+    the whole panel; the worst case keeps every model.
+    """
+    available = [j for j in matrix.panel if j.label not in (skipped_judges or {})]
+    settings = matrix.tournament
+
+    def other_judges(model: MatrixModel) -> list[JudgeConfig]:
+        return screening_judges(model, available)
+
+    screening_matrix = matrix.model_copy(
+        update={
+            "run": matrix.run.model_copy(update={"repeats": settings.screening_repeats})
+        }
+    )
+    survivors = assumed_survivors(matrix.models, settings, catalog)
+    return TournamentEstimate(
+        screening=estimate_matrix_cost(
+            screening_matrix,
+            screening_cases(cases, settings),
+            catalog,
+            skipped_judges=skipped_judges,
+            judges_for=other_judges,
+            discounts=discounts,
+        ),
+        finals=estimate_matrix_cost(
+            matrix.model_copy(update={"models": survivors}),
+            cases,
+            catalog,
+            skipped_judges=skipped_judges,
+            discounts=discounts,
+        ),
+        finals_worst_case=estimate_matrix_cost(
+            matrix,
+            cases,
+            catalog,
+            skipped_judges=skipped_judges,
+            discounts=discounts,
+        ),
+        assumed_survivors=[model.label for model in survivors],
+    )
 
 
-def _judge_cost(price: tuple[float, float] | None, calls: int) -> float | None:
+def assumed_survivors(
+    models: Sequence[MatrixModel], settings: TournamentSettings, catalog: ModelCatalog
+) -> list[MatrixModel]:
+    """The models a finals estimate assumes survive screening at every stage.
+
+    The best of each provider always survives, and quality tends to follow
+    price, so it takes the dearest model of each provider (input plus output
+    price), then the next dearest models until ``keep_top`` are kept.
+    """
+    by_price = sorted(models, key=lambda m: -_list_price(m, catalog))
+    kept: list[MatrixModel] = []
+    for provider in dict.fromkeys(model.provider for model in models):
+        kept.extend(
+            [m for m in by_price if m.provider == provider][
+                : settings.keep_per_provider
+            ]
+        )
+    for model in by_price:
+        if len(kept) >= settings.keep_top:
+            break
+        if model not in kept:
+            kept.append(model)
+    return kept
+
+
+def _discounted(
+    costs: Mapping[str, float | None], discounts: Mapping[str, float]
+) -> dict[str, float | None]:
+    return {
+        label: None
+        if cost is None
+        else cost * (1.0 - discounts.get(label.partition("/")[0], 0.0))
+        for label, cost in costs.items()
+    }
+
+
+def _list_price(model: MatrixModel, catalog: ModelCatalog) -> float:
+    price = catalog.price_for(model.model, provider=model.provider)
+    return -math.inf if price is None else price[0] + price[1]
+
+
+def _by_provider(*costs: Mapping[str, float | None]) -> dict[str, float | None]:
+    """Sum ``provider/model`` costs per provider, in first-seen order."""
+    grouped: dict[str, list[float | None]] = {}
+    for table in costs:
+        for label, cost in table.items():
+            grouped.setdefault(label.partition("/")[0], []).append(cost)
+    return {
+        provider: summarize_costs(values)[0] for provider, values in grouped.items()
+    }
+
+
+def _judge_cost(
+    price: tuple[float, float] | None,
+    calls: int,
+    *,
+    prefixes: int,
+    provider: str,
+    matrix: MatrixConfig,
+) -> float | None:
+    """Price ``calls`` judge calls, with the cached prefix when caching is on.
+
+    All calls of a judge on one (case, stage, grader) share a prefix, so
+    ``prefixes`` of them must write it (Anthropic charges extra for that)
+    and the rest can read it, of which ``estimated_hit_rate`` do.
+    """
     if calls == 0:
         return 0.0
-    return _price_tokens(price, calls * JUDGE_INPUT_TOKENS, calls * JUDGE_OUTPUT_TOKENS)
+    if price is None:
+        return None
+    caching = matrix.caching
+    if not caching.enabled:
+        return _price_tokens(
+            price, calls * JUDGE_INPUT_TOKENS, calls * JUDGE_OUTPUT_TOKENS
+        )
+    prefix = JUDGE_INPUT_TOKENS * caching.judge_prefix_share
+    hits = max(0, calls - prefixes) * caching.estimated_hit_rate
+    pricing = matrix.pricing
+    input_tokens = (
+        (calls - hits) * prefix * pricing.cache_write_multiplier.get(provider, 1.0)
+        + hits * prefix * pricing.cache_read_multiplier.get(provider, 1.0)
+        + calls * (JUDGE_INPUT_TOKENS - prefix)
+    )
+    input_price, output_price = price
+    return (
+        input_tokens * input_price + calls * JUDGE_OUTPUT_TOKENS * output_price
+    ) / _TOKENS_PER_MILLION
 
 
 def _price_tokens(

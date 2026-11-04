@@ -12,9 +12,11 @@ from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.matrix_overrides import MatrixOverrides
+from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.run_settings import RunSettings
+from evals.stages import EVALUATED_STAGES
 from mkcv.adapters.factory import create_provider_registry
-from mkcv.core.models.stage_key import PIPELINE_STAGES, StageKey
+from mkcv.core.models.stage_key import StageKey
 
 JUDGE = JudgeConfig(provider="anthropic", model="claude-opus-5-5")
 HAIKU = MatrixModel(provider="anthropic", model="claude-haiku-5-5", temperature=0.4)
@@ -43,7 +45,7 @@ class TestMatrixOverrides:
             MatrixOverrides(stages=["polish"]).apply(_matrix())
 
     def test_a_non_pipeline_stage_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="not resume pipeline stages"):
+        with pytest.raises(ValueError, match="not stages the harness evaluates"):
             MatrixOverrides(stages=["kb"]).apply(_matrix())
 
     def test_cases_replace_the_run_cases(self) -> None:
@@ -60,7 +62,7 @@ class TestMatrixOverrides:
     def test_other_run_settings_are_kept(self) -> None:
         result = MatrixOverrides(concurrency=1).apply(_matrix())
         assert result.run.repeats == 2
-        assert tuple(result.run.stages) == PIPELINE_STAGES
+        assert tuple(result.run.stages) == EVALUATED_STAGES
 
     def test_models_replace_the_matrix_models(self) -> None:
         result = MatrixOverrides(models=["stub:stub-model"]).apply(_matrix())
@@ -82,21 +84,44 @@ class TestMatrixOverrides:
             MatrixOverrides(models=["gpt-6"]).apply(_matrix())
 
     def test_the_judge_is_replaced(self) -> None:
-        result = MatrixOverrides(judge="openai:gpt-6.1-sol").apply(_matrix())
-        assert result.judge == JudgeConfig(provider="openai", model="gpt-6.1-sol")
+        result = MatrixOverrides(judges=["openai:gpt-6.1-sol"]).apply(_matrix())
+        assert result.panel == [JudgeConfig(provider="openai", model="gpt-6.1-sol")]
+
+    def test_several_judges_make_a_panel(self) -> None:
+        result = MatrixOverrides(
+            judges=["openai:gpt-6-astra", "google:gemini-4-argon"]
+        ).apply(_matrix())
+        assert [j.label for j in result.panel] == [
+            "openai/gpt-6-astra",
+            "google/gemini-4-argon",
+        ]
+
+    def test_the_override_replaces_a_matrix_panel(self) -> None:
+        matrix = MatrixConfig(
+            judges=[JUDGE, JudgeConfig(provider="google", model="gemini-4-argon")],
+            reference=JUDGE,
+            models=[HAIKU],
+        )
+        result = MatrixOverrides(judges=["openai:gpt-6-astra"]).apply(matrix)
+        assert [j.label for j in result.panel] == ["openai/gpt-6-astra"]
 
     def test_a_judge_without_a_colon_is_a_usage_error(self) -> None:
         with pytest.raises(ValueError, match=r"--judge expects provider:model"):
-            MatrixOverrides(judge="gpt-6.1-sol").apply(_matrix())
+            MatrixOverrides(judges=["gpt-6.1-sol"]).apply(_matrix())
 
     @pytest.mark.parametrize("value", [":model", "provider:"])
     def test_a_judge_with_an_empty_side_is_a_usage_error(self, value: str) -> None:
         with pytest.raises(ValueError, match="--judge expects provider:model"):
-            MatrixOverrides(judge=value).apply(_matrix())
+            MatrixOverrides(judges=[value]).apply(_matrix())
 
     def test_the_reference_model_is_not_touched_by_the_judge_override(self) -> None:
-        result = MatrixOverrides(judge="openai:gpt-6.1-sol").apply(_matrix())
+        result = MatrixOverrides(judges=["openai:gpt-6.1-sol"]).apply(_matrix())
         assert result.reference == JUDGE
+
+    def test_the_recommendation_settings_are_kept(self) -> None:
+        settings = RecommendationSettings(tie_epsilon=0.02)
+        matrix = _matrix().model_copy(update={"recommendation": settings})
+        assert MatrixOverrides(cases=["a"]).apply(matrix).recommendation == settings
 
 
 class TestSplitByCredentials:

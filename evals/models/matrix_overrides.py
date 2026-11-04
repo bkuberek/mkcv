@@ -9,22 +9,27 @@ from evals.models.run_settings import RunSettings
 
 
 class MatrixOverrides(BaseModel):
-    """Values for ``--stages``, ``--cases``, ``--models``, ``--judge``, and
-    ``--concurrency``; None leaves the matrix file's value in place."""
+    """Values for ``--stages``, ``--cases``, ``--models``, ``--judge``,
+    ``--concurrency``, ``--single-round``, ``--no-batch``, and ``--no-cache``;
+    None (or False) leaves the matrix file's value in place."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     stages: list[str] | None = None
     cases: list[str] | None = None
     models: list[str] | None = None
-    judge: str | None = None
+    judges: list[str] | None = None
     concurrency: int | None = None
+    single_round: bool = False
+    no_batch: bool = False
+    no_cache: bool = False
 
     def apply(self, matrix: MatrixConfig) -> MatrixConfig:
         """Return ``matrix`` with the given overrides applied.
 
         ``--models`` replaces the model list: a model that the matrix already
-        lists keeps its temperature, any other is added as given.
+        lists keeps its temperature, any other is added as given. ``--judge``
+        replaces the whole judge panel.
 
         Raises:
             ValueError: If a value is invalid (unknown stage, a model or judge
@@ -32,9 +37,27 @@ class MatrixOverrides(BaseModel):
         """
         return MatrixConfig(
             run=self._run_settings(matrix.run),
-            judge=self._judge(matrix.judge),
+            judge=matrix.judge if self.judges is None else None,
+            judges=matrix.judges if self.judges is None else self._judges(),
             reference=matrix.reference,
             models=self._models(matrix.models),
+            recommendation=matrix.recommendation,
+            tournament=(
+                matrix.tournament.model_copy(update={"enabled": False})
+                if self.single_round
+                else matrix.tournament
+            ),
+            batch=(
+                matrix.batch.model_copy(update={"enabled": False})
+                if self.no_batch
+                else matrix.batch
+            ),
+            pricing=matrix.pricing,
+            caching=(
+                matrix.caching.model_copy(update={"enabled": False})
+                if self.no_cache
+                else matrix.caching
+            ),
         )
 
     def _run_settings(self, current: RunSettings) -> RunSettings:
@@ -52,11 +75,13 @@ class MatrixOverrides(BaseModel):
         except ValidationError as error:
             raise ValueError(f"Invalid run setting: {error}") from error
 
-    def _judge(self, current: JudgeConfig) -> JudgeConfig:
-        if self.judge is None:
-            return current
-        provider, model = _split_provider_model("--judge", self.judge)
-        return JudgeConfig(provider=provider, model=model)
+    def _judges(self) -> list[JudgeConfig]:
+        return [
+            JudgeConfig(provider=provider, model=model)
+            for provider, model in (
+                _split_provider_model("--judge", value) for value in self.judges or []
+            )
+        ]
 
     def _models(self, current: list[MatrixModel]) -> list[MatrixModel]:
         if self.models is None:

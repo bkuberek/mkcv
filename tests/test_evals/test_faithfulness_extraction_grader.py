@@ -1,16 +1,16 @@
 """Tests for the faithfulness extraction grader (REQ-EV-10) and its helpers."""
 
+from decimal import Decimal
 from typing import Any
 
 import pytest
 
 from evals.graders.faithfulness_extraction_grader import FaithfulnessExtractionGrader
 from evals.graders.text_normalization import (
-    bare_digits,
     contains_term,
     extract_numbers,
     normalize_company,
-    normalize_number,
+    number_values,
 )
 from evals.models.grade import Grade
 from mkcv.core.models.stage_key import StageKey
@@ -377,24 +377,21 @@ class TestNormalization:
         assert extract_numbers(text) == numbers
 
     @pytest.mark.parametrize(
-        ("raw", "normalized"),
+        ("raw", "values"),
         [
-            ("$2.4M", "2.4m"),
-            ("85,000", "85000"),
-            ("40 percent", "40%"),
-            ("40 %", "40%"),
-            ("8X", "8x"),
+            ("$2.4M", {"2.4", "2400000"}),
+            ("85,000", {"85000"}),
+            ("40 percent", {"40"}),
+            ("40 %", {"40"}),
+            ("8X", {"8"}),
+            ("310k", {"310", "310000"}),
+            ("1.5 billion", {"1.5", "1500000000"}),
         ],
     )
-    def test_numbers_are_normalized(self, raw: str, normalized: str) -> None:
-        assert normalize_number(raw) == normalized
-
-    @pytest.mark.parametrize(
-        ("normalized", "bare"),
-        [("2.4m", "2.4"), ("40%", "40"), ("8x", "8"), ("310k", "310"), ("12", "12")],
-    )
-    def test_the_bare_digits_drop_the_unit(self, normalized: str, bare: str) -> None:
-        assert bare_digits(normalized) == bare
+    def test_numbers_stand_for_their_scaled_and_bare_values(
+        self, raw: str, values: set[str]
+    ) -> None:
+        assert number_values(raw) == {Decimal(value) for value in values}
 
     @pytest.mark.parametrize(
         ("name", "normalized"),

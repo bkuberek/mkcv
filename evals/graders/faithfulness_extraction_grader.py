@@ -3,13 +3,13 @@
 from evals.graders.extracted_claims import ExtractedClaims, extract_claims
 from evals.graders.grading_context import GradingContext
 from evals.graders.text_normalization import (
-    bare_digits,
+    claims_term,
     contains_phrase,
-    contains_term,
     extract_numbers,
+    is_supported_number,
     normalize_company,
-    normalize_number,
     normalize_text,
+    supported_numbers,
 )
 from evals.models.grade import Grade
 
@@ -60,23 +60,14 @@ class FaithfulnessExtractionGrader:
 def _check_numbers(
     claims: ExtractedClaims, kb_text: str, violations: list[dict[str, str]]
 ) -> int:
-    supported = _supported_numbers(kb_text)
+    supported = supported_numbers(kb_text)
     checked = 0
     for bullet in claims.bullets:
         for token in extract_numbers(bullet):
             checked += 1
-            normalized = normalize_number(token)
-            if normalized not in supported and bare_digits(normalized) not in supported:
+            if not is_supported_number(token, supported):
                 violations.append({"type": "number", "text": token})
     return checked
-
-
-def _supported_numbers(kb_text: str) -> set[str]:
-    """Return the knowledge base's numbers, each with and without its unit."""
-    normalized = {
-        normalize_number(token) for token in extract_numbers(kb_text, skip_dates=False)
-    }
-    return normalized | {bare_digits(number) for number in normalized}
 
 
 def _check_names(
@@ -100,6 +91,6 @@ def _check_forbidden(
 ) -> int:
     texts = [*claims.bullets, *claims.skills]
     for term in terms:
-        if any(contains_term(text, term) for text in texts):
+        if any(claims_term(text, term) for text in texts):
             violations.append({"type": "forbidden_claim", "text": term})
     return len(terms)

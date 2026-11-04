@@ -402,7 +402,7 @@ class TestOverrides:
         self, run: Callable[..., int], out_dir: Path
     ) -> None:
         run("--judge", "openai:gpt-6.1-sol")
-        judge = _manifest(out_dir).judge
+        [judge] = _manifest(out_dir).panel
         assert (judge.provider, judge.model) == ("openai", "gpt-6.1-sol")
 
     def test_a_judge_without_a_colon_exits_two_with_a_usage_message(
@@ -466,6 +466,8 @@ class TestBootstrapReference:
                 str(matrix_file),
                 "--fixtures",
                 str(tmp_fixtures),
+                "--state",
+                str(tmp_fixtures.parent / "bootstrap-state"),
                 *(["--yes"] if yes else []),
                 *extra,
             ]
@@ -478,7 +480,7 @@ class TestBootstrapReference:
     ) -> None:
         assert bootstrap() == 0
         case = load_cases(tmp_fixtures)[0]
-        assert len(case.reference_stages()) == 4
+        assert len(case.reference_stages()) == 5
 
     def test_it_reminds_the_user_to_review_before_committing(
         self, bootstrap: Callable[..., int], capsys: pytest.CaptureFixture[str]
@@ -606,8 +608,7 @@ class TestJudge:
         self, run: Callable[..., int], out_dir: Path
     ) -> None:
         run()
-        reason = _manifest(out_dir).judge_skipped
-        assert reason is not None
+        reason = _manifest(out_dir).skipped_judges["anthropic/claude-opus-5-5"]
         assert "ANTHROPIC_API_KEY" in reason
 
     def test_the_records_have_no_judge_grades(
@@ -650,7 +651,7 @@ class TestJudge:
         select = next(r for r in _records(out_dir) if r.stage is StageKey.SELECT)
         assert select.judge == "stub/stub-model"
         assert "selection_judge" in [g.name for g in select.grades]
-        assert _manifest(out_dir).judge_skipped is None
+        assert _manifest(out_dir).skipped_judges == {}
 
     def test_strict_refuses_a_judge_without_a_key_before_any_call(
         self,
@@ -885,3 +886,64 @@ class TestOfflineRunWithoutKeys:
         assert "skipping google/gemini-4-argon" in captured.err
         assert "Total: $0.0000" in captured.out
         assert "No results" in (out_dir / "report.md").read_text()
+
+
+TOURNAMENT = """
+[tournament]
+screening_cases = ["alpha-match"]
+"""
+
+
+class TestRounds:
+    @pytest.fixture
+    def tournament_matrix(self, tmp_path: Path) -> Path:
+        path = tmp_path / "tournament.toml"
+        path.write_text(TOURNAMENT + STUB_MATRIX, encoding="utf-8")
+        return path
+
+    def test_run_executes_both_rounds(
+        self, run: Callable[..., int], tournament_matrix: Path, out_dir: Path
+    ) -> None:
+        assert run(matrix=tournament_matrix) == 0
+        assert {r.round for r in _records(out_dir)} == {"screening", "finals"}
+
+    def test_the_round_flag_runs_only_the_screening(
+        self, run: Callable[..., int], tournament_matrix: Path, out_dir: Path
+    ) -> None:
+        assert run("--round", "screening", matrix=tournament_matrix) == 0
+        assert {r.round for r in _records(out_dir)} == {"screening"}
+
+    def test_resume_runs_the_finals_of_a_screened_run(
+        self, run: Callable[..., int], tournament_matrix: Path, out_dir: Path
+    ) -> None:
+        run("--round", "screening", matrix=tournament_matrix)
+        run_id = _manifest(out_dir).run_id
+        assert (
+            run("--round", "finals", "--resume", str(out_dir), matrix=tournament_matrix)
+            == 0
+        )
+        assert {r.round for r in _records(out_dir)} == {"screening", "finals"}
+        assert _manifest(out_dir).run_id == run_id
+
+    def test_finals_without_a_screened_run_exit_two(
+        self, run: Callable[..., int], tournament_matrix: Path
+    ) -> None:
+        assert run("--round", "finals", matrix=tournament_matrix) == 2
+
+    def test_single_round_turns_the_tournament_off(
+        self, run: Callable[..., int], tournament_matrix: Path, out_dir: Path
+    ) -> None:
+        assert run("--single-round", matrix=tournament_matrix) == 0
+        assert {r.round for r in _records(out_dir)} == {None}
+
+    def test_the_estimate_shows_both_rounds(
+        self,
+        run: Callable[..., int],
+        tournament_matrix: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        run("--round", "screening", matrix=tournament_matrix)
+        out = capsys.readouterr().out
+        assert "Screening:" in out
+        assert "Finals:" in out
+        assert "Total (screening + finals)" in out

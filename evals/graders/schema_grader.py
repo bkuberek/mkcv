@@ -5,6 +5,8 @@ from pydantic import BaseModel, ValidationError
 from evals.graders.grading_context import GradingContext
 from evals.graders.resume_yaml import load_cv, structure_problems
 from evals.models.grade import Grade
+from mkcv.core.models.cover_letter import CoverLetter
+from mkcv.core.models.cover_letter_review import CoverLetterReview
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.review_report import ReviewReport
@@ -18,6 +20,8 @@ STAGE_MODELS: dict[StageKey, type[BaseModel]] = {
     StageKey.SELECT: ExperienceSelection,
     StageKey.TAILOR: TailoredContent,
     StageKey.REVIEW: ReviewReport,
+    StageKey.COVER_LETTER_GENERATE: CoverLetter,
+    StageKey.COVER_LETTER_REVIEW: CoverLetterReview,
 }
 
 
@@ -25,8 +29,10 @@ class SchemaGrader:
     """Scores 1.0 when the output validates against its stage's model.
 
     Stages 1-3 and 5 validate the artifact against ``JDAnalysis``,
-    ``ExperienceSelection``, ``TailoredContent``, or ``ReviewReport``. Stage 4
-    needs YAML with a ``cv.name`` string and a non-empty ``cv.sections``.
+    ``ExperienceSelection``, ``TailoredContent``, or ``ReviewReport``, and the
+    cover letter stages against ``CoverLetter`` or ``CoverLetterReview``.
+    Stage 4 needs YAML with a ``cv.name`` string and a non-empty
+    ``cv.sections``.
     """
 
     name = "schema"

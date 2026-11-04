@@ -2,14 +2,26 @@
 
 import re
 from collections.abc import Iterator
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 NUMBER = re.compile(
-    r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?\s?(?:%|percent|x|k|m|b)?(?![\w])",
+    r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?\s?"
+    r"(?:%|percent|x|thousand|million|billion|mn|bn|k|m|b)?(?![\w])",
     re.IGNORECASE,
 )
+_SCALES = {
+    "k": Decimal(1_000),
+    "thousand": Decimal(1_000),
+    "m": Decimal(1_000_000),
+    "mn": Decimal(1_000_000),
+    "million": Decimal(1_000_000),
+    "b": Decimal(1_000_000_000),
+    "bn": Decimal(1_000_000_000),
+    "billion": Decimal(1_000_000_000),
+}
+_VALUE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*([a-z%]*)")
 ISO_DATE = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
-NUMBER_UNITS = "%xkmb"
 COMPANY_SUFFIXES = frozenset({"inc", "llc", "ltd", "corp", "co"})
 _NON_WORD_RUNS = re.compile(r"[\W_]+")
 
@@ -24,15 +36,38 @@ def extract_numbers(text: str, *, skip_dates: bool = True) -> list[str]:
     return [match.group().strip().rstrip(",") for match in NUMBER.finditer(cleaned)]
 
 
-def normalize_number(raw: str) -> str:
-    """Return ``raw`` without ``$``, commas, or spaces, lowercase, with ``%``."""
-    squeezed = re.sub(r"\s+", "", raw.lower())
-    return squeezed.replace("$", "").replace(",", "").replace("percent", "%")
+def number_values(token: str) -> set[Decimal]:
+    """Return the quantities a number as written can stand for.
+
+    That is its value with any scale applied (``9.8k`` and ``9,800`` are both
+    9800, ``$1.2M`` and ``1.2 million`` both 1,200,000) and the bare digits
+    as written (9.8, 1.2), so a figure the knowledge base gives with a
+    different scale word still matches. Thousands separators, ``$``, and the
+    ``%`` or ``x`` unit are ignored. Empty when ``token`` has no digits.
+    """
+    match = _VALUE.search(token.lower())
+    if match is None:
+        return set()
+    try:
+        digits = Decimal(match.group(1).replace(",", ""))
+    except InvalidOperation:
+        return set()
+    scale = _SCALES.get(match.group(2), Decimal(1))
+    return {digits, digits * scale}
 
 
-def bare_digits(normalized: str) -> str:
-    """Return a normalized number without its unit (``2.4m`` becomes ``2.4``)."""
-    return normalized.rstrip(NUMBER_UNITS)
+def supported_numbers(text: str) -> set[Decimal]:
+    """Return every quantity the numbers in ``text`` (dates included) stand for."""
+    return {
+        value
+        for token in extract_numbers(text, skip_dates=False)
+        for value in number_values(token)
+    }
+
+
+def is_supported_number(token: str, supported: set[Decimal]) -> bool:
+    """Return True if ``token`` (as written) states a quantity in ``supported``."""
+    return bool(number_values(token) & supported)
 
 
 def normalize_text(text: str) -> str:
@@ -51,6 +86,87 @@ def normalize_company(name: str) -> str:
 def contains_phrase(normalized_text: str, normalized_phrase: str) -> bool:
     """Return True if the phrase occurs in the text as whole words."""
     return f" {normalized_phrase} " in f" {normalized_text} "
+
+
+COMMON_WORD_NAMES = frozenset(
+    {
+        "airflow",
+        "amplitude",
+        "apollo",
+        "beam",
+        "box",
+        "chef",
+        "chorus",
+        "clarity",
+        "crystal",
+        "dart",
+        "delta",
+        "envoy",
+        "falcon",
+        "flume",
+        "go",
+        "gong",
+        "gusto",
+        "heap",
+        "helm",
+        "hive",
+        "iceberg",
+        "julia",
+        "keystone",
+        "looker",
+        "mode",
+        "nomad",
+        "notion",
+        "oracle",
+        "outreach",
+        "packer",
+        "pig",
+        "prism",
+        "puppet",
+        "python",
+        "ruby",
+        "rust",
+        "sage",
+        "salt",
+        "sap",
+        "segment",
+        "sentinel",
+        "sketch",
+        "slack",
+        "snowflake",
+        "spark",
+        "square",
+        "storm",
+        "stripe",
+        "swift",
+        "tableau",
+        "vault",
+        "workday",
+        "zoom",
+    }
+)
+"""Tool and product names that are also common English words.
+
+A single-word forbidden claim spelled with capitals that is one of these
+matches only in that exact case, so the verb in "spark interest" is not a
+claim of Spark. Add a name here when a case forbids it.
+"""
+
+
+def claims_term(text: str, term: str) -> bool:
+    """Return True if ``text`` claims the forbidden ``term``.
+
+    The term must occur as whole words. A single-word term that is also a
+    common English word (``COMMON_WORD_NAMES``) and is spelled with capitals
+    must match in exact case; every other term matches in any case.
+    """
+    exact = (
+        " " not in term.strip()
+        and term.lower() in COMMON_WORD_NAMES
+        and term != term.lower()
+    )
+    pattern = rf"(?<!\w){re.escape(term)}(?!\w)"
+    return re.search(pattern, text, 0 if exact else re.IGNORECASE) is not None
 
 
 def contains_term(text: str, term: str) -> bool:

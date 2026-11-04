@@ -353,6 +353,7 @@ def create_pipeline_service_for_stage_configs(
     *,
     preset_name: str = "standard",
     theme: str = "sb2nov",
+    providers: Mapping[str, LLMPort] | None = None,
 ) -> PipelineService:
     """Create a PipelineService that runs exactly the given stage configs.
 
@@ -366,6 +367,8 @@ def create_pipeline_service_for_stage_configs(
         stage_configs: Provider, model, and temperature for stages 1 to 5.
         preset_name: Preset or legacy profile name (content density only).
         theme: Resolved theme name.
+        providers: LLM adapters to use, by provider name, instead of
+            creating them (the eval harness passes batching adapters).
 
     Returns:
         PipelineService with one LLM adapter per provider in ``stage_configs``.
@@ -380,6 +383,7 @@ def create_pipeline_service_for_stage_configs(
         stage_configs,
         preset_name=preset_name,
         theme=theme,
+        providers=providers,
     )
 
 
@@ -390,10 +394,15 @@ def _assemble_pipeline_service(
     *,
     preset_name: str,
     theme: str,
+    providers: Mapping[str, LLMPort] | None = None,
 ) -> PipelineService:
     """Wire a PipelineService from already-decided stage configs."""
     return PipelineService(
-        providers=_create_providers(config, stage_configs, registry),
+        providers=(
+            dict(providers)
+            if providers is not None
+            else _create_providers(config, stage_configs, registry)
+        ),
         prompts=_create_prompt_loader(config),
         artifacts=FileSystemArtifactStore(),
         stage_configs=stage_configs,
@@ -524,6 +533,51 @@ def create_cover_letter_service(
         renderer=renderer,
         stage_configs=stage_configs,
         design=design,
+        catalog=registry.catalog,
+    )
+
+
+def create_cover_letter_service_for_stage_configs(
+    config: Configuration,
+    stage_configs: dict[int, StageConfig],
+    *,
+    providers: Mapping[str, LLMPort] | None = None,
+) -> CoverLetterService:
+    """Create a CoverLetterService that runs exactly the given stage configs.
+
+    Nothing is resolved: no profile, per-stage config, or command-line flag
+    changes which provider or model a stage uses. The eval harness uses this
+    to pin both cover letter stages to the model under evaluation.
+
+    Args:
+        config: Application configuration (providers, keys, catalog).
+        stage_configs: Provider, model, and temperature for stages 1 and 2.
+        providers: LLM adapters to use, by provider name, instead of
+            creating them.
+
+    Returns:
+        CoverLetterService with one LLM adapter per provider in ``stage_configs``.
+
+    Raises:
+        ConfigurationError: If a provider is unknown or the provider or
+            model-catalog settings are invalid.
+    """
+    from mkcv.adapters.renderers.typst_cover_letter import (
+        TypstCoverLetterRenderer,
+    )
+
+    registry = _registry(config)
+    return CoverLetterService(
+        providers=(
+            dict(providers)
+            if providers is not None
+            else _create_providers(config, stage_configs, registry)
+        ),
+        prompts=_create_prompt_loader(config),
+        artifacts=FileSystemArtifactStore(),
+        renderer=TypstCoverLetterRenderer(),
+        stage_configs=stage_configs,
+        design=_build_cover_letter_design(config),
         catalog=registry.catalog,
     )
 

@@ -1,22 +1,27 @@
 """Read a run directory and write its summary and report; publish a run."""
 
-import json
 import shutil
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from evals.batch.usage_ledger import read_usage
+from evals.graders.stage_graders import PRIMARY_METRIC
 from evals.harness.run_files import (
     MANIFEST_FILE,
     PUBLISHED_FILES,
     REPORT_FILE,
     RESULTS_FILE,
     SUMMARY_FILE,
+    USAGE_FILE,
 )
+from evals.harness.tournament import decide_survivors
 from evals.models.eval_record import EvalRecord
 from evals.models.run_manifest import RunManifest
+from evals.models.run_summary import RunSummary
 from evals.report.aggregator import aggregate
 from evals.report.markdown_report import render_markdown
+from evals.report.profile_suggester import not_evaluated, suggest_profiles
 from evals.report.recommender import recommend
 
 
@@ -69,14 +74,39 @@ def write_report_files(out_dir: Path) -> None:
     """
     records = read_records(out_dir)
     manifest = read_manifest(out_dir)
-    summaries = aggregate(records)
-    recommendations = recommend(summaries)
+    settings = manifest.matrix.recommendation
+    screened = [record for record in records if record.round == "screening"]
+    deciding = [record for record in records if record.round != "screening"]
+    screening_only = not deciding and bool(screened)
+    summaries = aggregate(deciding or screened, settings)
+    recommendations = recommend(summaries, tie_epsilon=settings.tie_epsilon)
+    decisions = (
+        decide_survivors(aggregate(screened, settings), manifest.matrix.tournament)
+        if screened
+        else []
+    )
+    summary = RunSummary(
+        run_id=manifest.run_id,
+        primary_metrics=PRIMARY_METRIC,
+        stages=summaries,
+        recommendations=recommendations,
+        suggested_profiles=suggest_profiles(recommendations),
+        screening=decisions,
+        not_evaluated=not_evaluated(summaries),
+    )
     (out_dir / SUMMARY_FILE).write_text(
-        json.dumps([s.model_dump(mode="json") for s in summaries], indent=2) + "\n",
-        encoding="utf-8",
+        summary.model_dump_json(indent=2) + "\n", encoding="utf-8"
     )
     (out_dir / REPORT_FILE).write_text(
-        render_markdown(manifest, summaries, recommendations), encoding="utf-8"
+        render_markdown(
+            manifest,
+            summaries,
+            recommendations,
+            screening=decisions,
+            screening_only=screening_only,
+            usage=read_usage(out_dir / USAGE_FILE),
+        ),
+        encoding="utf-8",
     )
 
 
@@ -94,6 +124,7 @@ def publish_run(out_dir: Path, published_root: Path) -> Path:
         ValueError: If the run ID is not a plain folder name.
     """
     missing = next((n for n in PUBLISHED_FILES if not (out_dir / n).is_file()), None)
+    optional = [USAGE_FILE] if (out_dir / USAGE_FILE).is_file() else []
     if missing is not None:
         raise FileNotFoundError(
             f"No {missing} in {out_dir}; run the report command first"
@@ -103,7 +134,7 @@ def publish_run(out_dir: Path, published_root: Path) -> Path:
         raise ValueError(f"Cannot publish a run with the ID '{run_id}'")
     destination = published_root / run_id
     destination.mkdir(parents=True, exist_ok=True)
-    for name in PUBLISHED_FILES:
+    for name in (*PUBLISHED_FILES, *optional):
         shutil.copyfile(out_dir / name, destination / name)
     return destination
 

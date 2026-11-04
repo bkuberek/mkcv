@@ -1,16 +1,108 @@
-# Default eval matrix: the models to evaluate, the judge, and the reference model.
+# Default eval matrix: the models to evaluate, the judges, and the reference model.
 # Mkcv providers, keys, and catalog overrides come from the normal mkcv settings.
 
 [run]
-repeats = 1
+repeats = 2                         # finals repeats (and a single round's)
 concurrency = 2
-stages = ["analyze", "select", "tailor", "structure", "review"]
+stages = [
+    "analyze",
+    "select",
+    "tailor",
+    "structure",
+    "review",
+    "cover_letter.generate",
+    "cover_letter.review",
+]
+# Analyze and structure are graded by rule; add them here to judge them too
+# (structure then gets a faithfulness judge; analyze has no judge rubric).
+judged_stages = [
+    "select",
+    "tailor",
+    "review",
+    "cover_letter.generate",
+    "cover_letter.review",
+]
 cases = ["*"]                       # case IDs or "*"
 preset = "standard"
 
-[judge]
+# Two rounds. Screening runs every model on the cases below (plus every review
+# probe) once, graded like the finals by every judge but the one from the
+# model's own provider. A model is dropped
+# from a stage only if it fails a hard gate or trails the leader by more than
+# margin plus the noise of that lead; the top keep_top models and the best of
+# each provider always go on. The finals run the survivors on every case with
+# the whole judge panel and [run] repeats.
+[tournament]
+enabled = true
+screening_repeats = 1
+margin = 0.05
+keep_top = 3
+keep_per_provider = 1
+screening_cases = [
+    "backend-platform-match",          # engineering, strong match
+    "data-mlops-stretch",              # data, stretch
+    "security-appsec-stretch",         # security, stretch
+    "product-pm-match",                # career switch, cover letter
+    "clinical-informatics-stretch",    # healthcare, honest gaps, cover letter
+    "accounting-manager-match",        # finance, career break, cover letter
+    "customer-success-ae-overreach",   # overreach, cover letter
+    "marketing-coordinator-match",     # new graduate, sparse KB, cover letter
+]
+
+# Stage and judge calls go out as provider batches (about half price): each
+# model's queue flushes at max_requests or flush_seconds after its first
+# request, and is polled every poll_seconds. Google batches run on Vertex AI,
+# with files under <bucket>/runs/<run id>/; without a bucket Google calls go
+# online. --no-batch sends everything online.
+[batch]
+enabled = true
+max_requests = 1000
+flush_seconds = 30
+poll_seconds = 30
+concurrency = 512
+google_gcs_bucket = "gs://destinyventures-mkcv-evals"
+
+# Discounts on catalog prices. The three providers publish 50% off batches.
+# Cache multipliers price cached prompt tokens against the input price; they
+# are planning values, so check them against each provider's pricing page.
+[pricing]
+batch_discount = { anthropic = 0.5, openai = 0.5, google = 0.5 }
+cache_read_multiplier = { anthropic = 0.1, openai = 0.5, google = 0.25 }
+cache_write_multiplier = { anthropic = 1.25 }
+
+# Judge requests lead with what every output of a case shares (rubric, job
+# description, knowledge base), byte for byte. Anthropic gets it marked for
+# its prompt cache; OpenAI and Gemini cache it on their own. The estimate
+# assumes that prefix is judge_prefix_share of a judge call's input and that
+# estimated_hit_rate of the calls that could reuse it do (best effort in
+# batches). --no-cache turns the markers off.
+[caching]
+enabled = true
+judge_prefix_share = 0.7
+estimated_hit_rate = 0.5
+
+# Quality first: the best eligible model wins; cost only breaks a tie between
+# models within tie_epsilon of the best score. A model that fabricates in more
+# than max_fabrication_rate of its runs is not eligible.
+[recommendation]
+tie_epsilon = 0.01
+max_fabrication_rate = 0.0
+
+# Every judged output is scored by each judge below (the top tier of each
+# provider in the model catalog) and gets their mean. A judge whose provider
+# has no credentials is skipped. One [judge] table instead of [[judges]] is a
+# panel of one.
+[[judges]]
 provider = "anthropic"
 model = "claude-opus-5-5"
+
+[[judges]]
+provider = "openai"
+model = "gpt-6-astra"
+
+[[judges]]
+provider = "google"
+model = "gemini-4-argon"
 
 [reference]
 provider = "anthropic"
