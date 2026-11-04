@@ -101,7 +101,7 @@ class ProviderRegistry:
                 "providers must be a table of provider definitions "
                 "([default.providers.<name>])"
             )
-        for name, body in section.items():
+        for name, body in _normalize_sections(section).items():
             specs[name] = _spec_from_section(name, body, BUILTIN_PROVIDERS.get(name))
         return cls(specs, catalog)
 
@@ -121,7 +121,7 @@ class ProviderRegistry:
             ConfigurationError: If no provider has that name.
         """
         try:
-            return self._specs[name]
+            return self._specs[name.lower()]
         except KeyError:
             raise ConfigurationError(
                 f"Unknown LLM provider '{name}'. "
@@ -344,6 +344,26 @@ _BUILDERS: dict[
     ProviderKind.GOOGLE: _build_google,
     ProviderKind.OPENAI_COMPATIBLE: _build_openai_compatible,
 }
+
+
+def _normalize_sections(section: Mapping[str, object]) -> dict[str, object]:
+    """Lowercase provider names and keys, merging sections that differ by case.
+
+    Env-var layers (``MKCV_PROVIDERS__GOOGLE__PROJECT``) arrive uppercase,
+    while TOML sections are usually lowercase; both must configure the same
+    provider.
+    """
+    merged: dict[str, object] = {}
+    for name, body in section.items():
+        key = str(name).lower()
+        if not isinstance(body, Mapping):
+            merged[key] = body
+            continue
+        existing = merged.get(key)
+        combined = dict(existing) if isinstance(existing, Mapping) else {}
+        combined.update({str(field).lower(): value for field, value in body.items()})
+        merged[key] = combined
+    return merged
 
 
 def _spec_from_section(

@@ -124,9 +124,9 @@ class TestUnknownProvider:
             assert name in message
         assert "[default.providers.<name>]" in message
 
-    def test_names_are_case_sensitive(self, tmp_path: Path) -> None:
+    def test_unknown_name_in_any_case_is_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigurationError):
-            _registry(tmp_path).get("Anthropic")
+            _registry(tmp_path).get("Nope")
 
     def test_create_adapter_rejects_unknown_providers(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigurationError, match="Unknown LLM provider"):
@@ -826,3 +826,37 @@ class TestModelResolution:
     def test_resolving_for_an_unknown_provider_fails(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigurationError):
             _registry(tmp_path).resolve_model("nope", "m")
+
+
+class TestProviderNameCase:
+    """Env-var layers arrive uppercase; provider names are case-insensitive."""
+
+    def test_uppercase_env_section_configures_builtin_provider(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MKCV_PROVIDERS__GOOGLE__API_KEY", "env-key")
+        config = Dynaconf(
+            settings_files=[],
+            environments=True,
+            default_env="default",
+            merge_enabled=True,
+            envvar_prefix="MKCV",
+        )
+        registry = ProviderRegistry.from_config(config, load_model_catalog(config))
+
+        assert registry.resolve_api_key("google") == "env-key"
+        assert "GOOGLE" not in registry.names()
+
+    def test_mixed_case_sections_merge_into_one_provider(self, tmp_path: Path) -> None:
+        registry = _registry(
+            tmp_path,
+            '[default.providers.Ollama]\nbase_url = "http://gpu-box:11434/v1"\n',
+        )
+
+        assert registry.get("ollama").base_url == "http://gpu-box:11434/v1"
+        assert "Ollama" not in registry.names()
+
+    def test_lookup_is_case_insensitive(self, tmp_path: Path) -> None:
+        registry = _registry(tmp_path)
+
+        assert registry.get("Anthropic") is registry.get("anthropic")
