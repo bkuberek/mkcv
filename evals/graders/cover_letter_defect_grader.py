@@ -12,4 +12,4 @@ class CoverLetterDefectGrader(DefectRecallGrader):
 
     def defects(self, case: EvalCase) -> list[str]:
         """The case's ``cover_letter.review_defects``."""
-        return case.cover_letter.review_defects
+        return case.letter.review_defects

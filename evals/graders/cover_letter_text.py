@@ -60,12 +60,12 @@ def word_count(letter: CoverLetter) -> int:
 
 def expected_company(ctx: GradingContext) -> str | None:
     """The company the letter must name: the case's, else the reference JD's."""
-    return ctx.case.cover_letter.company or _analysis_field(ctx, "company")
+    return ctx.case.letter.company or _analysis_field(ctx, "company")
 
 
 def expected_role(ctx: GradingContext) -> str | None:
     """The role the letter must name: the case's, else the reference JD's."""
-    return ctx.case.cover_letter.role or _analysis_field(ctx, "role_title")
+    return ctx.case.letter.role or _analysis_field(ctx, "role_title")
 
 
 def _analysis_field(ctx: GradingContext, name: str) -> str | None:

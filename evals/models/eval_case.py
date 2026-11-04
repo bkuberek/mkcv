@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evals.models.cover_letter_expectations import CoverLetterExpectations
 from evals.stages import EVALUATED_STAGES, STAGE_ORDER
-from mkcv.core.models.stage_key import StageKey
+from mkcv.core.models.stage_key import COVER_LETTER_STAGES, StageKey
 
 COVER_LETTER_FILE = "cover_letter_content.json"
 
@@ -72,8 +72,9 @@ class EvalCase(BaseModel):
         default=None,
         description="Stages this case applies to; None means every stage run",
     )
-    cover_letter: CoverLetterExpectations = Field(
-        default_factory=CoverLetterExpectations
+    cover_letter: CoverLetterExpectations | None = Field(
+        default=None,
+        description="Turns the cover letter stages on for this case",
     )
     fixtures_dir: Path = Field(default=DEFAULT_FIXTURES_DIR, exclude=True, repr=False)
 
@@ -90,14 +91,19 @@ class EvalCase(BaseModel):
         return stages
 
     @property
+    def letter(self) -> CoverLetterExpectations:
+        """The cover letter expectations, the defaults when the case has none."""
+        return self.cover_letter or CoverLetterExpectations()
+
+    @property
     def is_cover_letter_probe(self) -> bool:
         """True when the reference cover letter is hand-written with defects."""
-        return bool(self.cover_letter.review_defects)
+        return bool(self.letter.review_defects)
 
     @property
     def cover_letter_forbidden(self) -> list[str]:
         """What the letter must not claim: forbidden claims and ``must_not_claim``."""
-        terms = [*self.forbidden_claims, *self.cover_letter.must_not_claim]
+        terms = [*self.forbidden_claims, *self.letter.must_not_claim]
         return list(dict.fromkeys(terms))
 
     @property
@@ -126,8 +132,14 @@ class EvalCase(BaseModel):
         return self.jd_path.read_text(encoding="utf-8")
 
     def applies_to(self, stage: StageKey) -> bool:
-        """Return True if this case should be evaluated at ``stage``."""
-        return self.stages is None or stage in self.stages
+        """Return True if this case should be evaluated at ``stage``.
+
+        Without ``stages``, a case runs every resume stage, and the cover
+        letter stages only when it has a ``[cases.cover_letter]`` table.
+        """
+        if self.stages is not None:
+            return stage in self.stages
+        return stage not in COVER_LETTER_STAGES or self.cover_letter is not None
 
     def existing_reference_files(self) -> list[Path]:
         """Return every reference file already on disk, complete stage or not."""

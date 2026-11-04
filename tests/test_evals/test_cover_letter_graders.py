@@ -48,7 +48,7 @@ def _letter(**changes: Any) -> dict[str, Any]:
 
 def _case(**cover_letter: Any) -> EvalCase:
     return CASE.model_copy(
-        update={"cover_letter": CASE.cover_letter.model_copy(update=cover_letter)}
+        update={"cover_letter": CASE.letter.model_copy(update=cover_letter)}
     )
 
 
@@ -309,6 +309,20 @@ class TestFaithfulnessJudge:
         assert "Acme Corp" in user
         assert "MLflow" in user
 
+    async def test_the_faithfulness_judge_sees_the_must_not_rules(self) -> None:
+        judge = self._judge(*["supported"] * 10)
+        await _grade(
+            self.grader,
+            _letter(),
+            case=_case(must_not=["invent a reason for leaving"]),
+            judge=judge,
+            judge_model="m",
+            judge_provider="anthropic",
+        )
+        assert (
+            "invent a reason for leaving" in judge.requests[0]["messages"][1]["content"]
+        )
+
     async def test_one_unsupported_sentence_fails(self) -> None:
         judge = self._judge(*["supported"] * 9, "unsupported")
         grade = await _grade(
@@ -366,6 +380,21 @@ class TestCoverLetterJudge:
         )
         user = judge.requests[0]["messages"][1]["content"]
         assert "Kubernetes migration -> cluster upgrades" in user
+
+    async def test_the_judge_sees_what_the_letter_must_and_must_not_do(
+        self,
+    ) -> None:
+        judge = self._judge()
+        await _grade(
+            self.grader,
+            _letter(),
+            case=_case(must=["lead with OTIF"], must_not=["claim SAP"]),
+            judge=judge,
+            judge_model="m",
+        )
+        user = judge.requests[0]["messages"][1]["content"]
+        assert "lead with OTIF" in user
+        assert "claim SAP" in user
 
     async def test_without_connections_none_are_listed(self) -> None:
         judge = self._judge()

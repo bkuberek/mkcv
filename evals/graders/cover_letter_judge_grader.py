@@ -7,8 +7,8 @@ from evals.graders.rubric_judge_grader import RubricJudgeGrader
 class CoverLetterJudgeGrader(RubricJudgeGrader):
     """Scores evidence, specificity, persuasiveness, and tone (1 to 5 each).
 
-    When the case lists ``should_connect``, the judge sees those connections
-    between the knowledge base and the job as what a strong letter makes.
+    The judge also sees the case's ``must``, ``should_connect``, and
+    ``must_not`` guidance when it has any.
     """
 
     name = "cover_letter_judge"
@@ -23,8 +23,13 @@ class CoverLetterJudgeGrader(RubricJudgeGrader):
 
     def _user_message(self, ctx: GradingContext) -> str:
         message = super()._user_message(ctx)
-        hints = ctx.case.cover_letter.should_connect
-        if not hints:
-            return message
-        listed = "\n".join(f"- {hint}" for hint in hints)
-        return f"{message}\nA strong letter for this job connects:\n{listed}\n"
+        letter = ctx.case.letter
+        for heading, items in (
+            ("A great letter for this job must", letter.must),
+            ("A strong letter for this job connects", letter.should_connect),
+            ("The letter must not", letter.must_not),
+        ):
+            if items:
+                listed = "\n".join(f"- {item}" for item in items)
+                message += f"\n{heading}:\n{listed}\n"
+        return message

@@ -79,7 +79,7 @@ class CoverLetterRulesGrader:
 
 def _check(letter: CoverLetter, ctx: GradingContext) -> dict[str, str | None]:
     """Each checked rule mapped to its problem, or None when it passed."""
-    bounds = ctx.case.cover_letter
+    bounds = ctx.case.letter
     words = word_count(letter)
     body = len(letter.body_paragraphs)
     results: dict[str, str | None] = {

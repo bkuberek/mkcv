@@ -22,7 +22,8 @@ class CoverLetterFaithfulnessJudgeGrader(FaithfulnessJudgeGrader):
             return []
 
     def _user_message(self, ctx: GradingContext, bullets: list[str]) -> str:
-        forbidden = "\n".join(f"- {term}" for term in ctx.case.cover_letter_forbidden)
+        rules = [*ctx.case.cover_letter_forbidden, *ctx.case.letter.must_not]
+        forbidden = "\n".join(f"- {rule}" for rule in rules)
         return (
             f"Knowledge base:\n{ctx.kb_text}\n\n"
             f"Job description:\n{ctx.jd_text}\n\n"

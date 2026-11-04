@@ -96,6 +96,8 @@ persona = "personas/alpha.md"
 jd = "jds/alpha-match.md"
 expected_keywords = ["Kubernetes", "Go"]
 
+[cases.cover_letter]
+
 [[cases]]
 id = "alpha-probe"
 persona = "personas/alpha.md"

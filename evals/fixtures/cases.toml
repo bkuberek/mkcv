@@ -28,6 +28,28 @@ expected_keywords = ["roadmap", "customer interviews", "product requirement docu
 forbidden_claims = []
 review_probe_defects = []
 
+[cases.cover_letter]
+must = [
+    "present Jordan as an associate product manager who came from design",
+    "use the supplier onboarding work (14 customer interviews, a PRD, and a 20% rise in onboarding completion) as the main story",
+]
+should_connect = [
+    "Jordan's supplier platform work at Wonka Industries to Umbrella Analytics' supplier experience role",
+]
+must_not_claim = [
+    "SQL",
+    "A/B testing",
+    "senior product manager",
+    "group product manager",
+]
+must_not = [
+    "claim SQL, A/B testing, or analytics tools",
+    "call Jordan a senior or group product manager",
+    "claim sole ownership of engineering teams",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "product-growth-stretch"
 persona = "personas/product-switcher.md"
@@ -88,6 +110,27 @@ forbidden_claims = ["NI-BC"]
 review_probe_defects = []
 
 # Stretch: an Epic analyst role that wants SQL, Tableau, HL7, and Python.
+
+[cases.cover_letter]
+must = [
+    "explain why Renata moved from the bedside to informatics",
+    "use the admission navigator redesign (52 to 34 minutes) or the 2024-05 Epic upgrade go-live as evidence",
+]
+should_connect = [
+    "her ICU and super-user experience to the role's go-live and super-user program duties",
+    "her Spanish to the preferred bilingual requirement",
+]
+must_not_claim = [
+    "NI-BC",
+]
+must_not = [
+    "claim Epic certification",
+    "claim a completed MSN (it is in progress, expected 2027-05)",
+    "say she built Epic content herself (the analyst team built it)",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "clinical-informatics-stretch"
 persona = "personas/clinical-informatics-nurse.md"
@@ -97,6 +140,28 @@ forbidden_claims = ["SQL", "Tableau", "HL7", "Python"]
 review_probe_defects = []
 
 # Education career switcher: science teacher, now an associate instructional designer.
+
+[cases.cover_letter]
+must = [
+    "be honest that this is an analyst role and that her strength is clinical workflow, requirements, and test scripts",
+    "may express willingness to learn and to complete the sponsored Epic certification",
+]
+should_connect = [
+    "her test scripts and Reporting Workbench use to the role's build validation and reporting duties",
+]
+must_not_claim = [
+    "SQL",
+    "Tableau",
+    "HL7",
+    "Python",
+]
+must_not = [
+    "claim Clarity or any Epic certification",
+    "describe Reporting Workbench and Excel work as database or dashboard development",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "instructional-design-match"
 persona = "personas/teacher-instructional-designer.md"
@@ -106,6 +171,26 @@ forbidden_claims = ["Workday"]
 review_probe_defects = []
 
 # Stretch: a senior developer role at an e-learning studio.
+
+[cases.cover_letter]
+must = [
+    "frame the teaching career as instructional design experience (backward design, assessment, managing adult learners)",
+    "lead with the Corvane Freight Systems dock supervisor onboarding redesign (6 weeks to 4 weeks)",
+]
+should_connect = [
+    "designing for dock workers to Northpine's frontline and distribution center associates",
+]
+must_not_claim = [
+    "Workday",
+    "senior instructional designer",
+]
+must_not = [
+    "call Marcus a senior instructional designer",
+    "claim more than about two years in corporate learning",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "instructional-design-stretch"
 persona = "personas/teacher-instructional-designer.md"
@@ -124,6 +209,26 @@ forbidden_claims = ["Kubernetes"]
 review_probe_defects = []
 
 # Stretch: an offensive application security role with government requirements.
+
+[cases.cover_letter]
+must = [
+    "either address the three short tenures briefly and factually (a layoff, a startup shutdown, a restructuring) or leave them alone; if mentioned, keep the reasons accurate",
+]
+should_connect = [
+    "the IAM hardening (214 to 9 users with long-lived keys) and detections as code to the JD's IAM and detection engineering duties",
+    "payments and PCI DSS experience to a company that holds payroll data",
+]
+must_not_claim = [
+    "Kubernetes",
+    "EKS",
+]
+must_not = [
+    "describe any departure as voluntary or performance-related",
+    "invent a reason for leaving",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "security-appsec-stretch"
 persona = "personas/security-engineer.md"
@@ -142,6 +247,26 @@ forbidden_claims = ["FloQast"]
 review_probe_defects = []
 
 # Stretch: public-company SEC reporting; the persona has only private-company experience.
+
+[cases.cover_letter]
+must = [
+    "address the 2021-06 to 2024-08 career break honestly and briefly (full-time caregiver)",
+    "show what she did during it (volunteer treasurer, CPE) and since (contract senior accountant at Halloway Tool & Die)",
+]
+should_connect = [
+    "cutting the close from 12 to 6 business days to Bramwell's goal of moving from 8 days to 5",
+    "distributor contracts under ASC 606 to Bramwell's rebate programs",
+]
+must_not_claim = [
+    "FloQast",
+]
+must_not = [
+    "hide or misdate the break",
+    "claim she implemented ASC 842 (she only took CPE courses on it)",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "accounting-sec-reporting-stretch"
 persona = "personas/accounting-manager-returner.md"
@@ -160,6 +285,25 @@ forbidden_claims = ["SAP"]
 review_probe_defects = []
 
 # Customer success, mid-senior: owns renewals for an enterprise book.
+
+[cases.cover_letter]
+must = [
+    "build the letter on the Tessaract Home Goods years, especially OTIF (87% to 96%), the network redesign, and the WMS migration with no missed ship days",
+]
+should_connect = [
+    "OTIF results to Hearthline's goal of raising OTIF from 89% to 95%",
+    "the multi-channel (wholesale and direct) network to Hearthline's mix",
+]
+must_not_claim = [
+    "SAP",
+]
+must_not = [
+    "spend the letter on roles before 2009",
+    "invent Hearthline facts beyond the job description",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "customer-success-match"
 persona = "personas/customer-success-manager.md"
@@ -169,6 +313,24 @@ forbidden_claims = ["SQL"]
 review_probe_defects = []
 
 # Overreach: a quota-carrying new-business sales role full of keyword bait.
+
+[cases.cover_letter]
+must = [
+    "lead with the $6.8M book, 112% net revenue retention, and the at-risk accounts saved through the Gainsight health score",
+]
+should_connect = [
+    "procurement software experience at Brightspan to Plumline's legal and procurement customers",
+]
+must_not_claim = [
+    "SQL",
+    "quota attainment",
+]
+must_not = [
+    "claim new-business sales or quota attainment",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "customer-success-ae-overreach"
 persona = "personas/customer-success-manager.md"
@@ -178,6 +340,28 @@ forbidden_claims = ["MEDDICC", "quota", "new logo", "Gong"]
 review_probe_defects = []
 
 # Design, mid-senior: freelancer with eleven client engagements returning in-house.
+
+[cases.cover_letter]
+must = [
+    "present the move from customer success to sales honestly, using the expansion pipeline ($1.1M sourced, $640K closed), renewal negotiation with procurement teams, and work with executive stakeholders",
+]
+should_connect = [
+    "her procurement software domain knowledge to Vantorra's spend management product",
+]
+must_not_claim = [
+    "quota attainment",
+    "MEDDICC",
+    "Gong",
+    "President's Club",
+    "cold calling",
+]
+must_not = [
+    "claim a quota, quota attainment, or new logo sales",
+    "describe her as an account executive",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "design-product-match"
 persona = "personas/freelance-product-designer.md"
@@ -187,6 +371,26 @@ forbidden_claims = ["Amplitude", "Mixpanel"]
 review_probe_defects = []
 
 # Stretch: a UX engineer role that needs production front-end code.
+
+[cases.cover_letter]
+must = [
+    "explain the choice to return in-house after seven years of client work",
+    "use the Vellum Health referral inbox research and redesign as the main story",
+]
+should_connect = [
+    "data-dense healthcare and financial services workflows to Corbel's work queue for regulated industries",
+    "her WCAG 2.1 AA audits to the JD's accessibility goal",
+]
+must_not_claim = [
+    "Amplitude",
+    "Mixpanel",
+]
+must_not = [
+    "describe client engagements as full-time employment at those companies",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "design-ux-engineer-stretch"
 persona = "personas/freelance-product-designer.md"
@@ -205,6 +409,26 @@ forbidden_claims = ["Kubernetes", "Spark"]
 review_probe_defects = []
 
 # Marketing, new grad: a sparse, messy, notes-style knowledge base.
+
+[cases.cover_letter]
+must = [
+    "explain the move from academia to industry (the fixed-term contract ends in 2027-06)",
+    "use the Nordwerk Netz solar forecasting project as evidence of industry work",
+]
+should_connect = [
+    "his probabilistic nowcasting and graph neural network downscaling to Zephyrine's forecasting work",
+    "may mention that he needs visa sponsorship, which the JD offers",
+]
+must_not_claim = [
+    "Kubernetes",
+]
+must_not = [
+    "claim Spark or production model deployment (the Nordwerk Netz model ran in shadow mode only)",
+    "convert his Dr. rer. nat. into anything other than a doctorate equivalent to a PhD",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "marketing-coordinator-match"
 persona = "personas/marketing-new-grad.md"
@@ -214,6 +438,27 @@ forbidden_claims = ["Klaviyo", "Photoshop"]
 review_probe_defects = []
 
 # Overreach: a marketing operations role that wants years of Marketo and Salesforce.
+
+[cases.cover_letter]
+must = [
+    "sound like a new graduate",
+    "use the Juniper & Vale TikTok growth (1,200 to 9,800 followers) and the Larkin State Athletics social media work as evidence",
+    "mention her barista job at Ground Floor Coffee as a link to a coffee company",
+]
+should_connect = [
+    "her short video and Canva skills to the role's content duties",
+]
+must_not_claim = [
+    "Klaviyo",
+    "Photoshop",
+]
+must_not = [
+    "give any sales or conversion number for the influencer discount codes (the knowledge base has none)",
+    "claim full-time marketing experience",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "marketing-ops-overreach"
 persona = "personas/marketing-new-grad.md"
@@ -234,6 +479,27 @@ review_probe_defects = []
 # More review probes, each a hand-written resume with six documented defects
 # (reference/<probe id>/resume.yaml). Like review-probe, they copy their stage
 # 1-3 references from the case that shares their persona and job description.
+
+[cases.cover_letter]
+must = [
+    "choose two or three stories at most, such as the Teradata to lakehouse migration, the streaming claims platform, or data contracts",
+]
+should_connect = [
+    "the migration to the JD's legacy warehouse migration requirement",
+    "the streaming FNOL fraud pipeline to Sablecrest's streaming fraud data",
+    "governance in insurance to a regulated lender",
+]
+must_not_claim = [
+    "Snowflake",
+    "Iceberg",
+    "Flink",
+]
+must_not = [
+    "claim people management or direct reports",
+    "state company facts beyond the job description (news, funding, awards, customer names)",
+    "repeat resume bullets word for word",
+]
+
 [[cases]]
 id = "review-probe-clinical"
 persona = "personas/clinical-informatics-nurse.md"

@@ -421,6 +421,8 @@ company = "Acme Corp"
 role = "Platform Engineer"
 must_not_claim = ["MLflow", "led a team of 20"]
 should_connect = ["Kubernetes migration at Initech -> cluster operations"]
+must = ["lead with the Kubernetes migration"]
+must_not = ["describe a departure as voluntary"]
 min_words = 200
 max_words = 350
 """
@@ -431,21 +433,45 @@ class TestCoverLetterExpectations:
         (fixtures / "cases.toml").write_text(body, encoding="utf-8")
         return load_cases(fixtures)[0]
 
-    def test_a_case_without_a_cover_letter_table_gets_the_defaults(
+    def test_a_case_without_a_cover_letter_table_writes_no_letter(
         self, tmp_fixtures: Path
     ) -> None:
-        letter = load_cases(tmp_fixtures)[0].cover_letter
+        probe = load_cases(tmp_fixtures)[1].model_copy(update={"stages": None})
+        assert probe.cover_letter is None
+        assert not probe.applies_to(StageKey.COVER_LETTER_GENERATE)
+        assert not probe.applies_to(StageKey.COVER_LETTER_REVIEW)
+        assert probe.applies_to(StageKey.TAILOR)
+
+    def test_a_cover_letter_table_turns_the_letter_stages_on(
+        self, tmp_fixtures: Path
+    ) -> None:
+        case = load_cases(tmp_fixtures)[0]
+        assert case.applies_to(StageKey.COVER_LETTER_GENERATE)
+        assert case.applies_to(StageKey.COVER_LETTER_REVIEW)
+
+    def test_stages_that_name_a_letter_stage_need_no_table(
+        self, tmp_fixtures: Path
+    ) -> None:
+        probe = load_cases(tmp_fixtures)[1].model_copy(
+            update={"stages": [StageKey.COVER_LETTER_REVIEW]}
+        )
+        assert probe.applies_to(StageKey.COVER_LETTER_REVIEW)
+
+    def test_an_empty_table_gets_the_defaults(self, tmp_fixtures: Path) -> None:
+        letter = load_cases(tmp_fixtures)[0].letter
         assert (letter.company, letter.role, letter.must_not_claim) == (None, None, [])
         assert (letter.min_words, letter.max_words) == (250, 400)
         assert (letter.should_connect, letter.review_defects) == ([], [])
 
     def test_the_cover_letter_table_is_read(self, tmp_fixtures: Path) -> None:
-        letter = self._case(tmp_fixtures).cover_letter
+        letter = self._case(tmp_fixtures).letter
         assert (letter.company, letter.role) == ("Acme Corp", "Platform Engineer")
         assert letter.should_connect == [
             "Kubernetes migration at Initech -> cluster operations"
         ]
         assert (letter.min_words, letter.max_words) == (200, 350)
+        assert letter.must == ["lead with the Kubernetes migration"]
+        assert letter.must_not == ["describe a departure as voluntary"]
 
     def test_the_letter_must_not_claim_the_forbidden_claims_either(
         self, tmp_fixtures: Path

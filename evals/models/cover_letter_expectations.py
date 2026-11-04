@@ -7,12 +7,15 @@ class CoverLetterExpectations(BaseModel):
     """The checks a cover letter written for one case must pass.
 
     ``company`` and ``role`` default to the ones the case's reference JD
-    analysis names. ``must_not_claim`` adds to the case's ``forbidden_claims``,
-    which the letter must not claim either. ``should_connect`` lists the
-    knowledge base evidence a strong letter ties to the job's top needs; the
-    judge sees it as guidance. ``review_defects`` makes the case a cover
-    letter review probe: its reference ``cover_letter_content.json`` is
-    written by hand with those defects planted in it.
+    analysis names. ``must_not_claim`` holds literal terms the letter must not
+    claim, checked by rule and by the faithfulness judge; it adds to the
+    case's ``forbidden_claims``, which apply to the letter too. ``must``,
+    ``should_connect``, and ``must_not`` are rules only a judge can check
+    (what the letter must do, the knowledge base evidence a strong letter
+    ties to the job, and what it must not do); the judges see them as
+    guidance. ``review_defects`` makes the case a cover letter review probe:
+    its reference ``cover_letter_content.json`` is written by hand with those
+    defects planted in it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -25,9 +28,16 @@ class CoverLetterExpectations(BaseModel):
         default_factory=list,
         description="Terms or claims absent from the knowledge base",
     )
+    must: list[str] = Field(
+        default_factory=list, description="What a great letter must do"
+    )
     should_connect: list[str] = Field(
         default_factory=list,
         description="Knowledge base evidence a strong letter connects to the job",
+    )
+    must_not: list[str] = Field(
+        default_factory=list,
+        description="What the letter must not do, beyond claiming a term",
     )
     min_words: int = Field(default=250, ge=1)
     max_words: int = Field(default=400, ge=1)
