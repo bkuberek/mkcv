@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- version list -->
 
+## v1.5.1 (2026-11-04)
+
+### Bug Fixes
+
+- **cli**: Negative boolean flags turned options on ([#9](https://github.com/bkuberek/mkcv/pull/9),
+  [`6a3d8ee`](https://github.com/bkuberek/mkcv/commit/6a3d8ee0ea3e57683cfd5b140cd5016a5055242b))
+
+
 ## v1.5.0 (2026-11-04)
 
 ### Features
