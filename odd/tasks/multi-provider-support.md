@@ -50,7 +50,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 - [x] T08: Stage resolver, preset split, and settings migration (route: delegated; resolver, presets, settings, factory, validation) - `52e7c47`
 - [x] T09: Model advisor, generation warnings, and `--model-profile` (route: delegated; core service + CLI) - `5cfb69e` (Rich markup fix first: `9d141c0`)
 - [x] T10: `mkcv models` command (route: delegated; new command + app registration + tests) - `6044761`
-- [ ] T11: Provider and model documentation (route: delegated; 6+ docs files + template)
+- [x] T11: Provider and model documentation (route: delegated; 6+ docs files + template) - `4ba61b9` (advisor fix first: `bbd29b9`)
 
 ### P4: Eval harness
 
@@ -105,6 +105,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T08 | `52e7c47` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.resolution_request'` (resolver tests); `AssertionError: assert 'claude-opus-5-5' == 'gpt-6.1-sol'` in `test_standard_preset_honours_a_tailor_override` (the preset beat per-stage config) | 702 focused (stage resolver, factory, config, presets, validation, cli), 2761 full | pending (parent runs `gentle-ai review assess`) |
 | T09 | `5cfb69e` (+ `9d141c0`) | `ModuleNotFoundError: No module named 'mkcv.core.models.model_report'` (advisor/report/warnings tests); `AttributeError: module 'mkcv.cli.commands.generate' does not have the attribute 'create_model_report'` (95 CLI errors); markup fix: `assert '[default.pipeline.stages.select]' in "...set model in  or choose a --model-profile."` (15 failed) | 129 added over the fix commit (2787 to 2916 full); focused: 442 CLI + 156 factory/advisor | pending (parent runs `gentle-ai review assess`) |
 | T10 | `6044761` | `ModuleNotFoundError: No module named 'mkcv.cli.commands.models'` (63 failed, incl. the subprocess help tests) | 66 focused (test_models_command), 2987 full | pending (parent runs `gentle-ai review assess`) |
+| T11 | `4ba61b9` (+ `bbd29b9`) | `assert '# model_profile = "anthropic"' in <workspace mkcv.toml>` and the README assertions (14 failed in `test_workspace_manager.py`); advisor fix: `--model-profile anthropic-economy` produced tier warnings (2 failed against the previous advisor) | 70 focused (test_workspace_manager), 3010 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -196,7 +197,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - `generate` and the chained cover letter: `create_cover_letter_service(settings, provider_override=..., model_profile=..., preset_name=cl_preset)`; the `cover-letter` command passes `preset or "standard"`. The report step runs after preset resolution and before the app-dir, JD, or workspace work, so a bad flag exits 3 before any LLM call.
 - Spec/data mismatch: REQ-MP-9 expects the deprecation note to contain `routes to gemini-3.5-flash-lite`, but design §4.1 and the T01 catalog data read `requests route to gemini-3.5-flash-lite`. The design is authoritative for messages, so the data stays and the tests assert `route to`. Fix the spec wording if it is ever edited.
 - Decision (design gap): `estimated_total_usd` sums every stage in the report (design §8.1 verbatim), so `mkcv models`, which also lists cover letter, KB, and validate, cannot print "per resume run" from it. `ModelReport.resume_run_estimate()` sums only the five pipeline stages (shared helper `summarize_costs`); T10 uses it for the `Estimated cost per resume run (5 stages)` line.
-- Decision (design gap): a tier or tier-unknown warning is skipped when the assigned model is the one mkcv recommends for that stage. Without it `--model-profile local` (source `cli`) printed five warnings that llama3.1:8b is tier minimal with "recommended: ollama/llama3.1:8b". Deprecation warnings are never skipped.
+- Decision (design gap): a tier or tier-unknown warning is skipped when the assigned model is the one mkcv recommends for that stage. Without it `--model-profile local` (source `cli`) printed five warnings that llama3.1:8b is tier minimal with "recommended: ollama/llama3.1:8b". Deprecation warnings are never skipped. T11 widened the rule (`bbd29b9`): the active profile's own model for the stage is exempt too, because `--model-profile anthropic-economy` is labelled `cli` yet is mkcv's choice.
 - Decision (design gap): the offline `stub` provider is never warned about (it has no catalog data, so every `--provider stub` run would claim `stub/stub-model` is unknown).
 - Decision: `_extract_jd_metadata` re-raises `ConfigurationError`. It used to swallow every `MkcvError` and `generate` then reported "Could not determine company/position" (exit 2) for a bad `--model-profile` in a workspace.
 - Decision: `cover_letter_command` resolves the report (`_warn_about_models`) before the output directory is created, so an invalid setup leaves no empty directory behind.
@@ -216,6 +217,19 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Decision: the `Source:` line is derived from the report plus the flags (`cli (--model-profile)`, `cli (--provider)`, `preset (budget)`, `config (pipeline.model_profile or pipeline.provider)`, `default (...)`). The report records where a choice came from but not which config key, so the config line names both.
 - Decision: JSON goes through `console.print(..., markup=False, highlight=False, soft_wrap=True, emoji=False)`, because a narrow terminal would otherwise wrap it, and a catalog note such as `see [default.providers.groq] :rocket:` would lose its bracketed path and gain an emoji. Two tests pin this on a 40-column console.
 - Known limitation: on a non-TTY or narrow terminal Rich wraps table cells at the console width (80 columns when piped). The tests use a 240-column console; scripts should use `--json`.
+
+**T11** (route: delegated writer, trigger: 9 documentation files, the workspace template and README builder, and tests).
+
+- Commits: `bbd29b9 fix(core): do not question the models of a profile the user chose`, then `4ba61b9 docs: document providers, model profiles, and mkcv models`.
+- Verification: `uv run pytest tests/test_adapters/test_workspace_manager.py`: 70 passed; `uv run ruff check src/ tests/` and `uv run ruff format --check src/ tests/`: clean; `uv run mypy src/` (165 files): clean; `uv run pytest`: 3010 passed, exit 0 (clean `__pycache__`); `uv lock --check`: consistent. A fresh `mkcv init` workspace gets the new `mkcv.toml` and README, and `mkcv models` runs inside it.
+- Template tests (RED first): the commented examples in the workspace `mkcv.toml` (model profile, `provider`, `model_warnings`, Google and Groq providers, `[[default.model_catalog]]`) are switched on by the test, parsed as TOML, and fed to `ProviderRegistry.from_config` and `load_model_catalog`, so a documented example cannot rot into an invalid one. README tests assert `--preset` (not `--profile`) and `--model-profile` usage, the `mkcv models` row, and that no command in the table has an empty description.
+- Docs: new `docs/models.md` (providers, the four profiles plus three economy variants with provisional labels, stage requirements, estimated cost per profile, the four ways to choose, the numbered precedence list from design §6.5, warnings, custom providers and catalog entries, capability caveats, an Evidence section, the verified-facts tables with source links and the 2026-11-03 retrieval date, and the exit-code note). `README.md`, `docs/specs/cli-interface.md` (new `models` and `cover-letter` sections, exit code 3 row, env vars), `docs/specs/architecture.md`, `docs/specs/data-models.md`, and `AGENTS.md` describe the registry, catalog, resolver, advisor, and `ConfigurationError`. The behaviour change (per-stage config is now honoured by `generate`) is called out in the README, `models.md`, and the CLI spec. `CLAUDE.md` is untouched (owner-maintained).
+- Corrections of claims the old docs made that were never true: (1) `mkcv.toml` section headers need the `default.` prefix, and README and `examples/mkcv.toml` used `[pipeline.stages.*]`, which is silently ignored (checked against `Configuration.load_workspace_config`); `examples/mkcv.toml` now uses the prefix. (2) `docs/specs/cli-interface.md` listed `MKCV_ANTHROPIC_API_KEY` and friends; the old factory and the registry both read `ANTHROPIC_API_KEY` and the other providers' own names, so the table was rewritten. (3) The exit-code 3 row promised "missing API key"; a missing key warns and falls back to the stub.
+- Files outside T11's list, all inside the allowed surfaces: `docs/DEVELOPMENT.md` (stale "Adding an LLM Provider" steps and provider list), `examples/mkcv.toml`, `examples/mkcv-demo/README.md` (regenerated with `mkcv init --update-readme`, which changed only that file), and the `--provider` help text of `kb`.
+- The workspace README builder gained descriptions for `cover-letter`, `kb`, and `models` (its table showed an empty description for `cover-letter`) and uses `--preset`; the old text told users to run `--profile concise|standard|comprehensive`, which was never valid.
+- Acceptance note: the literal `rg -n "\-\-profile" README.md` also matches `mkcv models --profiles`; the only mention of the old `--profile` flag is the deprecation note.
+- `docs/models.md` describes the eval harness as planned (its "Evidence" section). T17 adds "How recommendations are made" and should replace that paragraph with the real process.
+- Follow-up (not in this feature): `[default.defaults] profile = "standard"` in the workspace template is read by nothing.
 
 ## Decisions (rationale in `design.md` §1 and §15)
 
@@ -241,4 +255,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-T01-T08 are implemented and committed on `feat/multi-provider-support`. Next: T09 (model advisor, warnings, `--model-profile`); fix the Rich markup swallowing of bracketed error text there (see the T08 notes), then T10 and T11.
+T01-T11 are implemented and committed on `feat/multi-provider-support` (P1-P3 complete). Next: T12 (eval package scaffolding, models, case loading, and cost estimate); it needs `create_provider_registry` and `create_model_report`'s resolver pieces from the factory, `STAGE_REQUIREMENTS`, and `load_model_catalog`. P4 (T12-T17) is the remaining work, then the owner actions at the end of `tasks.md`.
