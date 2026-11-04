@@ -9,12 +9,14 @@ from mkcv.core.models.application_metadata import ApplicationMetadata
 from mkcv.core.models.ats_check import ATSCheck
 from mkcv.core.models.bullet_review import BulletReview
 from mkcv.core.models.compensation import Compensation
+from mkcv.core.models.document_content import DocumentContent
 from mkcv.core.models.earlier_experience_section import EarlierExperienceSection
 from mkcv.core.models.experience_entry import ExperienceEntry
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.jd_document import JDDocument
 from mkcv.core.models.jd_frontmatter import JDFrontmatter
+from mkcv.core.models.kb_generation_result import KBGenerationResult
 from mkcv.core.models.kb_validation import KBValidationResult
 from mkcv.core.models.keyword_coverage import KeywordCoverage
 from mkcv.core.models.languages_section import LanguagesSection
@@ -51,12 +53,14 @@ __all__ = [
     "ApplicationMetadata",
     "BulletReview",
     "Compensation",
+    "DocumentContent",
     "EarlierExperienceSection",
     "ExperienceEntry",
     "ExperienceSelection",
     "JDAnalysis",
     "JDDocument",
     "JDFrontmatter",
+    "KBGenerationResult",
     "KBValidationResult",
     "KeywordCoverage",
     "LanguagesSection",

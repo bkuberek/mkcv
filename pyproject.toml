@@ -37,6 +37,9 @@ dependencies = [
     "rendercv[full]>=2.7",
     "pypdf>=6.9.1",
     "prompt_toolkit>=3.0",
+    "python-docx>=1.1",
+    "beautifulsoup4>=4.12",
+    "html2text>=2024.2",
 ]
 
 [project.urls]
@@ -49,6 +52,11 @@ Changelog = "https://github.com/bkuberek/mkcv/blob/main/CHANGELOG.md"
 mkcv = "mkcv.cli.app:main"
 
 [project.optional-dependencies]
+kb = [
+    "python-docx>=1.1",
+    "beautifulsoup4>=4.12",
+    "html2text>=2024.2",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -90,7 +98,7 @@ warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["dynaconf", "anthropic", "anthropic.*", "openai", "openai.*", "rendercv", "rendercv.*"]
+module = ["dynaconf", "anthropic", "anthropic.*", "openai", "openai.*", "rendercv", "rendercv.*", "docx", "docx.*", "bs4", "bs4.*", "html2text"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

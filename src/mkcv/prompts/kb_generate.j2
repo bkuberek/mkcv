@@ -1,0 +1,161 @@
+{# Generate a structured knowledge base from source documents.
+
+Context variables:
+  - document_texts: list[dict] — extracted documents, each with 'filename' and 'text'
+  - kb_name: str — name for the KB title heading (default "Career")
+
+Output: Markdown matching the mkcv knowledge base format.
+#}
+You are an expert career knowledge base compiler. Your job is to synthesize
+source documents into a single, comprehensive, structured Markdown knowledge
+base that can be used by mkcv to generate tailored resumes.
+
+## Source Documents
+
+{% for doc in document_texts %}
+### Document: {{ doc.filename }}
+
+{{ doc.text }}
+
+{% endfor %}
+
+## Instructions
+
+Synthesize ALL source documents into a single structured Markdown knowledge
+base. Follow the exact format specification below.
+
+### CRITICAL: LOSSLESS Synthesis
+
+You MUST preserve ALL information from the source documents. This is the
+candidate's career record — every detail matters:
+
+- **Every role, position, and employer** — include all of them, even short stints
+- **Every bullet point, achievement, and responsibility** — do not summarize away detail
+- **Every metric, number, and quantified result** — copy exactly as stated
+- **Every technology, tool, and skill mentioned** — include all of them
+- **Every date, duration, and time period** — preserve exactly
+- **Every education entry, certification, and credential** — include all
+- **Every project, publication, and award** — include all
+- **Contact information** — name, email, phone, location, URLs, social profiles
+
+Do NOT:
+- Summarize multiple bullets into one
+- Drop roles you consider "less important"
+- Omit technologies that seem outdated
+- Round or approximate numbers
+- Invent or infer information not present in the sources
+- Skip any section of the source documents
+
+When the same information appears in multiple documents, merge intelligently:
+- Use the most detailed version of overlapping content
+- Combine non-overlapping details from each source
+- For conflicting facts (e.g., different dates), prefer the source that appears
+  more authoritative or recent, and note the discrepancy in a comment
+
+### Knowledge Base Format
+
+Produce Markdown with these sections in order. Use the exact heading structure
+shown. If a section has no data in the sources, omit it entirely — do NOT
+include empty sections or placeholder text.
+
+```
+# {{ kb_name | default("Career") }} -- Career Knowledge Base
+
+## Personal Information
+
+| Field    | Value              |
+|----------|--------------------|
+| Name     | Full Name          |
+| Email    | email@example.com  |
+| Phone    | +1 234 567 8900    |
+| Location | City, State/Country|
+| LinkedIn | linkedin.com/in/…  |
+| GitHub   | github.com/…       |
+| Website  | https://…          |
+
+## Languages
+
+- English (native)
+- Spanish (proficient)
+
+## Professional Summary
+
+2-4 sentences summarizing the candidate's career arc, core expertise,
+years of experience, and key differentiators. Write in third person
+or neutral tone. Base this ENTIRELY on facts from the source documents.
+
+## Technical Skills -- Master List
+
+### Category Name (e.g., Programming Languages)
+- Skill (years if known) -- notes if available
+- Another Skill
+
+### Another Category (e.g., Cloud & Infrastructure)
+- Skill
+- Another Skill
+
+(Group skills into logical categories. Include ALL technologies
+mentioned across all source documents.)
+
+## Career History
+
+### Company Name — Job Title
+**Period:** Month Year - Month Year (or "present")
+**Location:** City, State/Country (if known)
+
+- Achievement or responsibility using XYZ formula where possible
+- Another bullet point — preserve metrics exactly as stated
+- Continue with ALL bullets from the source documents for this role
+
+(Repeat for EVERY role. Order reverse-chronologically — most recent first.
+Each role should have its own ### heading.)
+
+## Education
+
+### Institution Name — Degree, Field of Study
+**Period:** Year - Year
+**Location:** City, State/Country (if known)
+
+- Notable coursework, honors, GPA, or achievements (if mentioned)
+
+## Projects
+
+### Project Name
+- Description and details
+- Technologies used
+- Outcomes or impact
+
+## Certifications
+
+- Certification Name — Issuing Body (Year)
+```
+
+### Formatting Rules
+
+1. **Headings** — Use `#` for the title, `##` for major sections, `###` for
+   subsections (individual roles, education entries, projects).
+2. **Tables** — Use Markdown tables only for Personal Information.
+3. **Bullets** — Use `-` for all bullet lists. Indent with 2 spaces for
+   sub-bullets.
+4. **Dates** — Preserve the exact format from the source. If only years are
+   available, use years. If month+year, use "Month Year" or "YYYY-MM".
+5. **Bold** — Use `**bold**` for field labels like Period, Location.
+6. **Comments** — Use `<!-- comment -->` for any notes about conflicting
+   information between sources.
+
+### Content Quality Rules
+
+1. **XYZ-formula bullets** — Where the source provides enough detail, structure
+   bullets as: [Action verb] + [what was done] + [result/impact]. Do NOT
+   rewrite bullets that would lose specificity — preserve the original
+   phrasing if it is already detailed.
+2. **No fabrication** — Every fact must trace to a source document. If a source
+   says "improved performance," write "improved performance" — do NOT add
+   percentages or metrics that are not in the source.
+3. **Deduplication** — When multiple sources describe the same role or
+   achievement, merge into one entry with the combined detail from all sources.
+   Do not create duplicate role entries.
+4. **Completeness over polish** — This is a knowledge base, not a resume.
+   Include everything. The AI pipeline will select and tailor later.
+
+Respond with the Markdown knowledge base only. No commentary, no code fences.

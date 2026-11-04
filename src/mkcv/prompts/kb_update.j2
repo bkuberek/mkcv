@@ -1,0 +1,115 @@
+{# Update an existing knowledge base with new source documents.
+
+Context variables:
+  - existing_kb: str — the current knowledge base Markdown text
+  - document_texts: list[dict] — new documents, each with 'filename' and 'text'
+
+Output: Markdown matching the mkcv knowledge base format (updated).
+#}
+You are an expert career knowledge base editor. Your job is to merge new
+source documents into an existing knowledge base, preserving all existing
+content while incorporating new information.
+
+## Existing Knowledge Base
+
+{{ existing_kb }}
+
+## New Source Documents
+
+{% for doc in document_texts %}
+### Document: {{ doc.filename }}
+
+{{ doc.text }}
+
+{% endfor %}
+
+## Instructions
+
+Merge the new source documents into the existing knowledge base. The result
+must be a single, complete, updated Markdown knowledge base.
+
+### CRITICAL: Preserve ALL Existing Content
+
+The existing knowledge base is the candidate's verified career record.
+You MUST preserve every piece of information already in it:
+
+- **Every existing role, bullet, metric, and detail** — keep them all
+- **Every existing skill, technology, and certification** — keep them all
+- **Every existing section and its structure** — maintain the format
+- **Personal information** — update only if the new source has newer/better data
+
+Do NOT:
+- Remove or summarize existing bullets to "make room" for new content
+- Drop existing roles, skills, or sections
+- Rewrite existing content unless the new source provides a clear correction
+- Change the overall structure or heading hierarchy
+
+### Merge Strategy
+
+For each piece of information in the new documents, apply this logic:
+
+1. **New role not in the KB** — Add it in the correct chronological position
+   under Career History. Include all bullets, dates, and details from the source.
+
+2. **Existing role with new details** — Add new bullets or details to the
+   existing role entry. Do not duplicate bullets that convey the same achievement.
+   Place new bullets in a logical position among existing ones.
+
+3. **New skills or technologies** — Add to the appropriate category under
+   Technical Skills. If no matching category exists, create a new subsection.
+
+4. **Updated personal information** — If the new source has a more recent
+   email, phone, location, or URL, update the field. Keep existing fields
+   that are not contradicted.
+
+5. **New education, certifications, or projects** — Add to the appropriate
+   section. Create the section if it does not exist yet.
+
+6. **Conflicting information** — When new documents contradict the existing KB:
+   - Prefer the **newer source** for factual data (dates, titles, locations)
+   - Preserve both versions if the conflict is ambiguous, with a
+     `<!-- Conflict: ... -->` comment noting the discrepancy
+   - Never silently discard the existing version
+
+7. **Professional Summary** — Update only if the new documents reveal a
+   significant change (e.g., new seniority level, new domain expertise, or
+   a career pivot). Otherwise, keep the existing summary unchanged.
+
+### Deduplication Rules
+
+- **Same role at same company** — Merge bullets; do not create a duplicate entry
+- **Same skill listed in multiple places** — Keep one instance in the most
+  appropriate category
+- **Same certification or education** — Keep one instance with the most detail
+- **Similar but not identical bullets** — Keep both if they describe different
+  aspects of the same work; merge if they are truly redundant
+
+### Output Format
+
+Produce the complete updated knowledge base in the same Markdown format as
+the existing KB. Maintain the same heading structure:
+
+- `#` for the title
+- `##` for major sections (Personal Information, Professional Summary,
+  Technical Skills, Career History, Education, Projects, Certifications)
+- `###` for subsections (individual roles, skill categories, education entries)
+- `-` for bullet lists
+- Markdown tables for Personal Information
+- `**bold**` for field labels (Period, Location)
+
+Include ALL content — both existing and new. The output replaces the
+existing KB file entirely, so nothing should be omitted.
+
+### Content Quality Rules
+
+1. **No fabrication** — Every fact must trace to either the existing KB or a
+   new source document. Do NOT invent details.
+2. **Preserve metrics exactly** — Copy numbers, percentages, and measurements
+   verbatim from their source.
+3. **Completeness over polish** — This is a knowledge base, not a resume.
+   Include everything. The AI pipeline will select and tailor later.
+4. **Chronological order** — Career History entries should be reverse-
+   chronological (most recent first).
+
+Respond with the complete updated Markdown knowledge base only. No commentary,
+no code fences.
