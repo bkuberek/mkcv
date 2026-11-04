@@ -31,16 +31,12 @@ mkcv takes your career knowledge base and a job description, then produces a pol
 # Install (macOS on Apple silicon, or Linux)
 brew install bkuberek/tap/mkcv
 
-# Set up an API key (at least one provider) in your user config file
-mkdir -p ~/.config/mkcv
-cat >> ~/.config/mkcv/settings.toml <<'EOF'
-[default.providers.anthropic]
-api_key = "sk-ant-..."
-EOF
-chmod 600 ~/.config/mkcv/settings.toml
-
-# Create a workspace
+# Create a workspace. The first mkcv command you run also creates
+# ~/.config/mkcv/settings.toml (private, mode 600) with a place for each API key
 mkcv init ~/Documents/cv
+
+# Put an API key (at least one provider) in your user config file
+$EDITOR ~/.config/mkcv/settings.toml
 
 # Edit your knowledge base with your career history
 $EDITOR ~/Documents/cv/knowledge-base/career.md
@@ -105,10 +101,12 @@ mkcv --help
 
 ### Set Up API Credentials
 
-mkcv needs at least one AI provider configured. The recommended place for API
-keys is your user config file, `~/.config/mkcv/settings.toml`. It applies to
-every workspace, keeps keys out of your repositories and shell environment, and
-survives upgrades:
+mkcv needs at least one AI provider configured. The first time you run any mkcv
+command, it creates your user config file, `~/.config/mkcv/settings.toml`, with
+mode 600 and a commented template, and prints one line to say so. The file
+applies to every workspace, keeps keys out of your repositories and shell
+environment, and survives upgrades. Open it and fill in the key of each
+provider you use:
 
 ```toml
 # Anthropic (default provider -- recommended)
@@ -128,7 +126,11 @@ api_key = "..."
 api_key = "sk-or-..."
 ```
 
-Add only the providers you use, then run `chmod 600 ~/.config/mkcv/settings.toml`.
+Leave the providers you do not use as `api_key = ""`; an empty key counts as not
+set, so mkcv falls back to the provider's environment variable. mkcv never
+changes a file that already has content. If the file is missing or empty it is
+created or filled; set `MKCV_NO_USER_CONFIG=1` to stop that (for CI, tests, or
+packaging). If mkcv cannot write the file, it carries on without it.
 Never put `api_key` in a workspace `mkcv.toml` that you commit to git.
 
 Environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
@@ -271,7 +273,12 @@ Configuration is resolved in 5 layers (later overrides earlier):
 4. **Environment variables** -- `MKCV_` prefix
 5. **CLI flags** -- applied at runtime
 
-See [`examples/mkcv.toml`](examples/mkcv.toml) for a fully-commented configuration reference.
+Any option can live in either file: put what applies everywhere in the user
+config (`~/.config/mkcv/settings.toml`) and what is specific to one workspace in
+its `mkcv.toml`, which overrides the user config. Both files start with the same
+commented list of options (`mkcv init` writes the workspace one, and an empty
+`mkcv.toml` is filled the same way). See [`examples/mkcv.toml`](examples/mkcv.toml)
+for a fully-commented configuration reference.
 
 ### Model Profiles
 
