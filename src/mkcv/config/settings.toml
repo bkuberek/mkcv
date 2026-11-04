@@ -11,43 +11,34 @@ log_format = "%(levelname)s: %(message)s"
 from_stage = 1
 auto_render = true
 interactive = false
+model_warnings = true
+# Models come from a model profile unless a stage names its own below.
+# provider = "anthropic"        # default provider when no model_profile is set
+# model_profile = "anthropic"   # anthropic, anthropic-economy, openai, openai-economy,
+#                               # google, google-economy, local
 
 [default.pipeline.stages.analyze]
-provider = "anthropic"
-model = "claude-haiku-5-5"
 temperature = 0.2
 
 [default.pipeline.stages.select]
-provider = "anthropic"
-model = "claude-opus-5-5"
 temperature = 0.3
 
 [default.pipeline.stages.tailor]
-provider = "anthropic"
-model = "claude-opus-5-5"
 temperature = 0.5
 
 [default.pipeline.stages.structure]
-provider = "anthropic"
-model = "claude-sonnet-5-5"
 temperature = 0.1
 
 [default.pipeline.stages.review]
-provider = "anthropic"
-model = "claude-opus-5-5"
 temperature = 0.3
 
 [default.cover_letter]
 auto_render = true
 
 [default.cover_letter.stages.generate]
-provider = "anthropic"
-model = "claude-opus-5-5"
 temperature = 0.6
 
 [default.cover_letter.stages.review]
-provider = "anthropic"
-model = "claude-haiku-5-5"
 temperature = 0.2
 
 # Cover letter layout/design settings
@@ -65,11 +56,12 @@ temperature = 0.2
 # default_salutation = "Dear Hiring Manager,"
 
 [default.kb]
-provider = "anthropic"
-model = "claude-sonnet-5-5"
 temperature = 0.3
 max_tokens = 8192
 chunk_threshold = 100000
+
+[default.validate]
+temperature = 0.3
 
 [default.rendering]
 theme = "sb2nov"

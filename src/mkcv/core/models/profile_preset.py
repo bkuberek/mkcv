@@ -1,14 +1,14 @@
 """Preset definitions for resume generation.
 
-Each preset controls both model selection (via stage_configs) and
-content density parameters passed to prompt templates.
+A preset controls content density (how much the resume says). Which models
+write it is a separate choice made by the stage resolver; a preset only says
+whether to prefer the economy variant of a model profile and, for the legacy
+``budget`` preset, which provider to use.
 """
 
 from enum import StrEnum
 
 from pydantic import BaseModel
-
-from mkcv.core.models.stage_config import StageConfig
 
 
 class ContentDensity(StrEnum):
@@ -20,7 +20,12 @@ class ContentDensity(StrEnum):
 
 
 class Preset(BaseModel):
-    """A named preset that controls model selection and content density."""
+    """A named preset that controls content density.
+
+    ``economy`` asks the stage resolver for the economy variant of a model
+    profile. ``provider`` pins every stage to one provider (the legacy
+    ``budget`` preset pins ``ollama``).
+    """
 
     name: str
     description: str
@@ -31,75 +36,35 @@ class Preset(BaseModel):
     max_bullets_secondary: int
     include_earlier_experience: bool
     max_tokens: int = 8192
-    stage_configs: dict[int, StageConfig]
+    economy: bool = False
+    provider: str | None = None
 
-
-_SONNET_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.2),
-    2: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.3),
-    3: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.5),
-    4: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.1),
-    5: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.3),
-}
-
-_HAIKU_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.2),
-    2: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.3),
-    3: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.5),
-    4: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.1),
-    5: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.3),
-}
-
-_SMART_MIXED_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.2),
-    2: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
-    3: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.5),
-    4: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.1),
-    5: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
-}
-
-_OPUS_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.2),
-    2: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
-    3: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.5),
-    4: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.1),
-    5: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
-}
-
-_OLLAMA_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(provider="ollama", model="llama3.1:8b", temperature=0.2),
-    2: StageConfig(provider="ollama", model="llama3.1:8b", temperature=0.3),
-    3: StageConfig(provider="ollama", model="llama3.1:8b", temperature=0.5),
-    4: StageConfig(provider="ollama", model="llama3.1:8b", temperature=0.1),
-    5: StageConfig(provider="ollama", model="llama3.1:8b", temperature=0.3),
-}
 
 BUILT_IN_PRESETS: dict[str, Preset] = {
     "concise": Preset(
         name="concise",
-        description="1-page resume with highlights only (Haiku — fast & affordable)",
+        description="1-page resume with highlights only (economy models)",
         density=ContentDensity.CONCISE,
         page_budget="1",
         max_roles=3,
         max_bullets_primary=4,
         max_bullets_secondary=2,
         include_earlier_experience=False,
-        stage_configs=dict(_HAIKU_STAGE_CONFIGS),
+        economy=True,
     ),
     "standard": Preset(
         name="standard",
-        description="1-2 page balanced resume (smart Haiku/Opus mix)",
+        description="1-2 page balanced resume (recommended models)",
         density=ContentDensity.STANDARD,
         page_budget="1-2",
         max_roles=4,
         max_bullets_primary=5,
         max_bullets_secondary=3,
         include_earlier_experience=True,
-        stage_configs=dict(_SMART_MIXED_STAGE_CONFIGS),
     ),
     "comprehensive": Preset(
         name="comprehensive",
-        description="2+ page resume with full career detail (smart Haiku/Opus mix)",
+        description="2+ page resume with full career detail (recommended models)",
         density=ContentDensity.COMPREHENSIVE,
         page_budget="2+",
         max_roles=6,
@@ -107,7 +72,6 @@ BUILT_IN_PRESETS: dict[str, Preset] = {
         max_bullets_secondary=5,
         include_earlier_experience=True,
         max_tokens=16384,
-        stage_configs=dict(_SMART_MIXED_STAGE_CONFIGS),
     ),
 }
 
@@ -121,13 +85,13 @@ _LEGACY_PROFILE_MAP: dict[str, str] = {
 
 
 def _build_budget_preset() -> Preset:
-    """Build a 'budget' preset: concise density with ollama models."""
+    """Build the legacy 'budget' preset: concise density on local Ollama models."""
     concise = BUILT_IN_PRESETS["concise"]
     return concise.model_copy(
         update={
             "name": "budget",
-            "description": "Budget preset using local Ollama models",
-            "stage_configs": dict(_OLLAMA_STAGE_CONFIGS),
+            "description": "Concise resume on local Ollama models (legacy name)",
+            "provider": "ollama",
         }
     )
 

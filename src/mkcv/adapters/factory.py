@@ -7,12 +7,14 @@ the appropriate adapters based on configuration.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from mkcv.config.configuration import Configuration
+    from mkcv.core.models.stage_config import StageConfig
     from mkcv.core.ports.llm import LLMPort
     from mkcv.core.services.batch_render import BatchRenderService
     from mkcv.core.services.kb_generation_service import KBGenerationService
@@ -24,15 +26,22 @@ from mkcv.adapters.filesystem.prompt_loader import FileSystemPromptLoader
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
 from mkcv.adapters.llm.model_catalog_loader import load_model_catalog
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
+from mkcv.adapters.llm.resolution_request import ResolutionRequest
+from mkcv.adapters.llm.stage_resolver import StageResolver
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
+from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.models.cover_letter_design import CoverLetterDesign
 from mkcv.core.models.entry_layout import EntryLayout
 from mkcv.core.models.header_layout import HeaderLayout
 from mkcv.core.models.page_layout import PageLayout
-from mkcv.core.models.profile_preset import Preset, resolve_preset
+from mkcv.core.models.profile_preset import resolve_preset
 from mkcv.core.models.resume_design import ResumeDesign
 from mkcv.core.models.section_title_layout import SectionTitleLayout
-from mkcv.core.models.stage_config import StageConfig
+from mkcv.core.models.stage_key import (
+    COVER_LETTER_STAGES,
+    PIPELINE_STAGES,
+    StageKey,
+)
 from mkcv.core.models.typography_layout import TypographyLayout
 from mkcv.core.services.cover_letter import CoverLetterService
 from mkcv.core.services.pipeline import PipelineService
@@ -41,14 +50,6 @@ from mkcv.core.services.validation import ValidationService
 from mkcv.core.services.workspace import WorkspaceService
 
 logger = logging.getLogger(__name__)
-
-_STAGE_CONFIG_KEYS: dict[int, str] = {
-    1: "analyze",
-    2: "select",
-    3: "tailor",
-    4: "structure",
-    5: "review",
-}
 
 
 def _registry(config: Configuration) -> ProviderRegistry:
@@ -61,68 +62,6 @@ def _registry(config: Configuration) -> ProviderRegistry:
         ConfigurationError: If the provider or model-catalog settings are invalid.
     """
     return ProviderRegistry.from_config(config, load_model_catalog(config))
-
-
-def _resolve_preset(
-    name: str,
-    config: Configuration,
-) -> Preset | None:
-    """Resolve a preset by name, applying provider overrides from config.
-
-    Args:
-        name: Preset or legacy profile name.
-        config: Application configuration (for potential overrides).
-
-    Returns:
-        The resolved Preset, or None if name is "default" or unknown.
-    """
-    preset = resolve_preset(name)
-    if preset is not None:
-        logger.info("Using '%s' preset for all stages", preset.name)
-    return preset
-
-
-def _resolve_stage_configs(
-    config: Configuration,
-    preset_name: str = "default",
-) -> dict[int, StageConfig]:
-    """Read per-stage LLM configuration from settings or preset.
-
-    When preset_name matches a built-in or legacy preset, the preset
-    overrides config. When preset_name is "default", per-stage settings
-    from config are used.
-
-    Args:
-        config: Application configuration.
-        preset_name: Preset or legacy profile name.
-
-    Returns:
-        Dict mapping stage number (1-5) to StageConfig.
-    """
-    preset = _resolve_preset(preset_name, config)
-    if preset is not None:
-        return dict(preset.stage_configs)
-
-    stage_configs: dict[int, StageConfig] = {}
-
-    for stage_num, key in _STAGE_CONFIG_KEYS.items():
-        try:
-            stage_section = getattr(config.pipeline.stages, key)
-            provider = str(getattr(stage_section, "provider", "anthropic"))
-            model = str(getattr(stage_section, "model", "claude-sonnet-5-5"))
-            temperature = float(getattr(stage_section, "temperature", 0.3))
-        except AttributeError:
-            provider = "anthropic"
-            model = "claude-sonnet-5-5"
-            temperature = 0.3
-
-        stage_configs[stage_num] = StageConfig(
-            provider=provider,
-            model=model,
-            temperature=temperature,
-        )
-
-    return stage_configs
 
 
 def _create_llm_adapter(
@@ -350,41 +289,41 @@ def create_pipeline_service(
     preset_name: str = "default",
     *,
     provider_override: str | None = None,
+    model_profile: str | None = None,
     theme: str = "sb2nov",
 ) -> PipelineService:
     """Create a fully-wired PipelineService.
 
-    Reads per-stage provider/model/temperature from config (or preset)
-    and creates one LLM adapter per unique provider.
+    The preset sets content density; each stage's provider, model, and
+    temperature come from the stage resolver (command-line flags, then
+    per-stage config, then the model profile). One LLM adapter is created per
+    unique provider.
 
     Args:
         config: Application configuration.
         preset_name: Preset or legacy profile name.
-        provider_override: When set, override the provider for all stages.
+        provider_override: When set, run every stage on this provider.
+        model_profile: When set, run every stage on this model profile.
+        theme: Resolved theme name.
 
     Returns:
         PipelineService with per-stage LLM adapters.
+
+    Raises:
+        ConfigurationError: If a stage cannot be resolved.
     """
     prompt_loader = _create_prompt_loader(config)
     artifact_store = FileSystemArtifactStore()
-    preset = _resolve_preset(preset_name, config)
-    stage_configs = (
-        dict(preset.stage_configs)
-        if preset is not None
-        else _resolve_stage_configs(config, preset_name=preset_name)
-    )
-
-    if provider_override is not None:
-        stage_configs = {
-            num: StageConfig(
-                provider=provider_override,
-                model=sc.model,
-                temperature=sc.temperature,
-            )
-            for num, sc in stage_configs.items()
-        }
-
     registry = _registry(config)
+    resolved = StageResolver(config, registry).resolve(
+        PIPELINE_STAGES,
+        ResolutionRequest(
+            preset_name=preset_name,
+            model_profile=model_profile,
+            provider_override=provider_override,
+        ),
+    )
+    stage_configs = resolved.pipeline_stage_configs()
     providers = _create_providers(config, stage_configs, registry)
     resume_design = _build_resume_design(config, theme)
 
@@ -393,7 +332,7 @@ def create_pipeline_service(
         prompts=prompt_loader,
         artifacts=artifact_store,
         stage_configs=stage_configs,
-        preset=preset,
+        preset=resolve_preset(preset_name),
         resume_design=resume_design,
         catalog=registry.catalog,
     )
@@ -415,22 +354,31 @@ def create_render_service(config: Configuration) -> RenderService:
 def create_validation_service(config: Configuration) -> ValidationService:
     """Create a fully-wired ValidationService.
 
+    Validation resolves its own ``validate`` stage rather than borrowing the
+    analyze stage's provider.
+
     Args:
         config: Application configuration.
 
     Returns:
         ValidationService with LLM and prompt adapters connected.
+
+    Raises:
+        ConfigurationError: If the validate stage cannot be resolved.
     """
     prompt_loader = _create_prompt_loader(config)
+    registry = _registry(config)
+    resolved = StageResolver(config, registry).resolve(
+        (StageKey.VALIDATE,), ResolutionRequest()
+    )
+    assignment = resolved.assignments[StageKey.VALIDATE]
 
-    # Validation uses the analyze stage provider for JD analysis
-    # and the review stage provider for resume review
-    stage_configs = _resolve_stage_configs(config)
-    analyze_provider = stage_configs[1].provider
-    llm = _create_llm_adapter(analyze_provider, config)
-
-    pdf_reader = PyPdfReader()
-    return ValidationService(llm=llm, prompts=prompt_loader, pdf_reader=pdf_reader)
+    return ValidationService(
+        llm=registry.create_adapter(assignment.provider),
+        prompts=prompt_loader,
+        pdf_reader=PyPdfReader(),
+        model=assignment.model,
+    )
 
 
 def create_workspace_service() -> WorkspaceService:
@@ -443,83 +391,33 @@ def create_workspace_service() -> WorkspaceService:
     return WorkspaceService(workspace=manager)
 
 
-_CL_STAGE_CONFIG_KEYS: dict[int, str] = {
-    1: "generate",
-    2: "review",
+_COVER_LETTER_STAGE_NUMBERS: dict[StageKey, int] = {
+    StageKey.COVER_LETTER_GENERATE: 1,
+    StageKey.COVER_LETTER_REVIEW: 2,
 }
-
-
-def _resolve_cl_stage_configs(
-    config: Configuration,
-) -> dict[int, StageConfig]:
-    """Read cover letter stage configs from settings.
-
-    Falls back to sensible defaults if ``[cover_letter.stages.*]``
-    is not configured.
-
-    Args:
-        config: Application configuration.
-
-    Returns:
-        Dict mapping CL stage number (1-2) to StageConfig.
-    """
-    stage_configs: dict[int, StageConfig] = {}
-    default_temps = {1: 0.6, 2: 0.2}
-
-    for stage_num, key in _CL_STAGE_CONFIG_KEYS.items():
-        try:
-            cl_section = getattr(config, "cover_letter", None)
-            if cl_section is not None:
-                stages = getattr(cl_section, "stages", None)
-                if stages is not None:
-                    stage_section = getattr(stages, key)
-                    provider = str(getattr(stage_section, "provider", "anthropic"))
-                    model = str(
-                        getattr(
-                            stage_section,
-                            "model",
-                            "claude-sonnet-5-5",
-                        )
-                    )
-                    temperature = float(
-                        getattr(
-                            stage_section,
-                            "temperature",
-                            default_temps[stage_num],
-                        )
-                    )
-                    stage_configs[stage_num] = StageConfig(
-                        provider=provider,
-                        model=model,
-                        temperature=temperature,
-                    )
-                    continue
-        except AttributeError:
-            pass
-
-        # Default fallback
-        stage_configs[stage_num] = StageConfig(
-            provider="anthropic",
-            model="claude-sonnet-5-5",
-            temperature=default_temps[stage_num],
-        )
-
-    return stage_configs
 
 
 def create_cover_letter_service(
     config: Configuration,
     *,
     provider_override: str | None = None,
+    model_profile: str | None = None,
+    preset_name: str = "default",
 ) -> CoverLetterService:
     """Create a fully-wired CoverLetterService.
 
     Args:
         config: Application configuration.
-        provider_override: Override provider for all CL stages.
+        provider_override: Run both cover letter stages on this provider.
+        model_profile: Run both cover letter stages on this model profile.
+        preset_name: Preset or legacy profile name (selects the economy
+            variant of a profile for economy presets).
 
     Returns:
         CoverLetterService with LLM, prompt, artifact, and renderer adapters.
+
+    Raises:
+        ConfigurationError: If a stage cannot be resolved.
     """
     from mkcv.adapters.renderers.typst_cover_letter import (
         TypstCoverLetterRenderer,
@@ -528,19 +426,19 @@ def create_cover_letter_service(
     prompt_loader = _create_prompt_loader(config)
     artifact_store = FileSystemArtifactStore()
     renderer = TypstCoverLetterRenderer()
-    stage_configs = _resolve_cl_stage_configs(config)
-
-    if provider_override is not None:
-        stage_configs = {
-            num: StageConfig(
-                provider=provider_override,
-                model=sc.model,
-                temperature=sc.temperature,
-            )
-            for num, sc in stage_configs.items()
-        }
-
     registry = _registry(config)
+    resolved = StageResolver(config, registry).resolve(
+        COVER_LETTER_STAGES,
+        ResolutionRequest(
+            preset_name=preset_name,
+            model_profile=model_profile,
+            provider_override=provider_override,
+        ),
+    )
+    stage_configs = {
+        number: resolved.assignments[stage].to_stage_config()
+        for stage, number in _COVER_LETTER_STAGE_NUMBERS.items()
+    }
     providers = _create_providers(config, stage_configs, registry)
     design = _build_cover_letter_design(config)
 
@@ -582,41 +480,44 @@ def create_regeneration_service(
     preset_name: str = "default",
     *,
     provider_override: str | None = None,
+    model_profile: str | None = None,
 ) -> RegenerationService:
     """Create a fully-wired RegenerationService.
 
-    Uses stage-3 (tailor) configuration since regeneration is
+    Uses the tailor stage's configuration since regeneration is
     fundamentally the same operation as the tailor stage, just
     scoped to one section.
 
     Args:
         config: Application configuration.
         preset_name: Preset or legacy profile name.
-        provider_override: When set, override the LLM provider.
+        provider_override: When set, run on this provider.
+        model_profile: When set, use this model profile's tailor model.
 
     Returns:
         RegenerationService with LLM and prompt adapters connected.
+
+    Raises:
+        ConfigurationError: If the tailor stage cannot be resolved.
     """
     from mkcv.core.services.regeneration import RegenerationService
 
-    stage_configs = _resolve_stage_configs(config, preset_name=preset_name)
-    tailor_config = stage_configs[3]  # Stage 3 = tailor
-
-    if provider_override:
-        tailor_config = StageConfig(
-            provider=provider_override,
-            model=tailor_config.model,
-            temperature=tailor_config.temperature,
-        )
-
-    llm = _create_llm_adapter(tailor_config.provider, config)
-    prompts = _create_prompt_loader(config)
+    registry = _registry(config)
+    resolved = StageResolver(config, registry).resolve(
+        (StageKey.TAILOR,),
+        ResolutionRequest(
+            preset_name=preset_name,
+            model_profile=model_profile,
+            provider_override=provider_override,
+        ),
+    )
+    tailor = resolved.assignments[StageKey.TAILOR]
 
     return RegenerationService(
-        llm=llm,
-        prompts=prompts,
-        model=tailor_config.model,
-        temperature=tailor_config.temperature,
+        llm=registry.create_adapter(tailor.provider),
+        prompts=_create_prompt_loader(config),
+        model=tailor.model,
+        temperature=tailor.temperature,
     )
 
 
@@ -639,6 +540,10 @@ def _create_prompt_loader(config: Configuration) -> FileSystemPromptLoader:
     return FileSystemPromptLoader(override_dir=override_dir)
 
 
+_DEFAULT_KB_MAX_TOKENS = 8192
+_DEFAULT_KB_CHUNK_THRESHOLD = 100000
+
+
 def create_kb_generation_service(
     config: Configuration,
     *,
@@ -647,59 +552,51 @@ def create_kb_generation_service(
 ) -> KBGenerationService:
     """Create a fully-wired KBGenerationService.
 
-    Reads KB-specific LLM settings from ``[kb]`` config section and
-    creates a ``KBGenerationService`` with a ``MultiFormatDocumentReader``,
-    LLM adapter, and prompt loader.
+    The provider, model, and temperature come from the ``kb`` stage;
+    ``max_tokens`` and ``chunk_threshold`` are read from the ``[kb]`` section.
 
     Args:
         config: Application configuration.
-        provider_override: When set, override the LLM provider.
-        model_override: When set, override the LLM model.
+        provider_override: When set, run on this provider.
+        model_override: When set, use this model.
 
     Returns:
         KBGenerationService with all dependencies wired.
+
+    Raises:
+        ConfigurationError: If the stage cannot be resolved or a limit is
+            not an integer.
     """
     from mkcv.adapters.filesystem.document_reader import MultiFormatDocumentReader
     from mkcv.core.services.kb_generation_service import KBGenerationService
 
-    # Read KB config section with defaults
-    _default_model = "claude-sonnet-5-5"
-    try:
-        kb_section = getattr(config, "kb", None)
-        if kb_section is not None:
-            provider = str(getattr(kb_section, "provider", "anthropic"))
-            model = str(getattr(kb_section, "model", _default_model))
-            temperature = float(getattr(kb_section, "temperature", 0.3))
-            max_tokens = int(getattr(kb_section, "max_tokens", 8192))
-            chunk_threshold = int(getattr(kb_section, "chunk_threshold", 100000))
-        else:
-            provider = "anthropic"
-            model = _default_model
-            temperature = 0.3
-            max_tokens = 8192
-            chunk_threshold = 100000
-    except (AttributeError, TypeError, ValueError):
-        provider = "anthropic"
-        model = _default_model
-        temperature = 0.3
-        max_tokens = 8192
-        chunk_threshold = 100000
-
-    if provider_override is not None:
-        provider = provider_override
-    if model_override is not None:
-        model = model_override
-
-    llm = _create_llm_adapter(provider, config)
-    prompts = _create_prompt_loader(config)
-    document_reader = MultiFormatDocumentReader()
+    registry = _registry(config)
+    resolved = StageResolver(config, registry).resolve(
+        (StageKey.KB,),
+        ResolutionRequest(
+            provider_override=provider_override, model_override=model_override
+        ),
+    )
+    assignment = resolved.assignments[StageKey.KB]
+    kb_section = config.get("kb") or {}
 
     return KBGenerationService(
-        document_reader=document_reader,
-        llm=llm,
-        prompts=prompts,
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        chunk_threshold=chunk_threshold,
+        document_reader=MultiFormatDocumentReader(),
+        llm=registry.create_adapter(assignment.provider),
+        prompts=_create_prompt_loader(config),
+        model=assignment.model,
+        temperature=assignment.temperature,
+        max_tokens=_integer_setting(kb_section, "max_tokens", _DEFAULT_KB_MAX_TOKENS),
+        chunk_threshold=_integer_setting(
+            kb_section, "chunk_threshold", _DEFAULT_KB_CHUNK_THRESHOLD
+        ),
     )
+
+
+def _integer_setting(section: Mapping[str, Any], key: str, default: int) -> int:
+    """Read an integer from the ``[kb]`` section, falling back to ``default``."""
+    value = section.get(key, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ConfigurationError(f"{key} in [default.kb] must be an integer") from None

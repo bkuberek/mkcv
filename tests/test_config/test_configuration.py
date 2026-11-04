@@ -28,9 +28,25 @@ class TestConfiguration:
         config = Configuration()
         assert config.pipeline.auto_render is True
 
-    def test_pipeline_analyze_stage_has_provider(self) -> None:
+    def test_pipeline_analyze_stage_has_a_default_temperature(self) -> None:
         config = Configuration()
-        assert config.pipeline.stages.analyze.provider == "anthropic"
+        assert config.pipeline.stages.analyze.temperature == 0.2
+
+    def test_stage_sections_are_reachable_through_dotted_get(self) -> None:
+        config = Configuration()
+        assert config.get("pipeline.stages.tailor").get("temperature") == 0.5
+
+    def test_validate_section_is_reachable_through_get(self) -> None:
+        config = Configuration()
+        assert config.get("validate").get("temperature") == 0.3
+
+    def test_kb_section_is_reachable_through_get(self) -> None:
+        config = Configuration()
+        assert config.get("kb").get("max_tokens") == 8192
+
+    def test_missing_sections_resolve_to_none(self) -> None:
+        config = Configuration()
+        assert config.get("pipeline.model_profile") is None
 
     def test_in_workspace_is_false_by_default(self) -> None:
         config = Configuration()

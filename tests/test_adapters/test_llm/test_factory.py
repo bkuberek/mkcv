@@ -10,15 +10,16 @@ from dynaconf import Dynaconf
 from mkcv.adapters import factory as factory_module
 from mkcv.adapters.factory import (
     _create_llm_adapter,
-    _resolve_preset,
-    _resolve_stage_configs,
+    create_cover_letter_service,
     create_pipeline_service,
     create_regeneration_service,
+    create_validation_service,
     create_workspace_service,
 )
 from mkcv.adapters.llm.anthropic import AnthropicAdapter
 from mkcv.adapters.llm.openai import OpenAIAdapter
 from mkcv.adapters.llm.openai_compatible import OpenAICompatibleAdapter
+from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.llm.stub import StubLLMAdapter
 from mkcv.core.exceptions.configuration import ConfigurationError
@@ -32,7 +33,9 @@ def _blank_config(**values: Any) -> MagicMock:
 
     Keys that are not given resolve to the caller's default, like a Dynaconf
     object with nothing configured. The attribute pattern the legacy stage
-    resolution still uses (``config.pipeline.stages...``) stays a MagicMock.
+    resolution used (``config.pipeline.stages...``) is gone: stage sections are
+    read with ``config.get("pipeline.stages.tailor")``, so give those as
+    ``**{"pipeline.stages.tailor": {...}}``.
     """
     config = MagicMock()
     config.get.side_effect = lambda key, default=None: values.get(key, default)
@@ -163,159 +166,224 @@ class TestCreateLLMAdapter:
         assert not hasattr(factory_module, "_resolve_api_key")
 
 
-class TestResolvePreset:
-    """Tests for _resolve_preset factory helper."""
-
-    def test_returns_none_for_default(self) -> None:
-        config = MagicMock()
-        assert _resolve_preset("default", config) is None
-
-    def test_returns_none_for_unknown(self) -> None:
-        config = MagicMock()
-        assert _resolve_preset("nonexistent", config) is None
-
-    def test_resolves_concise(self) -> None:
-        config = MagicMock()
-        preset = _resolve_preset("concise", config)
-        assert preset is not None
-        assert preset.density == ContentDensity.CONCISE
-
-    def test_resolves_standard(self) -> None:
-        config = MagicMock()
-        preset = _resolve_preset("standard", config)
-        assert preset is not None
-        assert preset.density == ContentDensity.STANDARD
-
-    def test_resolves_comprehensive(self) -> None:
-        config = MagicMock()
-        preset = _resolve_preset("comprehensive", config)
-        assert preset is not None
-        assert preset.density == ContentDensity.COMPREHENSIVE
-
-    def test_resolves_budget_legacy(self) -> None:
-        config = MagicMock()
-        preset = _resolve_preset("budget", config)
-        assert preset is not None
-        for sc in preset.stage_configs.values():
-            assert sc.provider == "ollama"
-
-    def test_resolves_premium_legacy(self) -> None:
-        config = MagicMock()
-        preset = _resolve_preset("premium", config)
-        assert preset is not None
-        assert preset.density == ContentDensity.STANDARD
+_PIPELINE_STAGE_NAMES = ("analyze", "select", "tailor", "structure", "review")
+_SMART_MIX = [
+    "claude-haiku-5-5",
+    "claude-opus-5-5",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+]
+_DEFAULT_TEMPERATURES = [0.2, 0.3, 0.5, 0.1, 0.3]
 
 
-class TestResolveStageConfigs:
-    """Tests for _resolve_stage_configs with preset names."""
+def _stub_pipeline_config(**extra: Any) -> MagicMock:
+    """A config whose five pipeline stages all run on the offline stub."""
+    stages = {
+        f"pipeline.stages.{name}": {
+            "provider": "stub",
+            "model": "stub-model",
+            "temperature": 0.3,
+        }
+        for name in _PIPELINE_STAGE_NAMES
+    }
+    return _blank_config(**{**stages, **extra})
 
-    def test_default_preset_reads_from_config(self) -> None:
-        config = MagicMock()
-        analyze = MagicMock()
-        analyze.provider = "anthropic"
-        analyze.model = "claude-sonnet-5-5"
-        analyze.temperature = 0.2
-        config.pipeline.stages.analyze = analyze
-        config.pipeline.stages.select = analyze
-        config.pipeline.stages.tailor = analyze
-        config.pipeline.stages.structure = analyze
-        config.pipeline.stages.review = analyze
 
-        configs = _resolve_stage_configs(config, preset_name="default")
-        assert configs[1].provider == "anthropic"
-        assert configs[1].model == "claude-sonnet-5-5"
+def _models(service: Any) -> list[str]:
+    return [sc.model for sc in service._stage_configs.values()]
 
-    def test_budget_preset_uses_ollama(self) -> None:
-        config = MagicMock()
-        configs = _resolve_stage_configs(config, preset_name="budget")
-        for stage_num in range(1, 6):
-            assert configs[stage_num].provider == "ollama"
-            assert configs[stage_num].model == "llama3.1:8b"
 
-    def test_premium_preset_uses_anthropic(self) -> None:
-        config = MagicMock()
-        configs = _resolve_stage_configs(config, preset_name="premium")
-        for stage_num in range(1, 6):
-            assert configs[stage_num].provider == "anthropic"
-        # Premium maps to standard which uses smart Haiku/Sonnet/Opus mix
-        assert "haiku" in configs[1].model
-        assert "opus" in configs[2].model
-        assert "opus" in configs[3].model
-        assert "sonnet" in configs[4].model
-        assert "opus" in configs[5].model
+def _providers(service: Any) -> set[str]:
+    return {sc.provider for sc in service._stage_configs.values()}
 
-    def test_budget_preset_ignores_config_settings(self) -> None:
-        config = MagicMock()
-        analyze = MagicMock()
-        analyze.provider = "openai"
-        analyze.model = "gpt-4o"
-        analyze.temperature = 0.9
-        config.pipeline.stages.analyze = analyze
 
-        configs = _resolve_stage_configs(config, preset_name="budget")
-        assert configs[1].provider == "ollama"
+class TestRemovedHelpers:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "_resolve_preset",
+            "_resolve_stage_configs",
+            "_resolve_cl_stage_configs",
+            "_STAGE_CONFIG_KEYS",
+            "_CL_STAGE_CONFIG_KEYS",
+        ],
+    )
+    def test_legacy_stage_resolution_is_gone(self, name: str) -> None:
+        assert not hasattr(factory_module, name)
 
-    def test_premium_preset_preserves_per_stage_temperatures(self) -> None:
-        config = MagicMock()
-        configs = _resolve_stage_configs(config, preset_name="premium")
-        assert configs[1].temperature == 0.2
-        assert configs[3].temperature == 0.5
-        assert configs[4].temperature == 0.1
 
-    def test_concise_preset_uses_haiku(self) -> None:
-        config = MagicMock()
-        configs = _resolve_stage_configs(config, preset_name="concise")
-        for stage_num in range(1, 6):
-            assert configs[stage_num].provider == "anthropic"
-            assert "haiku" in configs[stage_num].model
+class TestPipelineStageModels:
+    """The resolver decides models; presets only decide density and economy."""
 
-    def test_standard_preset_uses_smart_mix(self) -> None:
-        config = MagicMock()
-        configs = _resolve_stage_configs(config, preset_name="standard")
-        for stage_num in range(1, 6):
-            assert configs[stage_num].provider == "anthropic"
-        # Smart mix: stage 1 = Haiku; stages 2,3,5 = Opus; stage 4 = Sonnet
-        assert "haiku" in configs[1].model
-        assert "opus" in configs[2].model
-        assert "opus" in configs[3].model
-        assert "sonnet" in configs[4].model
-        assert "opus" in configs[5].model
+    def test_standard_preset_gives_the_smart_claude_mix(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="standard")
+        assert _models(service) == _SMART_MIX
 
-    def test_comprehensive_preset_uses_smart_mix(self) -> None:
-        config = MagicMock()
-        configs = _resolve_stage_configs(config, preset_name="comprehensive")
-        for stage_num in range(1, 6):
-            assert configs[stage_num].provider == "anthropic"
-        # Smart mix: stage 1 = Haiku; stages 2,3,5 = Opus; stage 4 = Sonnet
-        assert "haiku" in configs[1].model
-        assert "opus" in configs[2].model
-        assert "opus" in configs[3].model
-        assert "sonnet" in configs[4].model
-        assert "opus" in configs[5].model
+    def test_stages_are_numbered_one_to_five(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="standard")
+        assert list(service._stage_configs) == [1, 2, 3, 4, 5]
+
+    def test_every_stage_keeps_todays_temperature(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="standard")
+        temperatures = [sc.temperature for sc in service._stage_configs.values()]
+        assert temperatures == _DEFAULT_TEMPERATURES
+
+    def test_concise_preset_uses_haiku_everywhere(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="concise")
+        assert set(_models(service)) == {"claude-haiku-5-5"}
+
+    @pytest.mark.parametrize("preset", ["comprehensive", "premium", "default"])
+    def test_other_presets_use_the_smart_mix(self, preset: str) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name=preset)
+        assert _models(service) == _SMART_MIX
+
+    def test_budget_preset_runs_every_stage_on_ollama(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="budget")
+        assert set(_models(service)) == {"llama3.1:8b"}
+        assert _providers(service) == {"ollama"}
+
+    def test_budget_preset_creates_the_ollama_provider(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="budget")
+        assert set(service._providers) == {"ollama"}
+
+    def test_budget_preset_still_yields_ollama_when_config_names_another_provider(
+        self,
+    ) -> None:
+        config = _blank_config(
+            **{
+                "pipeline.stages.analyze": {
+                    "provider": "openai",
+                    "model": "gpt-6-luna",
+                    "temperature": 0.9,
+                }
+            }
+        )
+        service = create_pipeline_service(config, preset_name="budget")
+        assert service._stage_configs[1].provider == "ollama"
+        assert service._stage_configs[1].model == "llama3.1:8b"
+
+    def test_default_preset_uses_the_stage_sections_from_config(self) -> None:
+        service = create_pipeline_service(
+            _stub_pipeline_config(), preset_name="default"
+        )
+        assert set(service._providers) == {"stub"}
+
+    def test_provider_override_runs_every_stage_on_that_provider(self) -> None:
+        service = create_pipeline_service(
+            _blank_config(), preset_name="standard", provider_override="openai"
+        )
+        assert _providers(service) == {"openai"}
+        assert _models(service) == [
+            "gpt-6-luna",
+            "gpt-6.1-sol",
+            "gpt-6-astra",
+            "gpt-6.1-terra",
+            "gpt-6.1-sol",
+        ]
+
+    def test_provider_override_without_a_profile_needs_configured_models(self) -> None:
+        with pytest.raises(ConfigurationError, match=r"^Cannot resolve models:"):
+            create_pipeline_service(
+                _blank_config(), preset_name="standard", provider_override="openrouter"
+            )
+
+    def test_model_profile_runs_every_stage_on_that_profile(self) -> None:
+        service = create_pipeline_service(
+            _blank_config(), preset_name="standard", model_profile="google"
+        )
+        assert _providers(service) == {"google"}
+        assert _models(service)[1] == "gemini-4-argon"
+
+    def test_model_profile_creates_only_that_providers_adapter(self) -> None:
+        service = create_pipeline_service(
+            _blank_config(), preset_name="standard", model_profile="google"
+        )
+        assert set(service._providers) == {"google"}
+
+    def test_model_profile_and_provider_override_are_mutually_exclusive(self) -> None:
+        with pytest.raises(ConfigurationError, match="cannot be used together"):
+            create_pipeline_service(
+                _blank_config(),
+                model_profile="google",
+                provider_override="openai",
+            )
+
+    def test_unknown_model_profile_is_a_configuration_error(self) -> None:
+        with pytest.raises(ConfigurationError, match="Unknown model profile 'nope'"):
+            create_pipeline_service(_blank_config(), model_profile="nope")
+
+    def test_resolution_errors_surface_before_any_adapter_is_created(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail(*args: object, **kwargs: object) -> None:
+            raise AssertionError("an adapter was created")
+
+        monkeypatch.setattr(ProviderRegistry, "create_adapter", fail)
+        with pytest.raises(ConfigurationError):
+            create_pipeline_service(
+                _blank_config(), preset_name="standard", provider_override="openrouter"
+            )
+
+
+class TestPerStageConfigBeatsThePreset:
+    """REQ-SR-2 end to end: this used to be ignored by ``generate``."""
+
+    TAILOR_ON_OPENAI: ClassVar[dict[str, Any]] = {
+        "pipeline.stages.tailor": {"provider": "openai", "model": "gpt-6.1-sol"}
+    }
+
+    def test_standard_preset_honours_a_tailor_override(self) -> None:
+        service = create_pipeline_service(
+            _blank_config(**self.TAILOR_ON_OPENAI), preset_name="standard"
+        )
+        assert service._stage_configs[3].model == "gpt-6.1-sol"
+        assert service._stage_configs[3].provider == "openai"
+
+    def test_the_other_stages_keep_the_presets_models(self) -> None:
+        service = create_pipeline_service(
+            _blank_config(**self.TAILOR_ON_OPENAI), preset_name="standard"
+        )
+        models = _models(service)
+        assert models[:2] + models[3:] == _SMART_MIX[:2] + _SMART_MIX[3:]
+
+    @pytest.mark.parametrize(
+        "preset", ["concise", "standard", "comprehensive", "premium", "default"]
+    )
+    def test_every_preset_honours_the_override(self, preset: str) -> None:
+        service = create_pipeline_service(
+            _blank_config(**self.TAILOR_ON_OPENAI), preset_name=preset
+        )
+        assert service._stage_configs[3].model == "gpt-6.1-sol"
+
+    def test_the_override_still_creates_its_provider(self) -> None:
+        service = create_pipeline_service(
+            _blank_config(**self.TAILOR_ON_OPENAI), preset_name="standard"
+        )
+        assert set(service._providers) == {"anthropic", "openai"}
+
+    def test_a_model_profile_on_the_command_line_beats_the_override(self) -> None:
+        service = create_pipeline_service(
+            _blank_config(**self.TAILOR_ON_OPENAI),
+            preset_name="standard",
+            model_profile="google",
+        )
+        assert service._stage_configs[3].provider == "google"
+
+    def test_a_configured_temperature_is_applied(self) -> None:
+        config = _blank_config(**{"pipeline.stages.tailor": {"temperature": 0.9}})
+        service = create_pipeline_service(config, preset_name="standard")
+        assert service._stage_configs[3].temperature == 0.9
+        assert service._stage_configs[3].model == "claude-opus-5-5"
+
+    def test_an_unresolvable_config_is_a_configuration_error(self) -> None:
+        config = _blank_config(**{"pipeline.stages.tailor": {"provider": "nope"}})
+        with pytest.raises(ConfigurationError, match="Unknown LLM provider 'nope'"):
+            create_pipeline_service(config, preset_name="standard")
 
 
 class TestCreatePipelineServiceWithPreset:
-    """Tests for create_pipeline_service preset_name parameter."""
-
-    def test_budget_preset_creates_ollama_provider(self) -> None:
-        config = _blank_config()
-        service = create_pipeline_service(config, preset_name="budget")
-        assert "ollama" in service._providers
-
-    def test_default_preset_uses_config_providers(self) -> None:
-        config = _blank_config()
-        analyze = MagicMock()
-        analyze.provider = "stub"
-        analyze.model = "stub-model"
-        analyze.temperature = 0.3
-        config.pipeline.stages.analyze = analyze
-        config.pipeline.stages.select = analyze
-        config.pipeline.stages.tailor = analyze
-        config.pipeline.stages.structure = analyze
-        config.pipeline.stages.review = analyze
-
-        service = create_pipeline_service(config, preset_name="default")
-        assert "stub" in service._providers
+    """The preset still controls content density on the service."""
 
     def test_concise_preset_sets_preset_on_service(self) -> None:
         config = _blank_config()
@@ -335,28 +403,20 @@ class TestCreatePipelineServiceWithPreset:
         assert service._preset is not None
         assert service._preset.density == ContentDensity.COMPREHENSIVE
 
-    def test_default_preset_has_no_preset(self) -> None:
-        config = _blank_config()
-        analyze = MagicMock()
-        analyze.provider = "stub"
-        analyze.model = "stub-model"
-        analyze.temperature = 0.3
-        config.pipeline.stages.analyze = analyze
-        config.pipeline.stages.select = analyze
-        config.pipeline.stages.tailor = analyze
-        config.pipeline.stages.structure = analyze
-        config.pipeline.stages.review = analyze
+    def test_budget_preset_sets_the_legacy_preset_on_service(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="budget")
+        assert service._preset is not None
+        assert service._preset.name == "budget"
 
-        service = create_pipeline_service(config, preset_name="default")
+    def test_default_preset_has_no_preset(self) -> None:
+        service = create_pipeline_service(
+            _stub_pipeline_config(), preset_name="default"
+        )
         assert service._preset is None
 
-    def test_provider_override_changes_all_stages(self) -> None:
-        config = _blank_config()
-        service = create_pipeline_service(
-            config, preset_name="standard", provider_override="openrouter"
-        )
-        for sc in service._stage_configs.values():
-            assert sc.provider == "openrouter"
+    def test_unknown_preset_name_has_no_preset(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="nonexistent")
+        assert service._preset is None
 
 
 def _real_config(tmp_path: Path, toml_text: str) -> Dynaconf:
@@ -467,10 +527,7 @@ class TestCatalogInjection:
         )
 
     def test_cover_letter_service_receives_the_loaded_catalog(self) -> None:
-        from mkcv.adapters.factory import create_cover_letter_service
-
         config = _blank_config(model_catalog=self.OVERRIDE)
-        config.cover_letter = None  # use the built-in cover letter defaults
         service = create_cover_letter_service(config)
         assert service._catalog is not None
         assert service._catalog.price_for("claude-opus-5-5", provider="anthropic") == (
@@ -507,19 +564,9 @@ class TestCreateWorkspaceService:
 class TestCreateRegenerationService:
     """Tests for create_regeneration_service factory function."""
 
-    def _make_stub_config(self) -> MagicMock:
+    def _make_stub_config(self, **extra: Any) -> MagicMock:
         """Build a config that resolves to stub provider for all stages."""
-        config = _blank_config()
-        stage = MagicMock()
-        stage.provider = "stub"
-        stage.model = "stub-model"
-        stage.temperature = 0.3
-        config.pipeline.stages.analyze = stage
-        config.pipeline.stages.select = stage
-        config.pipeline.stages.tailor = stage
-        config.pipeline.stages.structure = stage
-        config.pipeline.stages.review = stage
-        return config
+        return _stub_pipeline_config(**extra)
 
     def test_returns_regeneration_service(self) -> None:
         config = self._make_stub_config()
@@ -527,12 +574,15 @@ class TestCreateRegenerationService:
         assert isinstance(svc, RegenerationService)
 
     def test_uses_stage3_config(self) -> None:
-        config = self._make_stub_config()
-        tailor = MagicMock()
-        tailor.provider = "stub"
-        tailor.model = "tailor-model-x"
-        tailor.temperature = 0.7
-        config.pipeline.stages.tailor = tailor
+        config = self._make_stub_config(
+            **{
+                "pipeline.stages.tailor": {
+                    "provider": "stub",
+                    "model": "tailor-model-x",
+                    "temperature": 0.7,
+                }
+            }
+        )
 
         svc = create_regeneration_service(config)
         assert svc._model == "tailor-model-x"
@@ -546,6 +596,18 @@ class TestCreateRegenerationService:
         assert "opus" in svc._model
         assert svc._temperature == 0.5
 
+    def test_tailor_config_beats_the_preset(self) -> None:
+        config = _blank_config(
+            **{
+                "pipeline.stages.tailor": {
+                    "provider": "stub",
+                    "model": "tailor-model-x",
+                }
+            }
+        )
+        svc = create_regeneration_service(config, preset_name="standard")
+        assert svc._model == "tailor-model-x"
+
     def test_provider_override_changes_provider(self) -> None:
         config = _blank_config()
 
@@ -555,6 +617,25 @@ class TestCreateRegenerationService:
         assert isinstance(svc, RegenerationService)
         # The LLM adapter should be a StubLLMAdapter
         assert isinstance(svc._llm, StubLLMAdapter)
+
+    def test_provider_override_uses_that_providers_tailor_model(self) -> None:
+        svc = create_regeneration_service(
+            _blank_config(), preset_name="standard", provider_override="openai"
+        )
+        assert svc._model == "gpt-6-astra"
+
+    def test_model_profile_selects_the_tailor_model(self) -> None:
+        svc = create_regeneration_service(
+            _blank_config(), preset_name="standard", model_profile="google"
+        )
+        assert svc._model == "gemini-4-argon"
+
+    def test_only_the_tailor_stage_has_to_resolve(self) -> None:
+        config = _blank_config(
+            **{"pipeline.stages.analyze": {"provider": "nope"}},
+        )
+        svc = create_regeneration_service(config, preset_name="standard")
+        assert isinstance(svc, RegenerationService)
 
     def test_default_preset_reads_from_config(self) -> None:
         config = self._make_stub_config()
@@ -566,3 +647,112 @@ class TestCreateRegenerationService:
         config = self._make_stub_config()
         svc = create_regeneration_service(config)
         assert svc._prompts is not None
+
+
+class TestCreateValidationService:
+    """REQ-SR-9: validation resolves its own stage."""
+
+    def test_validate_stage_provider_and_model_are_used(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        config = _blank_config(
+            validate={"provider": "openai", "model": "gpt-6.1-terra"}
+        )
+        service = create_validation_service(config)
+        assert isinstance(_unwrap(service._llm), OpenAIAdapter)
+        assert service._model == "gpt-6.1-terra"
+
+    def test_default_model_comes_from_the_default_profile(self) -> None:
+        service = create_validation_service(_blank_config())
+        assert service._model == "claude-sonnet-5-5"
+
+    def test_pipeline_analyze_stage_is_not_borrowed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        config = _blank_config(
+            **{
+                "pipeline.stages.analyze": {
+                    "provider": "openai",
+                    "model": "gpt-6-luna",
+                }
+            }
+        )
+        service = create_validation_service(config)
+        assert service._model == "claude-sonnet-5-5"
+        assert not isinstance(_unwrap(service._llm), OpenAIAdapter)
+
+    def test_model_alone_infers_the_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        config = _blank_config(validate={"model": "gpt-6.1-terra"})
+        service = create_validation_service(config)
+        assert isinstance(_unwrap(service._llm), OpenAIAdapter)
+
+    def test_unknown_provider_is_a_configuration_error(self) -> None:
+        config = _blank_config(validate={"provider": "nope", "model": "m"})
+        with pytest.raises(ConfigurationError, match="Unknown LLM provider 'nope'"):
+            create_validation_service(config)
+
+
+class TestCreateCoverLetterService:
+    def test_defaults_reproduce_todays_cover_letter_models(self) -> None:
+        service = create_cover_letter_service(_blank_config())
+        configs = service._stage_configs
+        assert [(sc.model, sc.temperature) for sc in configs.values()] == [
+            ("claude-opus-5-5", 0.6),
+            ("claude-haiku-5-5", 0.2),
+        ]
+
+    def test_stages_are_numbered_generate_then_review(self) -> None:
+        service = create_cover_letter_service(_blank_config())
+        assert list(service._stage_configs) == [1, 2]
+
+    def test_stage_config_is_read_from_the_cover_letter_sections(self) -> None:
+        config = _blank_config(
+            **{
+                "cover_letter.stages.generate": {
+                    "provider": "stub",
+                    "model": "letter-model",
+                    "temperature": 0.4,
+                }
+            }
+        )
+        service = create_cover_letter_service(config)
+        generate = service._stage_configs[1]
+        assert (generate.provider, generate.model, generate.temperature) == (
+            "stub",
+            "letter-model",
+            0.4,
+        )
+        assert service._stage_configs[2].model == "claude-haiku-5-5"
+
+    def test_provider_override_runs_both_stages_on_that_provider(self) -> None:
+        service = create_cover_letter_service(
+            _blank_config(), provider_override="openai"
+        )
+        assert [sc.model for sc in service._stage_configs.values()] == [
+            "gpt-6-astra",
+            "gpt-6-luna",
+        ]
+
+    def test_model_profile_runs_both_stages_on_that_profile(self) -> None:
+        service = create_cover_letter_service(_blank_config(), model_profile="google")
+        assert [sc.model for sc in service._stage_configs.values()] == [
+            "gemini-4-argon",
+            "gemini-3.5-flash-lite",
+        ]
+
+    def test_economy_preset_keeps_the_cover_letter_models_of_the_base_profile(
+        self,
+    ) -> None:
+        service = create_cover_letter_service(
+            _blank_config(), provider_override="openai", preset_name="concise"
+        )
+        assert service._stage_configs[1].model == "gpt-6-astra"
+
+    def test_unknown_profile_is_a_configuration_error(self) -> None:
+        with pytest.raises(ConfigurationError, match="Unknown model profile"):
+            create_cover_letter_service(_blank_config(), model_profile="nope")

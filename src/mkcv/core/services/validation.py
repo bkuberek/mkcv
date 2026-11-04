@@ -35,24 +35,27 @@ class ValidationService:
         prompts: PromptLoaderPort,
         *,
         pdf_reader: PdfReaderPort | None = None,
+        model: str = DEFAULT_MODEL,
     ) -> None:
         self._llm = llm
         self._prompts = prompts
         self._pdf_reader = pdf_reader
+        self._model = model
 
     async def validate(
         self,
         resume_path: Path,
         *,
         jd_path: Path | None = None,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
     ) -> ReviewReport:
         """Validate a resume for ATS compliance and quality.
 
         Args:
             resume_path: Path to resume file (YAML or PDF).
             jd_path: Optional JD for keyword coverage analysis.
-            model: LLM model identifier.
+            model: LLM model identifier; defaults to the model the service
+                was constructed with.
 
         Returns:
             ReviewReport with scores and suggestions.
@@ -61,6 +64,7 @@ class ValidationService:
             ValidationError: If the file type is unsupported or
                 PDF reading fails.
         """
+        model = model or self._model
         resume_text = self._read_resume(resume_path)
 
         jd_analysis: JDAnalysis | None = None

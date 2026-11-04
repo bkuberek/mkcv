@@ -15,7 +15,7 @@ from mkcv.core.models.keyword_coverage import KeywordCoverage
 from mkcv.core.models.requirement import Requirement
 from mkcv.core.models.review_report import ReviewReport
 from mkcv.core.ports.pdf_reader import PdfReaderPort
-from mkcv.core.services.validation import ValidationService
+from mkcv.core.services.validation import DEFAULT_MODEL, ValidationService
 
 # ------------------------------------------------------------------
 # Fixtures
@@ -222,6 +222,67 @@ class TestValidateWithoutJD:
     ) -> None:
         await service_no_jd.validate(resume_yaml_file)
         assert stub_llm_no_jd.call_log[0]["response_model"] == "ReviewReport"
+
+
+# ------------------------------------------------------------------
+# Test: Model selection
+# ------------------------------------------------------------------
+
+
+class TestModelSelection:
+    """The model is bound at construction and can be overridden per call."""
+
+    @staticmethod
+    def _service(llm: StubLLMAdapter, **options: str) -> ValidationService:
+        return ValidationService(llm=llm, prompts=FileSystemPromptLoader(), **options)
+
+    async def test_default_model_is_the_module_default(
+        self, stub_llm_no_jd: StubLLMAdapter, resume_yaml_file: Path
+    ) -> None:
+        await self._service(stub_llm_no_jd).validate(resume_yaml_file)
+        assert stub_llm_no_jd.call_log[0]["model"] == DEFAULT_MODEL
+
+    async def test_constructor_model_is_used(
+        self, stub_llm_no_jd: StubLLMAdapter, resume_yaml_file: Path
+    ) -> None:
+        service = self._service(stub_llm_no_jd, model="gpt-6.1-terra")
+        await service.validate(resume_yaml_file)
+        assert stub_llm_no_jd.call_log[0]["model"] == "gpt-6.1-terra"
+
+    async def test_per_call_model_overrides_the_constructor_model(
+        self, stub_llm_no_jd: StubLLMAdapter, resume_yaml_file: Path
+    ) -> None:
+        service = self._service(stub_llm_no_jd, model="gpt-6.1-terra")
+        await service.validate(resume_yaml_file, model="gemini-3.8-flash")
+        assert stub_llm_no_jd.call_log[0]["model"] == "gemini-3.8-flash"
+
+    async def test_per_call_model_none_falls_back_to_the_constructor_model(
+        self, stub_llm_no_jd: StubLLMAdapter, resume_yaml_file: Path
+    ) -> None:
+        service = self._service(stub_llm_no_jd, model="gpt-6.1-terra")
+        await service.validate(resume_yaml_file, model=None)
+        assert stub_llm_no_jd.call_log[0]["model"] == "gpt-6.1-terra"
+
+    async def test_constructor_model_reaches_both_calls_when_a_jd_is_given(
+        self,
+        stub_llm_with_jd: StubLLMAdapter,
+        resume_yaml_file: Path,
+        jd_file: Path,
+    ) -> None:
+        service = self._service(stub_llm_with_jd, model="gpt-6.1-terra")
+        await service.validate(resume_yaml_file, jd_path=jd_file)
+        assert [call["model"] for call in stub_llm_with_jd.call_log] == [
+            "gpt-6.1-terra",
+            "gpt-6.1-terra",
+        ]
+
+    async def test_constructor_model_is_keyword_only(
+        self, stub_llm_no_jd: StubLLMAdapter
+    ) -> None:
+        with pytest.raises(TypeError):
+            ValidationService(  # type: ignore[misc]
+                stub_llm_no_jd, FileSystemPromptLoader(), None, "gpt-6.1-terra"
+            )
 
 
 # ------------------------------------------------------------------
