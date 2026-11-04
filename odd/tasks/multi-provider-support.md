@@ -57,7 +57,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 - [x] T12: Eval package scaffolding, models, case loading, and cost estimate (route: delegated; new `evals/` package, 10 models, 2 harness modules, CLI, tool config, 5 test files) - `378d9c5`
 - [x] T13: Stage-isolated runner and `run` / `bootstrap-reference` commands (route: delegated; factory function, 7 harness modules, 3 model modules, CLI, recorded fixtures, 6 test files) - `31eef2b`
 - [x] T14: Synthetic eval fixtures (route: delegated; 3 personas, 6 job descriptions, cases.toml, probe reference, 133-test fixture file) - `c714e9c`
-- [ ] T15: Deterministic graders (route: delegated)
+- [x] T15: Deterministic graders (route: delegated; 11 grader modules, runner wiring, 8 recorded failing fixtures, 7 test files) - `9b5259b`
 - [ ] T16: LLM-judge graders and rubrics (route: delegated)
 - [ ] T17: Aggregation, recommendations, report, and eval docs (route: delegated)
 
@@ -109,6 +109,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T12 | `378d9c5` | `ModuleNotFoundError: No module named 'evals'` (3 test modules fail to collect) and 7 `test_tooling.py` assertions on pyproject, CI, and `.gitignore` | 97 focused (tests/test_evals), 3107 full | pending (parent runs `gentle-ai review assess`) |
 | T13 | `31eef2b` | `ImportError: cannot import name 'create_pipeline_service_for_stage_configs' from 'mkcv.adapters.factory'`; `ModuleNotFoundError: No module named 'evals.harness.stage_runner'` (5 new test modules fail to collect; hiding the new modules reproduces it) | 176 added (166 under tests/test_evals, 10 factory), 3283 full | pending (parent runs `gentle-ai review assess`) |
 | T14 | `c714e9c` | `FileNotFoundError: [Errno 2] No such file or directory: '.../evals/fixtures/cases.toml'` (test_fixtures.py fails to collect; hiding the fixtures reproduces it) | 133 focused (tests/test_evals/test_fixtures.py), 3416 full | pending (parent runs `gentle-ai review assess`) |
+| T15 | `9b5259b` | `ModuleNotFoundError: No module named 'evals.graders'` (7 test modules fail to collect; `test_eval_runner.py` imports `evals.graders.grading_context` first) | 197 added (3416 to 3613 full) | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -275,6 +276,19 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Estimate for the shipped matrix over the seven cases (31 runs per model, 190 judge calls): `$36.40` in total, of which `$10.26` is the Claude judge; the largest model line is `openai/gpt-6-astra` at `$10.40` because of its price table, not its token counts. These are the planning token estimates, not measurements.
 - Not done here: the stage 1 to 3 references for the six real cases and the probe do not exist until the owner runs `bootstrap-reference`; until then the real cases record `skipped` for the downstream stages.
 
+**T15** (route: delegated writer, trigger: 11 grader modules, runner wiring, recorded fixtures, and 7 test files).
+
+- Verification: `uv run pytest tests/test_evals`: 593 passed; `uv run ruff check src/ tests/ evals/` and `uv run ruff format --check src/ tests/ evals/`: clean; `uv run mypy` (201 files): clean; `uv run pytest`: 3613 passed, exit 0; `uv lock --check`: consistent.
+- Test strength: 51 one-line mutations of the text helpers, YAML reader, six graders, claim extraction, stage mapping, and the runner wiring; 42 were caught at first. The nine survivors were killed by new tests (company suffix loop, blank cv.name, the "expected a JSON object" message, score counted per rule not per offending text, a company with two roles counted once, a KB date year supporting the same year, a suffix-only company not counted, and the `rewritten` field) or, for the `max(0.0, ...)` floor, removed as dead code (violations never exceed checked claims). All are now caught.
+- Recorded fixtures: `tests/test_evals/fixtures/recorded/ats-failures/` holds one clean-resume variant per ATS rule (R7 has two: an HTML tag and a Markdown table row), each failing exactly that rule; `fabricated-claims/stage3_content.json` is the recorded stage 3 plus a `$2.4M` bullet and a PyTorch bullet. The probe check (`73%` is the only violation of `faithfulness_extraction` on `review-probe/resume.yaml`; R3 is the only ATS failure) is a test.
+- Extra files (all inside the allowed surfaces): `evals/graders/extracted_claims.py` (what each stage's output claims, so the T16 faithfulness judge can reuse the bullets), `evals/graders/resume_yaml.py` (one YAML reader for the schema, ATS, and claim code), `tests/test_evals/grading_support.py` (case, recorded-JSON, and context builders), `tests/test_evals/test_stage_graders.py` (mapping and `PRIMARY_METRIC`).
+- Deviation: `GradingContext` also carries `judge_provider` and `evaluated_provider` (design 9.6 lists only `judge` and `judge_model`); REQ-EV-15's `self_judged` flag needs both providers.
+- Deviation: `jd_keyword_recall` matches whole words (case-insensitive) instead of the design's raw substring of `json.dumps(output)`. `Go` is an expected keyword in the backend cases and a substring match finds it in `ongoing`, `Google`, and `category`, which would make the metric near-vacuous. REQ-EV-8's scenario gives the same 0.667.
+- Decision (design reading): `faithfulness_extraction` also checks stage 2 `suggested_bullets` for numbers and `skills_to_highlight` for forbidden terms (design 9.6 names bullets only for stages 3 and 4, but a fabricated metric in a suggestion is the same fault). `tech_stack` strings count as skill text. A forbidden term is one violation however many times it appears; each term counts as one checked claim. A number is supported by the KB with or without its unit (`40%` supports `40`; design: "its normalized form or its bare digits"), ISO dates in bullets are skipped, and the KB's own dates still support the same year in a bullet. Companies and titles match as whole words after normalization. An output with nothing to read (no output, unparseable YAML) scores 0.0 rather than None, so garbage cannot pass as faithful by silence.
+- Decision: `ats_rules` scores the share of the seven rules that hold, not of offending texts; a resume that cannot be read (or has no `cv.name` / `cv.sections`) scores 0.0 with one failure of rule `parse`, so a degenerate resume cannot rank first on the structure stage's primary metric.
+- Decision: the runner loads only the JSON reference artifacts of the stages before the graded one into `GradingContext.reference` (keys `stage1_analysis`, ...); the stage 4 resume is YAML and not included. A grader that fails with an `MkcvError` leaves a grade with `score=None` and `details.error`, and the run goes on. `EvalRunner(graders=...)` takes a stage-to-graders mapping (default `STAGE_GRADERS`) so tests inject recording and failing graders.
+- `Grader.name` is a read-only property in the Protocol, so a class attribute satisfies it under `mypy --strict`. `STAGE_GRADERS` holds deterministic graders only; `PRIMARY_METRIC` already names the judge metrics of design 9.6.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -299,4 +313,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-T01-T14 are implemented and committed on `feat/multi-provider-support`. Next: T15 (deterministic graders: schema, JD recall, ATS rules, structure, faithfulness extraction, and the `STAGE_GRADERS` plumbing in `EvalRunner._run_job`). Then T16-T17, then the owner actions at the end of `tasks.md`.
+T01-T15 are implemented and committed on `feat/multi-provider-support`. Next: T16 (LLM-judge graders, rubrics, and the once-per-run judge), then T17, then the owner actions at the end of `tasks.md`.
