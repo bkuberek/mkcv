@@ -38,7 +38,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 - [x] T02: OpenAI-compatible adapter with structured-output fallback chain (route: delegated; 6 new adapter modules) - `703caff`
 - [x] T03: Native OpenAI adapter with strict structured outputs (route: delegated; adapter rewrite + test rewrite) - `baecd67`
 - [x] T04: Capability-driven Anthropic request shaping (route: delegated; adapter + tests) - `9333892`
-- [ ] T05: Provider registry, catalog overrides, and factory dispatch (route: delegated; registry, loader, factory, services, workspace README)
+- [x] T05: Provider registry, catalog overrides, and factory dispatch (route: delegated; registry, loader, factory, services, workspace README) - `03914d0`
 
 ### P2: Google Gemini
 
@@ -99,6 +99,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T02 | `703caff` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.strict_schema'` | 311 focused, 2110 full | pending (parent runs `gentle-ai review assess`) |
 | T03 | `baecd67` | `KeyError: 'max_completion_tokens'` (request still sent json_object, temperature, max_tokens) | 82 focused (test_openai + test_factory), 2148 full | pending (parent runs `gentle-ai review assess`) |
 | T04 | `9333892` | `TypeError: AnthropicAdapter.__init__() got an unexpected keyword argument 'resolver'` | 68 focused (test_anthropic), 2184 full | pending (parent runs `gentle-ai review assess`) |
+| T05 | `03914d0` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.model_catalog_loader'` (registry test imports it first; `provider_registry` is missing too) | 866 focused (tests/test_adapters + pipeline + cover letter), 2289 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -133,6 +134,15 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Error mapping is deliberately unchanged (context-length mapping only in `complete`); only the `provider` label now comes from `provider_name`. The temperature retry loop is bounded because the retried request no longer contains `temperature`.
 - Behaviour change (design D20): a Claude model unknown to the catalog now resolves to the strict defaults (no `temperature`, 16000 floor, `output_config`) where the old prefix check treated it as a 4.x model.
 
+**T05** (route: delegated writer, trigger: registry, loader, factory, two services, README builder, two deletions).
+
+- Verification: `uv run pytest -q tests/test_adapters tests/test_core/test_services/test_pipeline.py tests/test_core/test_services/test_cover_letter.py`: 866 passed; ruff check/format, `uv run mypy src/` (148 files): clean; `uv run pytest -q`: 2289 passed, exit 0. `rg -n "elif provider ==" src/mkcv/adapters/factory.py`: no matches; `fd ollama src tests`: no matches; `rg -n "OllamaAdapter|_PROVIDER_ENV_KEYS|_resolve_api_key" src tests`: only the assertions/docstrings that name them as gone. 21 one-line mutations of the registry, loader, factory, services, and README builder were all caught.
+- Dynaconf behaviour verified empirically before writing the loader tests: with `merge_enabled=True`, `[[default.model_catalog]]` arrays from later layers (and from `load_file`) are appended after earlier layers' items, so workspace entries overlay global ones; tables deep-merge; `config.get("providers", {})` returns a `Box` (a `dict`), and `config.get("model_catalog", [])` a `BoxList` (a `list`).
+- Tests that built `MagicMock` configs now need `config.get` to answer registry lookups; `test_factory.py` and `test_kb_factory.py` gained a `_blank_config`/`_make_config` that returns the caller's default for unset keys. The legacy attribute pattern (`config.pipeline.stages...`) is untouched and still goes away in T08.
+- Costs are priced with the stage's provider (`calculate_cost(..., provider=provider)`), per design §4.4. A stage whose provider name has no catalog entries for its model prices at 0.0, where the old table matched on model name alone. A test (`test_price_is_looked_up_for_the_stage_provider`) pins this.
+- `OllamaAdapter` behaviours were ported to `test_openai_compatible.py` (schema augmentation helper, connection error naming, parse and validation failures); its `model or default_model` fallback was dropped because every caller passes a model. `test_ollama.py` and `ollama.py` are deleted.
+- The `GOOGLE` builder raises `ConfigurationError("The google provider is not available yet")` as planned; `test_google_is_not_available_before_its_adapter_lands` in `test_provider_registry.py` is replaced in T06.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -157,4 +167,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-Create `feat/multi-provider-support` from `main` and start T01.
+Phase 1 (T01-T05) is implemented and committed on `feat/multi-provider-support`. Next: T06 (Google Gemini adapter; locks `google-genai`, replaces the registry's `GOOGLE` builder stub and its placeholder test).
