@@ -666,7 +666,7 @@ def _missing_key_warning(registry: ProviderRegistry, provider: str) -> ModelWarn
         model=None,
         message=(
             f"{provider}: no API key found (set {where}); "
-            "mkcv will use the offline stub and produce empty output."
+            "a run that uses it stops with a configuration error."
         ),
     )
 

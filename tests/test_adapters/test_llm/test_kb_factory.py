@@ -11,6 +11,18 @@ from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.services.kb_generation_service import KBGenerationService
 
 
+@pytest.fixture(autouse=True)
+def _fake_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every keyed built-in provider a key, as a configured user has."""
+    for variable in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.setenv(variable, "sk-test-fake")
+
+
 def _make_config(
     provider: str = "stub",
     api_key: str | None = None,
@@ -43,13 +55,19 @@ class TestCreateKBGenerationService:
         service = create_kb_generation_service(config)
         assert isinstance(service, KBGenerationService)
 
-    def test_uses_stub_when_no_api_key(self) -> None:
-        config = _make_config()
-        service = create_kb_generation_service(config)
-        # When no API key, anthropic falls back to stub
-        assert isinstance(service._llm, StubLLMAdapter) or hasattr(
-            service._llm, "_inner"
-        )
+    def test_missing_api_key_is_a_configuration_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
+            create_kb_generation_service(_make_config())
+
+    def test_stub_provider_needs_no_api_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        service = create_kb_generation_service(_make_config(), provider_override="stub")
+        assert isinstance(service._llm, StubLLMAdapter)
 
     def test_provider_override(self) -> None:
         config = _make_config()

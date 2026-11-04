@@ -35,6 +35,18 @@ from mkcv.core.services.regeneration import RegenerationService
 from mkcv.core.services.workspace import WorkspaceService
 
 
+@pytest.fixture(autouse=True)
+def _fake_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every keyed built-in provider a key, as a configured user has."""
+    for variable in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.setenv(variable, "sk-test-fake")
+
+
 def _blank_config(**values: Any) -> MagicMock:
     """Build a mock Configuration whose ``get`` resolves ``values`` by key.
 
@@ -89,13 +101,13 @@ class TestCreateLLMAdapter:
         assert isinstance(adapter, RetryingLLMAdapter)
         assert isinstance(_unwrap(adapter), OpenAIAdapter)
 
-    def test_falls_back_to_stub_when_no_api_key(
+    def test_missing_api_key_is_a_configuration_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         config = _make_config(provider="anthropic")
-        adapter = _create_llm_adapter("anthropic", config)
-        assert isinstance(_unwrap(adapter), StubLLMAdapter)
+        with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
+            _create_llm_adapter("anthropic", config)
 
     def test_uses_env_var_for_anthropic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-key")
@@ -141,12 +153,12 @@ class TestCreateLLMAdapter:
         adapter = _create_llm_adapter("openrouter", config, with_retry=False)
         assert type(adapter) is OpenAICompatibleAdapter
 
-    def test_openrouter_without_a_key_falls_back_to_the_stub(
+    def test_openrouter_without_a_key_is_a_configuration_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-        adapter = _create_llm_adapter("openrouter", _make_config())
-        assert isinstance(adapter, StubLLMAdapter)
+        with pytest.raises(ConfigurationError, match="OPENROUTER_API_KEY"):
+            _create_llm_adapter("openrouter", _make_config())
 
     def test_unknown_provider_is_a_configuration_error(self) -> None:
         with pytest.raises(ConfigurationError, match="Unknown LLM provider 'nope'"):
@@ -990,8 +1002,8 @@ model = "gemini-2.5-flash"
                 None,
                 "openai",
                 None,
-                "openai: no API key found (set OPENAI_API_KEY); mkcv will use the "
-                "offline stub and produce empty output.",
+                "openai: no API key found (set OPENAI_API_KEY); a run that uses "
+                "it stops with a configuration error.",
             )
         ]
 
@@ -1000,7 +1012,7 @@ model = "gemini-2.5-flash"
         report = create_model_report(config, model_profile="google")
         assert report.warnings[0].message == (
             "google: no API key found (set GEMINI_API_KEY or GOOGLE_API_KEY); "
-            "mkcv will use the offline stub and produce empty output."
+            "a run that uses it stops with a configuration error."
         )
 
     def test_a_provider_with_only_a_config_key_says_where_to_set_it(

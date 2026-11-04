@@ -290,6 +290,62 @@ requires_api_key = true
         assert registry.has_credentials("ollama") is False
 
 
+class TestCompatibleBaseUrlNormalisation:
+    @pytest.mark.parametrize(
+        "given",
+        ["http://localhost:11434", "http://localhost:11434/"],
+    )
+    def test_bare_host_gets_the_v1_path(self, tmp_path: Path, given: str) -> None:
+        config = f'[default.providers.ollama]\nbase_url = "{given}"\n'
+        spec = _registry(tmp_path, config).get("ollama")
+        assert spec.base_url == "http://localhost:11434/v1"
+
+    def test_explicit_path_is_left_alone(self, tmp_path: Path) -> None:
+        config = '[default.providers.ollama]\nbase_url = "http://host:1/custom"\n'
+        assert _registry(tmp_path, config).get("ollama").base_url == (
+            "http://host:1/custom"
+        )
+
+    def test_explicit_v1_path_is_left_alone(self, tmp_path: Path) -> None:
+        config = '[default.providers.ollama]\nbase_url = "http://host:1/v1/"\n'
+        assert _registry(tmp_path, config).get("ollama").base_url == (
+            "http://host:1/v1/"
+        )
+
+    def test_user_defined_compatible_provider_is_normalised(
+        self, tmp_path: Path
+    ) -> None:
+        config = """
+[default.providers.local]
+type = "openai-compatible"
+base_url = "http://gpu-box:8000"
+requires_api_key = false
+"""
+        assert _registry(tmp_path, config).get("local").base_url == (
+            "http://gpu-box:8000/v1"
+        )
+
+    def test_native_kind_endpoint_is_not_touched(self, tmp_path: Path) -> None:
+        config = '[default.providers.openai]\nbase_url = "https://proxy.example"\n'
+        assert _registry(tmp_path, config).get("openai").base_url == (
+            "https://proxy.example"
+        )
+
+    def test_adapter_client_uses_the_normalised_url(self, tmp_path: Path) -> None:
+        config = '[default.providers.ollama]\nbase_url = "http://localhost:11434"\n'
+        adapter = _registry(tmp_path, config).create_adapter("ollama", with_retry=False)
+        assert isinstance(adapter, OpenAICompatibleAdapter)
+        assert str(adapter._client.base_url).startswith("http://localhost:11434/v1")
+
+    def test_normalisation_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.INFO)
+        config = '[default.providers.ollama]\nbase_url = "http://localhost:11434"\n'
+        _registry(tmp_path, config)
+        assert "http://localhost:11434/v1" in caplog.text
+
+
 class TestInvalidProviderConfig:
     """REQ-PR-4."""
 
@@ -321,25 +377,38 @@ class TestInvalidProviderConfig:
         with pytest.raises(ConfigurationError, match="carrier-pigeon"):
             _registry(tmp_path, config)
 
-    def test_unknown_key(self, tmp_path: Path) -> None:
+    def test_unknown_key_is_ignored_with_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
         config = """
 [default.providers.groq]
 type = "openai-compatible"
 base_url = "https://x"
 colour = "red"
 """
-        with pytest.raises(ConfigurationError, match="Unknown key 'colour'"):
-            _registry(tmp_path, config)
+        spec = _registry(tmp_path, config).get("groq")
+        assert spec.kind is ProviderKind.OPENAI_COMPATIBLE
+        assert "colour" in caplog.text
 
-    def test_unknown_key_message_names_the_section(self, tmp_path: Path) -> None:
+    def test_unknown_key_warning_names_the_section(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
         config = """
 [default.providers.groq]
 type = "openai-compatible"
 base_url = "https://x"
 colour = "red"
 """
-        with pytest.raises(ConfigurationError, match=r"\[default\.providers\.groq\]"):
-            _registry(tmp_path, config)
+        _registry(tmp_path, config)
+        assert "[default.providers.groq]" in caplog.text
+
+    def test_unknown_key_on_a_builtin_provider_does_not_abort(
+        self, tmp_path: Path
+    ) -> None:
+        config = '[default.providers.ollama]\nmodels = ["llama3.1"]\n'
+        assert _registry(tmp_path, config).get("ollama").builtin is True
 
     def test_invalid_capability_value(self, tmp_path: Path) -> None:
         config = """
@@ -493,13 +562,36 @@ tier = "minimal"
             adapter._resolver("anthropic", "claude-opus-5-5").tier is ModelTier.MINIMAL
         )
 
-    def test_missing_key_falls_back_to_the_stub(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    def test_missing_key_raises_a_configuration_error(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigurationError, match="OPENROUTER_API_KEY"):
+            _registry(tmp_path).create_adapter("openrouter")
+
+    def test_missing_key_error_names_the_provider(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigurationError, match="openrouter"):
+            _registry(tmp_path).create_adapter("openrouter")
+
+    def test_missing_key_error_uses_exit_code_three(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigurationError) as raised:
+            _registry(tmp_path).create_adapter("openai")
+        assert raised.value.exit_code == 3
+
+    def test_missing_key_error_names_every_google_variable(
+        self, tmp_path: Path
     ) -> None:
-        caplog.set_level(logging.WARNING)
-        adapter = _registry(tmp_path).create_adapter("openrouter")
-        assert isinstance(adapter, StubLLMAdapter)
-        assert "No API key for provider 'openrouter'" in caplog.text
+        with pytest.raises(ConfigurationError, match=r"GEMINI_API_KEY.*GOOGLE_API_KEY"):
+            _registry(tmp_path).create_adapter("google")
+
+    def test_missing_key_error_points_at_config_without_a_variable(
+        self, tmp_path: Path
+    ) -> None:
+        config = """
+[default.providers.vault]
+type = "openai-compatible"
+base_url = "https://vault.example/v1"
+requires_api_key = true
+"""
+        with pytest.raises(ConfigurationError, match=r"api_key in \[default.providers"):
+            _registry(tmp_path, config).create_adapter("vault")
 
     def test_keyless_provider_gets_a_compatible_adapter(self, tmp_path: Path) -> None:
         adapter = _registry(tmp_path).create_adapter("ollama", with_retry=False)
@@ -584,13 +676,11 @@ class TestGoogleAdapterCreation:
             _registry(tmp_path).create_adapter("google", with_retry=False)
         assert client.call_args.kwargs["api_key"] == "g1"
 
-    def test_missing_key_falls_back_to_the_stub(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        caplog.set_level(logging.WARNING)
-        adapter = _registry(tmp_path).create_adapter("google")
-        assert isinstance(adapter, StubLLMAdapter)
-        assert "No API key for provider 'google'" in caplog.text
+    def test_missing_key_raises_a_configuration_error(self, tmp_path: Path) -> None:
+        with pytest.raises(
+            ConfigurationError, match="No API key for provider 'google'"
+        ):
+            _registry(tmp_path).create_adapter("google")
 
     def test_adapter_resolves_models_through_the_registry(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

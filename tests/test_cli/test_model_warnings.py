@@ -19,8 +19,8 @@ _UNKNOWN_MESSAGE = (
     "conservative defaults. Describe it with a [[default.model_catalog]] entry."
 )
 _KEY_MESSAGE = (
-    "openai: no API key found (set OPENAI_API_KEY); mkcv will use the offline "
-    "stub and produce empty output."
+    "openai: no API key found (set OPENAI_API_KEY); a run that uses it stops "
+    "with a configuration error."
 )
 
 

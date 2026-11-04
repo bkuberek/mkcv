@@ -11,6 +11,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import ValidationError
 
@@ -40,6 +41,7 @@ _PROVIDER_SETTING_KEYS = frozenset(
     {"type", "base_url", "api_key_env", "api_key", "requires_api_key"}
 )
 _CAPABILITY_KEYS = frozenset(CapabilityOverlay.model_fields)
+_OPENAI_COMPATIBLE_PATH = "/v1"
 _ALLOWED_SECTION_KEYS = _PROVIDER_SETTING_KEYS | _CAPABILITY_KEYS
 
 _USER_PROVIDER_KINDS = (
@@ -133,8 +135,9 @@ class ProviderRegistry:
     def create_adapter(self, name: str, *, with_retry: bool = True) -> LLMPort:
         """Create the LLM adapter for provider ``name``.
 
-        Falls back to the offline stub (with a warning) when the provider
-        needs an API key and none is available.
+        Raises:
+            ConfigurationError: If the provider is unknown, or it needs an API
+                key and none is configured.
         """
         spec = self.get(name)
         if spec.kind is ProviderKind.STUB:
@@ -143,16 +146,26 @@ class ProviderRegistry:
         api_key = self.resolve_api_key(name)
         if not api_key:
             if spec.requires_api_key:
-                logger.warning(
-                    "No API key for provider '%s'; falling back to stub.", name
-                )
-                return _create_stub()
+                raise ConfigurationError(_missing_key_message(spec))
             api_key = _KEYLESS_API_KEY
 
         adapter = _BUILDERS[spec.kind](spec, api_key, self)
         if with_retry:
             return RetryingLLMAdapter(adapter)
         return adapter
+
+
+def _missing_key_message(spec: ProviderSpec) -> str:
+    variables = " or ".join(spec.api_key_env)
+    sources = (
+        f"{variables}, or api_key in [default.providers.{spec.name}]"
+        if variables
+        else f"api_key in [default.providers.{spec.name}]"
+    )
+    return (
+        f"No API key for provider '{spec.name}': set {sources}. "
+        'For an offline dry run use the "stub" provider.'
+    )
 
 
 def _create_stub() -> LLMPort:
@@ -235,18 +248,22 @@ def _spec_from_section(
         raise ConfigurationError(f"[default.providers.{name}] must be a table")
 
     kind = _kind_for(name, body, builtin)
-    unknown = next((key for key in body if key not in _ALLOWED_SECTION_KEYS), None)
-    if unknown is not None:
-        raise ConfigurationError(
-            f"Unknown key '{unknown}' in [default.providers.{name}]"
-        )
+    for key in body:
+        if key not in _ALLOWED_SECTION_KEYS:
+            logger.warning(
+                "Ignoring unknown key '%s' in [default.providers.%s]", key, name
+            )
+
+    base_url = _optional_text(
+        name, body, "base_url", builtin.base_url if builtin else None
+    )
+    if kind is ProviderKind.OPENAI_COMPATIBLE:
+        base_url = _with_api_path(name, base_url)
 
     return ProviderSpec(
         name=name,
         kind=kind,
-        base_url=_optional_text(
-            name, body, "base_url", builtin.base_url if builtin else None
-        ),
+        base_url=base_url,
         api_key_env=(
             _key_variables(name, body["api_key_env"])
             if "api_key_env" in body
@@ -264,6 +281,23 @@ def _spec_from_section(
         defaults=_capability_defaults(name, body, builtin),
         builtin=builtin is not None,
     )
+
+
+def _with_api_path(name: str, base_url: str | None) -> str | None:
+    """Append ``/v1`` to an OpenAI-compatible URL that has no path.
+
+    ``http://localhost:11434`` is how older docs wrote the Ollama endpoint;
+    the client would call ``/chat/completions`` on it and get a 404. A URL
+    with any explicit path is the user's choice and stays as written.
+    """
+    if not base_url:
+        return base_url
+    parts = urlsplit(base_url)
+    if parts.path not in ("", "/"):
+        return base_url
+    normalised = urlunsplit(parts._replace(path=_OPENAI_COMPATIBLE_PATH))
+    logger.info("base_url of provider '%s' has no path; using %s", name, normalised)
+    return normalised
 
 
 def _kind_for(
