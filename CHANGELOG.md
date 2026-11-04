@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- version list -->
 
+## v1.6.0 (2026-11-04)
+
+### Features
+
+- **llm**: Google Gemini on Vertex AI with Application Default Credentials
+  ([#10](https://github.com/bkuberek/mkcv/pull/10),
+  [`0960da3`](https://github.com/bkuberek/mkcv/commit/0960da39f1893144783f3110ffd248e26e4e4e25))
+
+
 ## v1.5.1 (2026-11-04)
 
 ### Bug Fixes
