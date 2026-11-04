@@ -47,7 +47,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 ### P3: Profiles, resolution, `mkcv models`, warnings, docs
 
 - [x] T07: Stage keys, stage requirements, and built-in model profiles (route: delegated; 6 new core modules) - `07f5a3b`
-- [ ] T08: Stage resolver, preset split, and settings migration (route: delegated; resolver, presets, settings, factory, validation)
+- [x] T08: Stage resolver, preset split, and settings migration (route: delegated; resolver, presets, settings, factory, validation) - `52e7c47`
 - [ ] T09: Model advisor, generation warnings, and `--model-profile` (route: delegated; core service + CLI)
 - [ ] T10: `mkcv models` command (route: delegated; new command + app registration + tests)
 - [ ] T11: Provider and model documentation (route: delegated; 6+ docs files + template)
@@ -102,6 +102,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T05 | `03914d0` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.model_catalog_loader'` (registry test imports it first; `provider_registry` is missing too) | 866 focused (tests/test_adapters + pipeline + cover letter), 2289 full | pending (parent runs `gentle-ai review assess`) |
 | T06 | `1c550ce` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.google'` (both new test files import it) | 156 focused (test_google + test_provider_registry), 2385 full | pending (parent runs `gentle-ai review assess`) |
 | T07 | `07f5a3b` | `ModuleNotFoundError: No module named 'mkcv.core.models.stage_key'` (all four test files import it; `builtin_model_profiles` is reached after it) | 281 focused (test_core/test_catalog + stage_assignment + stage_key), 2580 full | pending (parent runs `gentle-ai review assess`) |
+| T08 | `52e7c47` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.resolution_request'` (resolver tests); `AssertionError: assert 'claude-opus-5-5' == 'gpt-6.1-sol'` in `test_standard_preset_honours_a_tailor_override` (the preset beat per-stage config) | 702 focused (stage resolver, factory, config, presets, validation, cli), 2761 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -167,6 +168,22 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - `StageAssignment.temperature` is unconstrained (as in the design); `to_stage_config()` raises a Pydantic `ValidationError` for a value outside 0..2. T08 must turn a bad configured temperature into a `ConfigurationError` before it builds assignments.
 - `core/models/__init__.py` now exports `ModelProfile`, `StageAssignment`, `StageKey`, and `StageRequirement`. `STAGE_REQUIREMENTS` and the profile helpers are imported from `mkcv.core.catalog.*` (same as `BUILTIN_MODEL_CAPABILITIES`). A subprocess test confirms the catalog modules import first in a fresh interpreter and pull in nothing from `adapters`, `config`, or `cli`.
 
+**T08** (route: delegated writer, trigger: 3 new adapter modules, preset/settings/factory/validation edits, and a test rewrite across 8 files).
+
+- Verification: `uv run pytest tests/test_adapters/test_llm/test_stage_resolver.py tests/test_adapters/test_llm/test_factory.py tests/test_config tests/test_core/test_models/test_profile_preset.py tests/test_core/test_services/test_validation.py tests/test_cli`: 702 passed; ruff check/format and `uv run mypy src/` (158 files): clean; `uv run pytest`: 2761 passed, exit 0. `rg -n '"anthropic"|claude-' src/mkcv/adapters/factory.py` and `rg -n "^\s*(provider|model)\s*=" src/mkcv/config/settings.toml`: no matches.
+- Test strength: 40 one-line mutations of `stage_resolver.py`, `factory.py`, `validation.py`, `profile_preset.py`, and `resolved_stages.py` were all caught.
+- Real-config smoke test (the real `Configuration` class, not temp TOML): defaults give exactly today's models and temperatures for `standard`, `concise`, `budget`, KB, validate, and cover letter; a workspace `mkcv.toml` tailor override and `MKCV_PIPELINE__MODEL_PROFILE=openai` are honoured; `MKCV_PIPELINE__MODEL_PROFILE=nope` makes `mkcv generate` print `Error: Unknown model profile 'nope'...` and exit 3 before any LLM call (REQ-SR-10).
+- Rewritten tests (old precedence replaced, not deleted): `test_factory.py` (`TestResolvePreset`/`TestResolveStageConfigs` became resolver-based classes; `test_budget_preset_ignores_config_settings` became `test_budget_preset_still_yields_ollama_when_config_names_another_provider`; legacy MagicMock attribute stages became `config.get` dotted keys), `test_profile_preset.py` (REQ-MP-2), `test_kb_factory.py`, and `test_configuration.py` (see below).
+- Decision (design gap): the `stub` provider has no profile, and the old `--provider stub` path worked because the preset still supplied a model. The resolver now gives a stub stage the model `stub-model` (`STUB_MODEL`) when nothing names one, instead of failing with `Cannot resolve models`. Explicit config still wins.
+- Decision (design inconsistency): design §6.5 step 5 falls back to `profile.provider` else `DEFAULT_PROVIDER` for a stage that sets only an unknown `model`. With `pipeline.provider = "groq"` (no profile) that would send the model to Anthropic, contradicting the documented meaning of `pipeline.provider` ("default provider when no model_profile is set"). The resolver uses the plan's base provider instead (the profile's provider when a profile exists, so every spec scenario is unchanged; otherwise the configured/default provider).
+- Decision (literal reading kept): under `--provider X`, a stage that sets only `model` (no `provider`) does not count as config for X, so the profile model is used (design §6.5 step 5 requires `cfg_provider == provider_override`). Pinned by `test_a_model_only_config_entry_is_not_config_for_the_overridden_provider`; T11 should document that a stage meant to survive `--provider` must name its provider.
+- Addition: the resolver validates `temperature` (must be a number in 0..2) and string settings, and raises `ConfigurationError` instead of leaking a Pydantic error from `StageAssignment.to_stage_config()` (T07 note). `create_kb_generation_service` raises `ConfigurationError` for a non-integer `max_tokens`/`chunk_threshold`; it previously fell back silently to the defaults.
+- Preset descriptions no longer name models ("economy models", "recommended models"), because the same preset now runs on any provider.
+- `tests/test_config/test_configuration.py` was edited (outside the T08 file list) because `test_pipeline_analyze_stage_has_provider` asserted the removed `provider` key; it now asserts the temperature and checks that `config.get("validate")`, `config.get("kb")`, and dotted stage paths resolve on the real Dynaconf object, which the resolver depends on.
+- Not done, by design: `generate.py` and `cover_letter.py` are unchanged. `generate.py` still calls `create_cover_letter_service(settings, provider_override=...)` without `preset_name`, so a `cl_preset` of `concise` does not yet pick the economy variant for cover letters (T09 passes it through).
+- Known issue for T09 (not caused by T08): the CLI prints errors as `console.print(f"[red]Error:[/red] {exc}")`, and Rich treats `[default.pipeline.stages.select]` in the message as a markup tag and drops it. A user sees `set model in  or choose a --model-profile.` The same happens to T05's `Define new ones under [default.providers.<name>]`. Reproduce with `uv run mkcv generate --jd jd.txt --kb kb.md --provider openrouter`. Fix with `rich.markup.escape(str(exc))` at every `except MkcvError` print site: `cli/app.py:102`, `cli/commands/generate.py` (8 sites), `cover_letter.py` (4), `kb.py` (4), `validate.py` (1). A CLI test that asserts a bracketed message survives is the RED.
+- `[default.validate] temperature` and `[default.pipeline] model_warnings` are in `settings.toml` per design, but `ValidationService` still hard-codes 0.2/0.3 and nothing reads `model_warnings` until T09.
+
 ## Decisions (rationale in `design.md` §1 and §15)
 
 - Eval harness in top-level `evals/` (not packaged), run with `uv run python -m evals`.
@@ -180,7 +197,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 ## Risks to watch during implementation
 
 - Strict-schema transform vs real response models (T02): the parametrized test over all twelve response models is the guard.
-- T08 changes precedence: existing CLI and factory tests that encoded "preset beats config" must be rewritten to the new rule, not deleted.
+- T08 changes precedence: existing CLI and factory tests that encoded "preset beats config" must be rewritten to the new rule, not deleted. (Done in T08; the CLI tests needed no change because they patch the factory.)
 - `uv.lock` on `main` records mkcv `1.2.0` while `pyproject.toml` says `1.3.0`; the first `uv run` rewrites it. Commit that one-line lock change with T06 (when `uv lock` runs anyway) or in T01 if a check needs it.
 
 ## Follow-ups (not in this feature)
@@ -191,4 +208,4 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 
 ## Next step
 
-T01-T07 are implemented and committed on `feat/multi-provider-support`. Next: T08 (stage resolver, preset split, settings migration), then T09-T11.
+T01-T08 are implemented and committed on `feat/multi-provider-support`. Next: T09 (model advisor, warnings, `--model-profile`); fix the Rich markup swallowing of bracketed error text there (see the T08 notes), then T10 and T11.
