@@ -12,17 +12,17 @@ class TestRunMetadata:
         meta = RunMetadata(
             preset="standard",
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
         )
         assert meta.preset == "standard"
         assert meta.provider == "anthropic"
-        assert meta.model == "claude-sonnet-4-20250514"
+        assert meta.model == "claude-sonnet-5-5"
 
     def test_defaults_for_optional_fields(self) -> None:
         meta = RunMetadata(
             preset="standard",
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
         )
         assert meta.duration_seconds == 0.0
         assert meta.review_score == 0
@@ -32,7 +32,7 @@ class TestRunMetadata:
         meta = RunMetadata(
             preset="standard",
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
         )
         assert meta.timestamp is not None
 
@@ -40,7 +40,7 @@ class TestRunMetadata:
         meta = RunMetadata(
             preset="standard",
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             duration_seconds=12.5,
             review_score=85,
             total_cost_usd=0.05,

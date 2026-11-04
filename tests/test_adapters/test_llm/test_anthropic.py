@@ -7,11 +7,37 @@ from unittest.mock import AsyncMock, MagicMock
 import anthropic
 import pytest
 
-from mkcv.adapters.llm.anthropic import AnthropicAdapter
+from mkcv.adapters.llm.anthropic import AnthropicAdapter, uses_strict_request_rules
 from mkcv.core.exceptions.authentication import AuthenticationError
+from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.rate_limit import RateLimitError
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.requirement import Requirement
+
+_JD_ANALYSIS_DATA: dict[str, Any] = {
+    "company": "TestCo",
+    "role_title": "Engineer",
+    "seniority_level": "Senior",
+    "core_requirements": [
+        {
+            "skill": "Python",
+            "importance": "must_have",
+            "context": "Backend development",
+        }
+    ],
+    "technical_stack": ["Python"],
+    "soft_skills": ["Communication"],
+    "leadership_signals": [],
+    "culture_keywords": [],
+    "ats_keywords": ["Python"],
+    "hidden_requirements": [],
+    "role_summary": "A senior engineer role.",
+}
+
+_MESSAGES = [
+    {"role": "system", "content": "You are precise."},
+    {"role": "user", "content": "analyze this JD"},
+]
 
 
 @pytest.fixture
@@ -127,6 +153,248 @@ def _make_usage(input_tokens: int = 100, output_tokens: int = 50) -> MagicMock:
     usage.input_tokens = input_tokens
     usage.output_tokens = output_tokens
     return usage
+
+
+def _make_text_block(text: str) -> MagicMock:
+    block = MagicMock()
+    block.type = "text"
+    block.text = text
+    return block
+
+
+def _make_thinking_block() -> MagicMock:
+    block = MagicMock()
+    block.type = "thinking"
+    block.thinking = ""
+    return block
+
+
+def _make_final_message(content: list[Any], stop_reason: str = "end_turn") -> MagicMock:
+    final = MagicMock()
+    final.content = content
+    final.stop_reason = stop_reason
+    final.usage = _make_usage()
+    return final
+
+
+def _mock_final_message_stream(final_message: Any) -> MagicMock:
+    """Create a stream mock that only exposes the final assembled message."""
+    return _mock_tool_stream_with_events([], final_message)
+
+
+def _sent_kwargs(stream_mock: MagicMock) -> dict[str, Any]:
+    kwargs: dict[str, Any] = stream_mock.call_args.kwargs
+    return kwargs
+
+
+class TestIsClaude5Family:
+    """Tests for the Claude 5.x model-family check."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-fable-5-1",
+            "claude-mythos-5-1",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+        ],
+    )
+    def test_strict_rule_models_match(self, model: str) -> None:
+        assert uses_strict_request_rules(model)
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4-20250514",
+            "claude-3-5-sonnet-20241022",
+        ],
+    )
+    def test_older_models_do_not_match(self, model: str) -> None:
+        assert not uses_strict_request_rules(model)
+
+
+class TestAnthropicRequestShape:
+    """Exact request kwargs per model family."""
+
+    async def test_complete_claude_5_omits_sampling_and_floors_max_tokens(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        stream = _mock_final_message_stream(
+            _make_final_message([_make_text_block("ok")])
+        )
+        anthropic_adapter._client.messages.stream = stream
+
+        await anthropic_adapter.complete(
+            _MESSAGES, model="claude-opus-5-5", temperature=0.7, max_tokens=4096
+        )
+
+        assert _sent_kwargs(stream) == {
+            "model": "claude-opus-5-5",
+            "messages": [{"role": "user", "content": "analyze this JD"}],
+            "max_tokens": 16000,
+            "system": "You are precise.",
+        }
+
+    async def test_complete_claude_5_keeps_larger_max_tokens(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        stream = _mock_final_message_stream(
+            _make_final_message([_make_text_block("ok")])
+        )
+        anthropic_adapter._client.messages.stream = stream
+
+        await anthropic_adapter.complete(
+            _MESSAGES, model="claude-sonnet-5-5", max_tokens=32000
+        )
+
+        assert _sent_kwargs(stream)["max_tokens"] == 32000
+
+    async def test_complete_claude_4_request_is_unchanged(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        stream = _mock_final_message_stream(
+            _make_final_message([_make_text_block("ok")])
+        )
+        anthropic_adapter._client.messages.stream = stream
+
+        await anthropic_adapter.complete(
+            _MESSAGES, model="claude-sonnet-4-6", temperature=0.7, max_tokens=4096
+        )
+
+        assert _sent_kwargs(stream) == {
+            "model": "claude-sonnet-4-6",
+            "messages": [{"role": "user", "content": "analyze this JD"}],
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "system": "You are precise.",
+        }
+
+    async def test_structured_claude_5_uses_output_config(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        stream = _mock_final_message_stream(
+            _make_final_message([_make_text_block(json.dumps(_JD_ANALYSIS_DATA))])
+        )
+        anthropic_adapter._client.messages.stream = stream
+
+        await anthropic_adapter.complete_structured(
+            _MESSAGES,
+            model="claude-sonnet-5-5",
+            response_model=JDAnalysis,
+            temperature=0.2,
+            max_tokens=8192,
+        )
+
+        assert _sent_kwargs(stream) == {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "analyze this JD"}],
+            "max_tokens": 16000,
+            "system": "You are precise.",
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": anthropic.transform_schema(JDAnalysis),
+                }
+            },
+        }
+
+    async def test_structured_claude_4_keeps_forced_tool_and_temperature(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        final = _make_final_message([])
+        tool_block = MagicMock()
+        tool_block.type = "tool_use"
+        tool_block.name = "extract_jdanalysis"
+        tool_block.input = _JD_ANALYSIS_DATA
+        final.content = [tool_block]
+        stream = _mock_final_message_stream(final)
+        anthropic_adapter._client.messages.stream = stream
+
+        await anthropic_adapter.complete_structured(
+            _MESSAGES,
+            model="claude-opus-4-6",
+            response_model=JDAnalysis,
+            temperature=0.2,
+            max_tokens=8192,
+        )
+
+        sent = _sent_kwargs(stream)
+        assert {k: v for k, v in sent.items() if k != "tools"} == {
+            "model": "claude-opus-4-6",
+            "messages": [{"role": "user", "content": "analyze this JD"}],
+            "temperature": 0.2,
+            "max_tokens": 8192,
+            "system": "You are precise.",
+            "tool_choice": {"type": "tool", "name": "extract_jdanalysis"},
+        }
+        assert [tool["name"] for tool in sent["tools"]] == ["extract_jdanalysis"]
+
+
+class TestAnthropicThinkingBlocks:
+    """Claude 5.x responses carry thinking blocks before the text."""
+
+    async def test_complete_ignores_thinking_blocks(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        final = _make_final_message(
+            [_make_thinking_block(), _make_text_block("Hello from Claude 5.5")]
+        )
+        anthropic_adapter._client.messages.stream = _mock_final_message_stream(final)
+
+        result = await anthropic_adapter.complete(_MESSAGES, model="claude-opus-5-5")
+
+        assert result == "Hello from Claude 5.5"
+
+    async def test_structured_parses_text_after_thinking_block(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        final = _make_final_message(
+            [
+                _make_thinking_block(),
+                _make_text_block(json.dumps(_JD_ANALYSIS_DATA)),
+            ]
+        )
+        anthropic_adapter._client.messages.stream = _mock_final_message_stream(final)
+
+        result = await anthropic_adapter.complete_structured(
+            _MESSAGES, model="claude-opus-5-5", response_model=JDAnalysis
+        )
+
+        assert isinstance(result, JDAnalysis)
+        assert result.company == "TestCo"
+
+    async def test_structured_claude_5_without_text_raises_provider_error(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        final = _make_final_message([_make_thinking_block()])
+        anthropic_adapter._client.messages.stream = _mock_final_message_stream(final)
+
+        with pytest.raises(ProviderError):
+            await anthropic_adapter.complete_structured(
+                _MESSAGES, model="claude-opus-5-5", response_model=JDAnalysis
+            )
+
+    async def test_structured_claude_5_truncated_json_raises_provider_error(
+        self, anthropic_adapter: AnthropicAdapter
+    ) -> None:
+        final = _make_final_message(
+            [_make_text_block('{"company": "Trunc')], stop_reason="max_tokens"
+        )
+        anthropic_adapter._client.messages.stream = _mock_final_message_stream(final)
+
+        with pytest.raises(ProviderError, match="max_tokens"):
+            await anthropic_adapter.complete_structured(
+                _MESSAGES, model="claude-opus-5-5", response_model=JDAnalysis
+            )
 
 
 class TestAnthropicComplete:

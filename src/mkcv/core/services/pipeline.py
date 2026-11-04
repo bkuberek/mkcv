@@ -36,7 +36,7 @@ from mkcv.core.ports.stage_callback import StageCallbackPort
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_MAX_TOKENS = 4096
 STAGE_MAX_TOKENS_YAML = 8192
 
@@ -401,6 +401,7 @@ class PipelineService:
                 model=config.model,
                 temperature=config.temperature,
                 stage_number=stage_number,
+                max_tokens=self._max_tokens_yaml,
             ),
             stage_name=STAGE_NAMES[stage_number],
             stage_number=stage_number,
@@ -457,6 +458,7 @@ class PipelineService:
                 model=config.model,
                 temperature=config.temperature,
                 stage_number=stage_number,
+                max_tokens=self._max_tokens_yaml,
             ),
             stage_name=STAGE_NAMES[stage_number],
             stage_number=stage_number,

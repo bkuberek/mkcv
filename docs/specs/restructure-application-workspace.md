@@ -709,18 +709,18 @@ timestamp = "2026-03-19T10:30:00+00:00"
 preset = "standard"
 theme = "sb2nov"
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-5-5"
 from_stage = 1
 duration_seconds = 45.2
 total_cost_usd = 0.0342
 review_score = 85
 
 [run.stage_models]
-1 = "claude-sonnet-4-20250514"
-2 = "claude-sonnet-4-20250514"
-3 = "claude-sonnet-4-20250514"
+1 = "claude-sonnet-5-5"
+2 = "claude-sonnet-5-5"
+3 = "claude-sonnet-5-5"
 4 = "gpt-4o"
-5 = "claude-sonnet-4-20250514"
+5 = "claude-sonnet-5-5"
 ```
 
 #### SC-4-3-1: Run metadata written after pipeline

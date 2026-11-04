@@ -135,11 +135,11 @@ def _resolve_stage_configs(
         try:
             stage_section = getattr(config.pipeline.stages, key)
             provider = str(getattr(stage_section, "provider", "anthropic"))
-            model = str(getattr(stage_section, "model", "claude-sonnet-4-20250514"))
+            model = str(getattr(stage_section, "model", "claude-sonnet-5-5"))
             temperature = float(getattr(stage_section, "temperature", 0.3))
         except AttributeError:
             provider = "anthropic"
-            model = "claude-sonnet-4-20250514"
+            model = "claude-sonnet-5-5"
             temperature = 0.3
 
         stage_configs[stage_num] = StageConfig(
@@ -552,7 +552,7 @@ def _resolve_cl_stage_configs(
                         getattr(
                             stage_section,
                             "model",
-                            "claude-sonnet-4-20250514",
+                            "claude-sonnet-5-5",
                         )
                     )
                     temperature = float(
@@ -574,7 +574,7 @@ def _resolve_cl_stage_configs(
         # Default fallback
         stage_configs[stage_num] = StageConfig(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=default_temps[stage_num],
         )
 
@@ -735,7 +735,7 @@ def create_kb_generation_service(
     from mkcv.core.services.kb_generation_service import KBGenerationService
 
     # Read KB config section with defaults
-    _default_model = "claude-sonnet-4-20250514"
+    _default_model = "claude-sonnet-5-5"
     try:
         kb_section = getattr(config, "kb", None)
         if kb_section is not None:
