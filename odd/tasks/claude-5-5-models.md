@@ -56,6 +56,9 @@ Out of scope: non-Anthropic providers, historical SDD docs under `docs/changes/`
 - `uv run pytest -q`: exit 0, 1583 passed (`7b16a44` and `3c2761a` each pass alone: 1575)
 - `rg -n "20250514|claude-sonnet-4-6|claude-opus-4-6" src/`: only historical pricing keys
 
+- 2026-11-03: `c5156c9` fix(llm): Opus 4.7/4.8 and Mythos use the strict request rules (they reject sampling params); added `claude-opus-4-20250514` price; example configs moved to 5.5. Checks: ruff, mypy, pytest exit 0.
+- 2026-11-03: v1.3.0 tagged by CI from PR #5. PR #6 opened for this feature.
+
 ## Next step
 
-T3: live smoke test against the API with a 5.5 model (structured outputs not yet exercised against the real API), then PR.
+T3: live smoke test (needs `ANTHROPIC_API_KEY`), then merge PR #6 so CI releases v1.4.0.
