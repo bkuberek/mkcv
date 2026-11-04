@@ -49,7 +49,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 - [x] T07: Stage keys, stage requirements, and built-in model profiles (route: delegated; 6 new core modules) - `07f5a3b`
 - [x] T08: Stage resolver, preset split, and settings migration (route: delegated; resolver, presets, settings, factory, validation) - `52e7c47`
 - [x] T09: Model advisor, generation warnings, and `--model-profile` (route: delegated; core service + CLI) - `5cfb69e` (Rich markup fix first: `9d141c0`)
-- [ ] T10: `mkcv models` command (route: delegated; new command + app registration + tests)
+- [x] T10: `mkcv models` command (route: delegated; new command + app registration + tests) - `6044761`
 - [ ] T11: Provider and model documentation (route: delegated; 6+ docs files + template)
 
 ### P4: Eval harness
@@ -104,6 +104,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T07 | `07f5a3b` | `ModuleNotFoundError: No module named 'mkcv.core.models.stage_key'` (all four test files import it; `builtin_model_profiles` is reached after it) | 281 focused (test_core/test_catalog + stage_assignment + stage_key), 2580 full | pending (parent runs `gentle-ai review assess`) |
 | T08 | `52e7c47` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.resolution_request'` (resolver tests); `AssertionError: assert 'claude-opus-5-5' == 'gpt-6.1-sol'` in `test_standard_preset_honours_a_tailor_override` (the preset beat per-stage config) | 702 focused (stage resolver, factory, config, presets, validation, cli), 2761 full | pending (parent runs `gentle-ai review assess`) |
 | T09 | `5cfb69e` (+ `9d141c0`) | `ModuleNotFoundError: No module named 'mkcv.core.models.model_report'` (advisor/report/warnings tests); `AttributeError: module 'mkcv.cli.commands.generate' does not have the attribute 'create_model_report'` (95 CLI errors); markup fix: `assert '[default.pipeline.stages.select]' in "...set model in  or choose a --model-profile."` (15 failed) | 129 added over the fix commit (2787 to 2916 full); focused: 442 CLI + 156 factory/advisor | pending (parent runs `gentle-ai review assess`) |
+| T10 | `6044761` | `ModuleNotFoundError: No module named 'mkcv.cli.commands.models'` (63 failed, incl. the subprocess help tests) | 66 focused (test_models_command), 2987 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -202,6 +203,19 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Known limitation: with `--cover-letter` and a `--cl-preset` that differs from `--cv-preset`, the single report (design §8.3) uses the CV preset for both document types. The cover letter factory uses `cl_preset`, so the two differ only if `--cl-preset budget` (provider ollama) is mixed with a non-budget CV preset.
 - Known limitation: `--profile budget --model-profile X` fails with "`--model-profile` and `--provider` cannot be used together" because the deprecated `budget` value implies `--provider ollama`. The message names a flag the user did not type; the legacy flag is deprecated, so it is left as is.
 - Not done by design: `kb --provider` help text still lists the old four providers (T11 touches the docs and help strings).
+
+**T10** (route: delegated writer, trigger: new command module, app registration, factory accessor, and a 66-test file).
+
+- Verification: `uv run pytest tests/test_cli/test_models_command.py tests/test_cli/test_app.py`: all passed; `uv run ruff check src/ tests/` and `uv run ruff format --check src/ tests/`: clean; `uv run mypy src/` (165 files): clean; `uv run pytest`: 2987 passed, exit 0; `uv lock --check`: consistent. `uv run mkcv models --help` exits 0; `uv run mkcv models --profiles` runs with no keys (also a subprocess test in `test_app.py`).
+- Test strength: 27 one-line mutations of `models.py` and the `app.py` registration; 23 were caught at first, and the four survivors (an undefined catalog provider, a deprecated entry without notes, the unknown tier cell, the last stage row of a profile) were killed by five added tests, so 27 of 27 are caught.
+- Real CLI check (temp directory, `ANTHROPIC_API_KEY` set, no `OPENAI_API_KEY`, tailor set to `openai/gpt-6.1-terra` through `MKCV_PIPELINE__STAGES__TAILOR__*`): the default view reproduces design §8.4's mock row for row, including `$0.0550` for tailor and `Estimated cost per resume run (5 stages): $0.37`. With no user config the same command prints today's Anthropic models, `$0.54` per resume run, and no `Warnings:` section.
+- Decision (outside the task's file list): `factory.create_provider_registry(config)` is a public wrapper over `_registry`. The `--catalog` view needs the catalog with the user's overrides and the provider names, and the CLI must not import the private helper.
+- Decision: `--catalog` rows show effective capabilities (the entry laid over its provider's defaults), so sampling and structured-output cells say what a request would really use. `--catalog --json` lists the raw entries (`ModelCapability.model_dump`), the form a user writes in `[[default.model_catalog]]`.
+- Decision: `--catalog --provider X` validates `X` through the registry, so a typo exits 3 with the known providers instead of printing an empty table; a defined provider with no entries (`stub`) prints `No catalog entries for provider 'stub'.`
+- Decision: `--profiles` together with `--catalog` exits 2 (usage error, like `generate --app-dir` conflicts); `--provider` and `--model-profile` are ignored by `--profiles`, which always lists all seven. The three view flags have no `--no-` forms.
+- Decision: the `Source:` line is derived from the report plus the flags (`cli (--model-profile)`, `cli (--provider)`, `preset (budget)`, `config (pipeline.model_profile or pipeline.provider)`, `default (...)`). The report records where a choice came from but not which config key, so the config line names both.
+- Decision: JSON goes through `console.print(..., markup=False, highlight=False, soft_wrap=True, emoji=False)`, because a narrow terminal would otherwise wrap it, and a catalog note such as `see [default.providers.groq] :rocket:` would lose its bracketed path and gain an emoji. Two tests pin this on a 40-column console.
+- Known limitation: on a non-TTY or narrow terminal Rich wraps table cells at the console width (80 columns when piped). The tests use a 240-column console; scripts should use `--json`.
 
 ## Decisions (rationale in `design.md` §1 and §15)
 
