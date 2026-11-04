@@ -22,6 +22,9 @@ a knowledge base, config, and `applications/{company}/{YYYY-MM-position}/` dirs.
 | `validate` | Implemented   | LLM-powered ATS check, PDF + YAML, KB validation |
 | `themes`   | Implemented   | Lists themes with metadata, --preview support |
 | `status`   | Implemented   | Workspace overview and application listing    |
+| `cover-letter` | Implemented | Tailored cover letter from a JD and resume/KB |
+| `kb`       | Implemented   | Generate or update a career knowledge base    |
+| `models`   | Implemented   | Models, tiers, and costs per stage; `--profiles`, `--catalog`, `--json` |
 
 ## Tech Stack
 
@@ -33,7 +36,7 @@ a knowledge base, config, and `applications/{company}/{YYYY-MM-position}/` dirs.
 - **Jinja2** for prompt templates (`.j2` files in `src/mkcv/prompts/`)
 - **RenderCV** (Typst) for PDF rendering via Python API
 - **pytest + pytest-asyncio** for tests, **ruff** for lint/format, **mypy --strict** for types
-- AI providers: Anthropic, OpenAI, Ollama, Stub (provider-agnostic via `LLMPort`)
+- AI providers: Anthropic, OpenAI, Google Gemini, and any OpenAI-compatible endpoint (Ollama and OpenRouter are built in), plus an offline Stub — provider-agnostic via `LLMPort`; a model profile picks a provider and model per stage (see `docs/models.md`)
 
 ## Build / Run / Test
 
@@ -58,12 +61,14 @@ uv run mypy src/                                 # Type check
 src/mkcv/
 ├── cli/                  # Cyclopts commands — no business logic
 │   ├── app.py            # App entry point, global options, meta handler
-│   └── commands/         # generate, render, validate, init_cmd, themes, status
+│   ├── commands/         # generate, render, validate, init_cmd, themes, status, cover_letter, kb, models
+│   └── model_warnings.py # Prints the non-blocking model warnings
 ├── core/                 # Pure business logic — never imports from adapters
+│   ├── catalog/          # Static data: model capabilities, model profiles, stage requirements
 │   ├── exceptions/       # MkcvError hierarchy (one class per file)
 │   ├── models/           # Pydantic data models (one class per file)
 │   ├── ports/            # Protocol interfaces: LLMPort, RendererPort, etc.
-│   └── services/         # Pipeline, Render, Validation, Workspace, Theme, etc.
+│   └── services/         # Pipeline, Render, Validation, Workspace, Theme, ModelAdvisor, etc.
 ├── config/               # Dynaconf configuration + workspace discovery
 │   ├── configuration.py  # 5-layer Configuration class
 │   ├── workspace.py      # find_workspace_root(), is_workspace()
@@ -71,7 +76,7 @@ src/mkcv/
 └── adapters/             # Implementations of core ports
     ├── factory.py        # DI wiring — creates fully-assembled services
     ├── filesystem/       # ArtifactStore, PromptLoader, WorkspaceManager, PyPdfReader
-    ├── llm/              # Anthropic, OpenAI, Ollama, Stub adapters + retry
+    ├── llm/              # Anthropic, OpenAI, Google, OpenAI-compatible, Stub adapters; provider registry, stage resolver, retry
     └── renderers/        # RenderCV (Typst → PDF)
 ```
 
@@ -125,6 +130,7 @@ from mkcv.core.ports.llm import LLMPort
 ### Error Handling
 
 Custom hierarchy rooted at `MkcvError` (each with `exit_code`):
+- `ConfigurationError` (3) — unknown provider/profile, unresolvable stage models, invalid settings
 - `ProviderError` (4) → `RateLimitError`, `AuthenticationError`, `ContextLengthError`
 - `PipelineStageError` (5), `ValidationError` (5)
 - `RenderError` (6), `TemplateError` (6)
@@ -141,7 +147,9 @@ Never catch bare `Exception` — always catch specific types.
 4. Environment variables (`MKCV_` prefix)
 5. CLI flags (applied at runtime)
 
-Secrets via env vars: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.
+Secrets via env vars: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `OPENROUTER_API_KEY`, or the `api_key_env` of a provider defined in config.
+
+In `mkcv.toml`, every section header needs the `default.` prefix (`[default.pipeline.stages.tailor]`), or the setting is ignored. Which provider and model each stage uses is decided by the stage resolver: CLI flags, then per-stage config, then a model profile. Never hard-code a provider or model name in `adapters/factory.py`; add providers as data in `adapters/llm/builtin_providers.py` and models in `core/catalog/builtin_models.py`.
 
 ### Testing
 
@@ -153,6 +161,7 @@ Secrets via env vars: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.
 
 ## Reference Documentation
 
+- Models, providers, and profiles: `docs/models.md`
 - Architecture: `docs/specs/architecture.md`
 - Data models: `docs/specs/data-models.md`
 - CLI interface: `docs/specs/cli-interface.md`

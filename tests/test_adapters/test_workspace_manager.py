@@ -1,10 +1,16 @@
 """Tests for WorkspaceManager filesystem operations."""
 
+import re
+import tomllib
 from pathlib import Path
 
 import pytest
+from dynaconf import Dynaconf
 
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
+from mkcv.adapters.llm.model_catalog_loader import load_model_catalog
+from mkcv.adapters.llm.provider_registry import ProviderRegistry
+from mkcv.core.catalog.builtin_model_profiles import BUILTIN_MODEL_PROFILES
 from mkcv.core.exceptions import WorkspaceError, WorkspaceExistsError
 
 
@@ -507,3 +513,171 @@ class TestListApplications:
         # Both created "today" so timestamps are very close
         # Just verify we get 2 results
         assert len(result) == 2
+
+
+class TestWorkspaceReadmeCredentials:
+    """REQ-PR-7: the README credentials block comes from the provider registry."""
+
+    @staticmethod
+    def _credentials_block(tmp_path: Path) -> str:
+        target = tmp_path / "ws"
+        WorkspaceManager().create_workspace(target)
+        readme = (target / "README.md").read_text()
+        section = readme.split("### 2. Set up an API key", 1)[1].split("### 3.", 1)[0]
+        return section.split("```bash", 1)[1].split("```", 1)[0]
+
+    @pytest.mark.parametrize(
+        "export_line",
+        [
+            "export ANTHROPIC_API_KEY=sk-ant-...",
+            "export OPENAI_API_KEY=sk-...",
+            "export GEMINI_API_KEY=...",
+            "export OPENROUTER_API_KEY=sk-or-...",
+        ],
+    )
+    def test_block_lists_each_keyed_provider(
+        self, tmp_path: Path, export_line: str
+    ) -> None:
+        assert export_line in self._credentials_block(tmp_path)
+
+    def test_google_hint_names_gemini(self, tmp_path: Path) -> None:
+        block = self._credentials_block(tmp_path)
+        assert "# Google Gemini\nexport GEMINI_API_KEY=..." in block
+
+    def test_block_lists_providers_in_registry_order_with_ollama_last(
+        self, tmp_path: Path
+    ) -> None:
+        block = self._credentials_block(tmp_path)
+        positions = [
+            block.index(marker)
+            for marker in ("ANTHROPIC", "OPENAI", "GEMINI", "OPENROUTER", "Ollama")
+        ]
+        assert positions == sorted(positions)
+
+    def test_ollama_hint_needs_no_key(self, tmp_path: Path) -> None:
+        block = self._credentials_block(tmp_path)
+        assert "ollama serve" in block
+        assert block.strip().endswith("# Just run: ollama serve")
+
+    def test_block_never_mentions_the_stub_provider(self, tmp_path: Path) -> None:
+        assert "stub" not in self._credentials_block(tmp_path).lower()
+
+
+def _uncommented_examples(text: str) -> str:
+    """Turn the commented TOML examples of the pipeline and provider sections on."""
+    lines: list[str] = []
+    active = False
+    for line in text.splitlines():
+        if line.startswith("# ──"):
+            active = "Pipeline" in line or "Providers" in line or "Model" in line
+        if active and re.match(r"^# (\[|[a-z_]+ = )", line):
+            lines.append(line[2:])
+    return "\n".join(lines)
+
+
+class TestWorkspaceConfigTemplate:
+    """The workspace mkcv.toml documents profiles, providers, and the catalog."""
+
+    @staticmethod
+    def _template(tmp_path: Path) -> str:
+        target = tmp_path / "ws"
+        WorkspaceManager().create_workspace(target)
+        return (target / "mkcv.toml").read_text()
+
+    def test_template_is_valid_toml(self, tmp_path: Path) -> None:
+        assert tomllib.loads(self._template(tmp_path))["default"]["workspace"]
+
+    def test_documents_the_model_profile_setting(self, tmp_path: Path) -> None:
+        assert '# model_profile = "anthropic"' in self._template(tmp_path)
+
+    def test_names_every_built_in_profile(self, tmp_path: Path) -> None:
+        template = self._template(tmp_path)
+        assert [n for n in BUILTIN_MODEL_PROFILES if n not in template] == []
+
+    def test_documents_the_provider_fallback_setting(self, tmp_path: Path) -> None:
+        assert '# provider = "anthropic"' in self._template(tmp_path)
+
+    def test_documents_the_warnings_switch(self, tmp_path: Path) -> None:
+        assert "# model_warnings = true" in self._template(tmp_path)
+
+    def test_points_at_the_models_command(self, tmp_path: Path) -> None:
+        assert "mkcv models" in self._template(tmp_path)
+
+    def test_documents_the_google_provider(self, tmp_path: Path) -> None:
+        template = self._template(tmp_path)
+        assert "# [default.providers.google]" in template
+        assert "GEMINI_API_KEY" in template
+
+    def test_documents_a_custom_openai_compatible_provider(
+        self, tmp_path: Path
+    ) -> None:
+        template = self._template(tmp_path)
+        assert "# [default.providers.groq]" in template
+        assert '# type = "openai-compatible"' in template
+
+    def test_documents_the_model_catalog(self, tmp_path: Path) -> None:
+        assert "# [[default.model_catalog]]" in self._template(tmp_path)
+
+    def test_the_commented_examples_are_valid_toml(self, tmp_path: Path) -> None:
+        enabled = tomllib.loads(_uncommented_examples(self._template(tmp_path)))
+        assert enabled["default"]["providers"]["groq"]["type"] == "openai-compatible"
+        assert enabled["default"]["model_catalog"][0]["provider"] == "groq"
+        assert enabled["default"]["pipeline"]["model_profile"] == "anthropic"
+
+    def test_the_commented_examples_are_accepted_by_the_registry(
+        self, tmp_path: Path
+    ) -> None:
+        examples = tmp_path / "examples.toml"
+        examples.write_text(_uncommented_examples(self._template(tmp_path)))
+        config = Dynaconf(
+            settings_files=[str(examples)],
+            environments=True,
+            default_env="default",
+            merge_enabled=True,
+        )
+        registry = ProviderRegistry.from_config(config, load_model_catalog(config))
+        assert registry.get("groq").kind.value == "openai-compatible"
+
+
+class TestWorkspaceReadmeModels:
+    """The workspace README describes presets, profiles, and ``mkcv models``."""
+
+    @staticmethod
+    def _readme(tmp_path: Path) -> str:
+        target = tmp_path / "ws"
+        WorkspaceManager().create_workspace(target)
+        return (target / "README.md").read_text()
+
+    def test_presets_are_selected_with_the_preset_flag(self, tmp_path: Path) -> None:
+        readme = self._readme(tmp_path)
+        assert "mkcv generate --jd job.txt --preset concise" in readme
+
+    def test_the_removed_profile_flag_is_not_advertised(self, tmp_path: Path) -> None:
+        assert (
+            re.search(r"(?<![\w-])--profile(?![\w-])", self._readme(tmp_path)) is None
+        )
+
+    def test_model_profiles_are_explained(self, tmp_path: Path) -> None:
+        readme = self._readme(tmp_path)
+        assert "--model-profile google" in readme
+        assert "pipeline.model_profile" in readme
+
+    def test_the_models_command_is_listed(self, tmp_path: Path) -> None:
+        assert "| `mkcv models` |" in self._readme(tmp_path)
+
+    def test_every_command_in_the_table_has_a_description(self, tmp_path: Path) -> None:
+        rows = [
+            line
+            for line in self._readme(tmp_path).splitlines()
+            if line.startswith("| `mkcv ")
+        ]
+        assert [row for row in rows if row.endswith("|  |")] == []
+
+    def test_presets_no_longer_claim_claude_only_models(self, tmp_path: Path) -> None:
+        readme = self._readme(tmp_path)
+        assert "Haiku for all stages" not in readme
+
+    def test_the_openrouter_example_uses_the_default_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        assert "[default.pipeline.stages.analyze]" in self._readme(tmp_path)

@@ -1,143 +1,40 @@
-"""OpenAI GPT LLM adapter."""
+"""OpenAI LLM adapter with native strict structured outputs."""
 
-import logging
-from typing import Any
-
-import openai
-from pydantic import BaseModel
-
-from mkcv.adapters.llm._utils import (
-    build_schema_prompt,
-    extract_json_from_text,
-    validate_structured_response,
-)
-from mkcv.core.exceptions.authentication import AuthenticationError
-from mkcv.core.exceptions.context_length import ContextLengthError
-from mkcv.core.exceptions.provider import ProviderError
-from mkcv.core.exceptions.rate_limit import RateLimitError
-from mkcv.core.models.token_usage import TokenUsage
-
-logger = logging.getLogger(__name__)
+from mkcv.adapters.llm.model_resolver import ModelResolver, builtin_resolver
+from mkcv.adapters.llm.openai_compatible import OpenAICompatibleAdapter
+from mkcv.core.models.provider_kind import ProviderKind
+from mkcv.core.models.resolved_model import ResolvedModel
 
 
-class OpenAIAdapter:
-    """LLM adapter using the OpenAI API.
+class OpenAIAdapter(OpenAICompatibleAdapter):
+    """LLM adapter for the OpenAI API (Chat Completions).
 
-    Also works with OpenRouter and other OpenAI-compatible APIs
-    by setting a custom base_url.
+    Shares request shaping, refusal and truncation handling, error mapping,
+    and repair with ``OpenAICompatibleAdapter``. What makes it "native" is
+    configuration, not code: the ``openai`` provider kind forbids structured
+    output degradation (strict JSON schema or an error), sends
+    ``max_completion_tokens``, and omits ``temperature`` for models that
+    reject it. A model the catalog does not know may still degrade from the
+    strict schema to JSON mode, so an older model that rejects the schema
+    keeps working; a catalogued model never does.
 
     Implements: LLMPort
     """
 
-    def __init__(self, api_key: str, *, base_url: str | None = None) -> None:
-        kwargs: dict[str, Any] = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        self._client = openai.AsyncOpenAI(**kwargs)
-        self._last_usage = TokenUsage()
-
-    async def complete(
+    def __init__(
         self,
-        messages: list[dict[str, str]],
+        api_key: str,
         *,
-        model: str,
-        temperature: float = 0.3,
-        max_tokens: int = 4096,
-    ) -> str:
-        """Send a completion request and return the text response."""
-        try:
-            response = await self._client.chat.completions.create(
-                model=model,
-                messages=messages,  # type: ignore[arg-type]
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            if response.usage:
-                self._last_usage = TokenUsage(
-                    input_tokens=response.usage.prompt_tokens,
-                    output_tokens=response.usage.completion_tokens,
-                )
-            return response.choices[0].message.content or ""
-        except openai.RateLimitError as e:
-            raise RateLimitError(str(e), provider="openai") from e
-        except openai.AuthenticationError as e:
-            raise AuthenticationError(str(e), provider="openai") from e
-        except openai.BadRequestError as e:
-            if "context" in str(e).lower() or "token" in str(e).lower():
-                raise ContextLengthError(str(e), provider="openai") from e
-            raise ProviderError(str(e), provider="openai") from e
-        except openai.APIError as e:
-            raise ProviderError(str(e), provider="openai") from e
+        base_url: str | None = None,
+        resolver: ModelResolver | None = None,
+        provider_name: str = "openai",
+    ) -> None:
+        super().__init__(
+            api_key,
+            base_url=base_url,
+            resolver=resolver or builtin_resolver(ProviderKind.OPENAI),
+            provider_name=provider_name,
+        )
 
-    async def complete_structured(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        model: str,
-        response_model: type[BaseModel],
-        temperature: float = 0.3,
-        max_tokens: int = 4096,
-    ) -> BaseModel:
-        """Send a completion request and return a validated Pydantic model."""
-        # Add schema instruction to system message
-        schema_instruction = build_schema_prompt(response_model)
-
-        augmented_messages = []
-        has_system = False
-        for msg in messages:
-            if msg["role"] == "system":
-                augmented_messages.append(
-                    {
-                        "role": "system",
-                        "content": msg["content"] + schema_instruction,
-                    }
-                )
-                has_system = True
-            else:
-                augmented_messages.append(msg)
-
-        if not has_system:
-            augmented_messages.insert(
-                0,
-                {
-                    "role": "system",
-                    "content": (f"You are a helpful assistant.{schema_instruction}"),
-                },
-            )
-
-        try:
-            create_kwargs: dict[str, Any] = {
-                "model": model,
-                "messages": augmented_messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "response_format": {"type": "json_object"},
-            }
-            response = await self._client.chat.completions.create(**create_kwargs)
-            if response.usage:
-                self._last_usage = TokenUsage(
-                    input_tokens=response.usage.prompt_tokens,
-                    output_tokens=response.usage.completion_tokens,
-                )
-
-            content = response.choices[0].message.content or ""
-            data = extract_json_from_text(content)
-            return validate_structured_response(data, response_model)
-
-        except (
-            RateLimitError,
-            AuthenticationError,
-            ContextLengthError,
-            ProviderError,
-        ):
-            raise
-        except openai.RateLimitError as e:
-            raise RateLimitError(str(e), provider="openai") from e
-        except openai.AuthenticationError as e:
-            raise AuthenticationError(str(e), provider="openai") from e
-        except openai.APIError as e:
-            raise ProviderError(str(e), provider="openai") from e
-
-    def get_last_usage(self) -> TokenUsage:
-        """Return token usage from the most recent API call."""
-        return self._last_usage
+    def _may_degrade(self, resolved: ResolvedModel) -> bool:
+        return resolved.allow_structured_fallback or not resolved.known

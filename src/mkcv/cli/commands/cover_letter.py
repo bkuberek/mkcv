@@ -10,11 +10,14 @@ from typing import Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.markup import escape
 
 from mkcv.adapters.factory import (
     create_cover_letter_service,
+    create_model_report,
     create_workspace_service,
 )
+from mkcv.cli.model_warnings import print_model_warnings
 from mkcv.config import settings
 from mkcv.core.exceptions import MkcvError
 from mkcv.core.models.cover_letter_result import CoverLetterResult
@@ -23,6 +26,8 @@ from mkcv.core.services.jd_reader import read_jd
 logger = logging.getLogger(__name__)
 
 console = Console()
+
+_DEFAULT_PRESET = "standard"
 
 
 def cover_letter_command(
@@ -76,7 +81,22 @@ def cover_letter_command(
     provider: Annotated[
         str | None,
         cyclopts.Parameter(
-            help="Override AI provider for all stages.",
+            help=(
+                "Run both stages on this provider with its recommended models "
+                "(anthropic/openai/google/ollama/openrouter or a provider from "
+                "your config)."
+            ),
+        ),
+    ] = None,
+    model_profile: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name="--model-profile",
+            help=(
+                "Model profile for both stages: anthropic, anthropic-economy, "
+                "openai, openai-economy, google, google-economy, local. "
+                "Run 'mkcv models --profiles'."
+            ),
         ),
     ] = None,
     render: Annotated[
@@ -121,7 +141,7 @@ def cover_letter_command(
     try:
         jd_doc = read_jd(jd)
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     jd_text = jd_doc.body
@@ -176,6 +196,9 @@ def cover_letter_command(
         )
         sys.exit(2)
 
+    # Resolve models and warn about weak choices before anything is created
+    _warn_about_models(preset=preset, model_profile=model_profile, provider=provider)
+
     # Determine generation directory — may be temp if deferred
     if needs_deferred_placement:
         gen_dir = Path(tempfile.mkdtemp(prefix="mkcv-cl-"))
@@ -206,9 +229,14 @@ def cover_letter_command(
 
     # Create and run the service
     try:
-        service = create_cover_letter_service(settings, provider_override=provider)
+        service = create_cover_letter_service(
+            settings,
+            provider_override=provider,
+            model_profile=model_profile,
+            preset_name=preset or _DEFAULT_PRESET,
+        )
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     try:
@@ -224,7 +252,7 @@ def cover_letter_command(
             )
         )
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     # Deferred placement: now we know company/role from the LLM result
@@ -244,6 +272,27 @@ def cover_letter_command(
         _save_jd_copy(jd_text, final_output, as_markdown=True)
 
     _display_result(result, final_output)
+
+
+def _warn_about_models(
+    *, preset: str | None, model_profile: str | None, provider: str | None
+) -> None:
+    """Print warnings about the cover letter models, or exit on a bad setup."""
+    if not settings.get("pipeline.model_warnings", True):
+        return
+    try:
+        report = create_model_report(
+            settings,
+            preset_name=preset or _DEFAULT_PRESET,
+            model_profile=model_profile,
+            provider_override=provider,
+            include_pipeline=False,
+            include_cover_letter=True,
+        )
+    except MkcvError as exc:
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
+        sys.exit(exc.exit_code)
+    print_model_warnings(report, console)
 
 
 # ------------------------------------------------------------------
@@ -375,7 +424,7 @@ def _place_in_application_dir(
     except MkcvError as exc:
         console.print(
             f"  [yellow]\u26a0[/yellow] Could not create app dir: "
-            f"{exc} — files remain in: {temp_dir}"
+            f"{escape(str(exc))} — files remain in: {temp_dir}"
         )
         return temp_dir
 

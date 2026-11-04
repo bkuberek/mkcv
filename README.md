@@ -16,13 +16,13 @@ mkcv takes your career knowledge base and a job description, then produces a pol
 ## Features
 
 - **5-stage AI pipeline** -- analyze JD, select experience, tailor content, structure YAML, review for ATS compliance
-- **Multi-provider AI** -- Anthropic (Claude), OpenAI (GPT), Ollama (local/free), OpenRouter (200+ models)
+- **Multi-provider AI** -- Anthropic (Claude), OpenAI (GPT), Google (Gemini), and any OpenAI-compatible endpoint (Ollama, OpenRouter, Groq, ...)
 - **Interactive mode** -- pause and review after each pipeline stage
 - **Cover letters** -- generate tailored cover letters alongside your resume
 - **Multiple themes** -- choose from built-in RenderCV themes (sb2nov, classic, moderncv, engineeringresumes)
 - **PDF + more** -- render to PDF, PNG, Markdown, or HTML via Typst
 - **Workspace model** -- organize knowledge base, config, and applications per company/role
-- **Smart defaults** -- per-stage model selection with budget and premium profiles
+- **Smart defaults** -- a recommended model for every stage, switchable with one flag (`--model-profile`), with warnings for weak or unknown models and `mkcv models` to see what each stage costs
 - **Configurable** -- 5-layer config resolution (defaults, global, workspace, env vars, CLI flags)
 
 ## Quick Start
@@ -97,6 +97,9 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # OpenAI
 export OPENAI_API_KEY=sk-...
 
+# Google Gemini (GOOGLE_API_KEY also works; GEMINI_API_KEY wins if both are set)
+export GEMINI_API_KEY=...
+
 # OpenRouter (access 200+ models with one key)
 export OPENROUTER_API_KEY=sk-or-...
 
@@ -142,8 +145,12 @@ mkcv generate --jd job.txt --company DeepL --position "Senior Engineer"
 # Interactive mode -- review each stage before proceeding
 mkcv generate --jd job.txt --kb career.md --interactive
 
-# Budget mode -- use free local Ollama models
-mkcv generate --jd job.txt --kb career.md --profile budget
+# Run every stage on another provider's recommended models
+mkcv generate --jd job.txt --kb career.md --model-profile openai
+mkcv generate --jd job.txt --kb career.md --model-profile google-economy
+
+# Free local Ollama models
+mkcv generate --jd job.txt --kb career.md --model-profile local
 
 # Resume from a specific stage (reuse previous artifacts)
 mkcv generate --jd job.txt --from-stage 3
@@ -204,6 +211,20 @@ mkcv themes --preview sb2nov     # Detailed theme preview
 mkcv status                      # Overview of workspace and applications
 ```
 
+### Models and Costs
+
+```bash
+mkcv models                              # The model, tier, and estimated cost of every stage
+mkcv models --model-profile openai       # What the openai profile would use
+mkcv models --profiles                   # List the built-in model profiles
+mkcv models --catalog --provider google  # What mkcv knows about each Gemini model
+mkcv models --json                       # Machine-readable output
+```
+
+`mkcv generate` and `mkcv cover-letter` print the same warnings before they
+run when a stage uses a weak or unknown model, or when a provider's API key is
+missing. Warnings never stop a run.
+
 ## Configuration
 
 Configuration is resolved in 5 layers (later overrides earlier):
@@ -216,32 +237,64 @@ Configuration is resolved in 5 layers (later overrides earlier):
 
 See [`examples/mkcv.toml`](examples/mkcv.toml) for a fully-commented configuration reference.
 
-### Provider Profiles
+### Model Profiles
 
-Use `--profile` to quickly switch provider configurations:
+A model profile names one recommended model per stage on one provider. Pick one
+with `--model-profile`, or set a default in `mkcv.toml`:
 
-| Profile | Provider | Best For |
+| Profile | Provider | Best for |
 |---------|----------|----------|
-| `premium` (default) | Anthropic Claude | Highest quality output |
-| `budget` | Ollama (local) | Free, no API key needed |
+| `anthropic` (default) | Anthropic | Haiku for extraction, Opus for decisions and writing, Sonnet for YAML |
+| `anthropic-economy` | Anthropic | Haiku for every resume stage |
+| `openai` | OpenAI | Luna, Astra, Sol, and Terra mix |
+| `openai-economy` | OpenAI | Low-cost Luna and Terra |
+| `google` | Google | Flash-Lite, Argon, and Flash mix |
+| `google-economy` | Google | Low-cost Flash-Lite and Flash |
+| `local` | Ollama | Free and offline, lowest quality |
+
+```toml
+[default.pipeline]
+model_profile = "google"
+```
+
+`--provider openai` runs every stage on that provider's recommended models,
+like `--model-profile openai`; it also works for providers with no profile if
+`mkcv.toml` names a model for each stage. `--preset concise` selects the
+economy variant of the profile. **The profiles are provisional**: they follow
+vendor positioning and prices, not measurements of mkcv's pipeline. See
+[docs/models.md](docs/models.md) for the tables, precedence rules, and the
+facts behind them.
+
+The legacy `--profile budget|premium` flag still works but is deprecated; use
+`--preset` and `--model-profile`.
 
 ### Per-Stage Configuration
 
-Configure different providers and models for each pipeline stage in `mkcv.toml`:
+Choose the provider and model for any stage in `mkcv.toml`. A stage you
+configure beats the profile:
 
 ```toml
-[pipeline.stages.analyze]
-provider = "anthropic"
-model = "claude-sonnet-5-5"
-temperature = 0.2
-
-[pipeline.stages.structure]
+[default.pipeline.stages.tailor]
 provider = "openai"
-model = "gpt-4o"
-temperature = 0.1
+model = "gpt-6-astra"
+
+[default.pipeline.stages.structure]
+model = "gemini-3.8-flash"        # provider inferred from the model
+
+[default.cover_letter.stages.generate]
+provider = "anthropic"
+model = "claude-opus-5-5"
+temperature = 0.6
 ```
 
-Claude 5.x models (`claude-*-5-5`, the defaults) do not accept sampling parameters, so mkcv ignores `temperature` for them. It still applies to Claude 4.x and other providers.
+Section headers in `mkcv.toml` need the `default.` prefix; without it the
+setting is ignored. Per-stage settings are now honoured by `mkcv generate`:
+earlier versions replaced them with the preset's models. Check the result with
+`mkcv models`.
+
+Claude 5.x, GPT-5/6, and Gemini models do not accept sampling parameters, so
+mkcv omits `temperature` for them. It still applies to Claude 4.x and to
+OpenAI-compatible endpoints.
 
 ### Environment Variables
 
@@ -249,6 +302,7 @@ Use the `MKCV_` prefix with double underscores for nested keys:
 
 ```bash
 export MKCV_RENDERING__THEME=classic
+export MKCV_PIPELINE__MODEL_PROFILE=google
 export MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5
 ```
 
@@ -257,11 +311,34 @@ export MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5
 | Provider | Setup | Notes |
 |----------|-------|-------|
 | **Anthropic** | `export ANTHROPIC_API_KEY=sk-ant-...` | Default provider, Claude models |
-| **OpenAI** | `export OPENAI_API_KEY=sk-...` | GPT models |
+| **OpenAI** | `export OPENAI_API_KEY=sk-...` | GPT models, strict structured output |
+| **Google Gemini** | `export GEMINI_API_KEY=...` | Gemini models (`GOOGLE_API_KEY` also works) |
 | **Ollama** | [Install Ollama](https://ollama.ai), run `ollama serve` | Free, local, no API key |
-| **OpenRouter** | `export OPENROUTER_API_KEY=sk-or-...` | 200+ models via single API key |
+| **OpenRouter** | `export OPENROUTER_API_KEY=sk-or-...` | 200+ models via single API key; name a model per stage |
+| **Any OpenAI-compatible endpoint** | Define it in `mkcv.toml` | Groq, Together, vLLM, LM Studio, a company gateway |
 
-[OpenRouter](https://openrouter.ai) is a good choice if you want access to Claude, GPT, Gemini, DeepSeek, and more through a single API key. Set `provider = "openrouter"` in your config and use OpenRouter model identifiers (e.g., `anthropic/claude-sonnet-4`).
+[OpenRouter](https://openrouter.ai) is a good choice if you want access to Claude, GPT, Gemini, DeepSeek, and more through a single API key. It has no model profile, so set `provider = "openrouter"` and an OpenRouter model identifier (for example `anthropic/claude-sonnet-4`) for each stage you run on it.
+
+To use another OpenAI-compatible endpoint, define it as a provider:
+
+```toml
+[default.providers.groq]
+type = "openai-compatible"
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+
+[default.pipeline.stages.analyze]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+```
+
+If mkcv does not know a model, it runs it with conservative defaults and a
+warning; describe the model with a `[[default.model_catalog]]` entry to give
+it a quality tier and prices. See [docs/models.md](docs/models.md).
+
+Upgrading from 1.4? Per-stage config now applies to `generate`, a missing API
+key stops the run, and `http://localhost:11434` is fixed to `/v1` for you. See
+[Upgrading from 1.4](docs/models.md#upgrading-from-14).
 
 ## Contributing
 

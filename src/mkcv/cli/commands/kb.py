@@ -8,6 +8,7 @@ from typing import Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.markup import escape
 
 from mkcv.adapters.factory import create_kb_generation_service
 from mkcv.config import settings
@@ -68,7 +69,10 @@ def kb_generate_command(
     provider: Annotated[
         str | None,
         cyclopts.Parameter(
-            help=("Override AI provider (anthropic/openai/openrouter/ollama)."),
+            help=(
+                "Run on this provider (anthropic/openai/google/ollama/openrouter "
+                "or a provider from your config)."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -108,7 +112,7 @@ def kb_generate_command(
             model_override=model,
         )
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     with console.status("  Generating knowledge base..."):
@@ -122,7 +126,7 @@ def kb_generate_command(
                 )
             )
         except MkcvError as exc:
-            console.print(f"  [red]Error:[/red] {exc}")
+            console.print(f"  [red]Error:[/red] {escape(str(exc))}")
             sys.exit(exc.exit_code)
 
     # Display results
@@ -167,7 +171,10 @@ def kb_update_command(
     provider: Annotated[
         str | None,
         cyclopts.Parameter(
-            help=("Override AI provider (anthropic/openai/openrouter/ollama)."),
+            help=(
+                "Run on this provider (anthropic/openai/google/ollama/openrouter "
+                "or a provider from your config)."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -214,7 +221,7 @@ def kb_update_command(
             model_override=model,
         )
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
 
     with console.status("  Updating knowledge base..."):
@@ -227,7 +234,7 @@ def kb_update_command(
                 )
             )
         except MkcvError as exc:
-            console.print(f"  [red]Error:[/red] {exc}")
+            console.print(f"  [red]Error:[/red] {escape(str(exc))}")
             sys.exit(exc.exit_code)
 
     # Display results

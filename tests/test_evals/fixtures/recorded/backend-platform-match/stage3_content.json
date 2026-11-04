@@ -1,0 +1,121 @@
+{
+  "mission": {
+    "text": "Platform engineer who moves services onto Kubernetes, builds observability that shortens incidents, and keeps infrastructure costs down.",
+    "rationale": "Mirrors the posting's focus on platform reliability and ownership without adding claims beyond the knowledge base."
+  },
+  "skills": [
+    {
+      "label": "Platform",
+      "skills": [
+        "Kubernetes",
+        "Terraform",
+        "Docker"
+      ]
+    },
+    {
+      "label": "Languages",
+      "skills": [
+        "Go",
+        "Python",
+        "SQL"
+      ]
+    },
+    {
+      "label": "Data and observability",
+      "skills": [
+        "PostgreSQL",
+        "Redis",
+        "OpenTelemetry",
+        "Prometheus",
+        "Grafana"
+      ]
+    }
+  ],
+  "roles": [
+    {
+      "company": "Initech",
+      "position": "Senior Software Engineer, Platform",
+      "location": "Austin, TX",
+      "start_date": "2021-03",
+      "end_date": "present",
+      "summary": null,
+      "bullets": [
+        {
+          "original": "Led the migration of 42 services from VM-based deploys to Kubernetes, cutting deploy time from 45 minutes to 6 minutes",
+          "rewritten": "Migrated 42 services from VM-based deploys to Kubernetes, cutting deploy time from 45 minutes to 6 minutes",
+          "keywords_incorporated": [
+            "Kubernetes"
+          ],
+          "confidence": "high"
+        },
+        {
+          "original": "Designed the observability stack (OpenTelemetry, Prometheus, Grafana) covering 120 services, cutting mean time to detect incidents from 25 minutes to 4 minutes",
+          "rewritten": "Designed an OpenTelemetry, Prometheus, and Grafana observability stack covering 120 services, cutting mean time to detect incidents from 25 minutes to 4 minutes",
+          "keywords_incorporated": [
+            "observability"
+          ],
+          "confidence": "high"
+        },
+        {
+          "original": "Reduced p99 latency of the order API by 40% by adding read replicas and a Redis cache layer",
+          "rewritten": "Cut p99 latency of the order API by 40% with read replicas and a Redis cache layer",
+          "keywords_incorporated": [],
+          "confidence": "high"
+        },
+        {
+          "original": "Wrote shared Terraform modules adopted by 14 teams, saving an estimated $310K per year in duplicated infrastructure work",
+          "rewritten": "Wrote shared Terraform modules adopted by 14 teams, saving an estimated $310K per year",
+          "keywords_incorporated": [
+            "Terraform"
+          ],
+          "confidence": "high"
+        },
+        {
+          "original": "Ran the on-call rotation for a team of 9 and introduced incident response runbooks, lowering pages per week from 31 to 12",
+          "rewritten": "Ran the on-call rotation for a team of 9 and added incident response runbooks, lowering pages per week from 31 to 12",
+          "keywords_incorporated": [
+            "incident response"
+          ],
+          "confidence": "high"
+        }
+      ],
+      "tech_stack": "Kubernetes, Terraform, OpenTelemetry, Prometheus, Grafana, Redis"
+    },
+    {
+      "company": "Globex",
+      "position": "Software Engineer II",
+      "location": "Austin, TX",
+      "start_date": "2018-06",
+      "end_date": "2021-02",
+      "summary": null,
+      "bullets": [
+        {
+          "original": "Built a Go ingestion service handling 85,000 events per second at 99.95% availability",
+          "rewritten": "Built a Go ingestion service handling 85,000 events per second at 99.95% availability",
+          "keywords_incorporated": [
+            "Go"
+          ],
+          "confidence": "high"
+        },
+        {
+          "original": "Migrated a 3 TB PostgreSQL database to a partitioned schema with zero downtime, making report queries 8x faster",
+          "rewritten": "Migrated a 3 TB PostgreSQL database to a partitioned schema with zero downtime, making report queries 8x faster",
+          "keywords_incorporated": [
+            "PostgreSQL"
+          ],
+          "confidence": "high"
+        },
+        {
+          "original": "Cut cloud spend by $1.2M per year by right-sizing instances and moving batch jobs to spot capacity",
+          "rewritten": "Cut cloud spend by $1.2M per year by right-sizing instances and moving batch jobs to spot capacity",
+          "keywords_incorporated": [],
+          "confidence": "high"
+        }
+      ],
+      "tech_stack": "Go, PostgreSQL, AWS"
+    }
+  ],
+  "earlier_experience": null,
+  "languages": null,
+  "low_confidence_flags": []
+}

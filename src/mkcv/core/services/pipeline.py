@@ -20,6 +20,7 @@ from mkcv.core.exceptions.validation import ValidationError
 from mkcv.core.models.experience_selection import ExperienceSelection
 from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.jd_frontmatter import JDFrontmatter
+from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.pricing import calculate_cost
 from mkcv.core.models.profile_preset import Preset
@@ -83,11 +84,14 @@ class PipelineService:
         stage_configs: dict[int, StageConfig] | None = None,
         preset: Preset | None = None,
         resume_design: ResumeDesign | None = None,
+        *,
+        catalog: ModelCatalog | None = None,
     ) -> None:
         self._providers = providers
         self._prompts = prompts
         self._artifacts = artifacts
         self._stage_configs = stage_configs or DEFAULT_STAGE_CONFIGS
+        self._catalog = catalog
         self._preset = preset
         self._resume_design = resume_design
 
@@ -864,8 +868,8 @@ class PipelineService:
             data = self._artifacts.load(artifact_name, run_dir=output_dir)
         return model_class.model_validate(data)
 
-    @staticmethod
     def _build_stage_metadata(
+        self,
         *,
         stage_number: int,
         provider: str,
@@ -879,7 +883,7 @@ class PipelineService:
         output_tokens = usage.output_tokens if usage else 0
 
         resolved_usage = usage or TokenUsage()
-        cost = calculate_cost(model, resolved_usage)
+        cost = calculate_cost(model, resolved_usage, self._catalog, provider=provider)
 
         return StageMetadata(
             stage_number=stage_number,

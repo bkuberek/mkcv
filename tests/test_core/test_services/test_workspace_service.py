@@ -184,14 +184,16 @@ class TestWorkspaceReadme:
         assert __version__ in content
 
     def test_readme_mentions_all_providers(self, tmp_path: Path) -> None:
-        from mkcv.adapters.factory import _PROVIDER_ENV_KEYS
+        from mkcv.adapters.llm.builtin_providers import BUILTIN_PROVIDERS
 
         manager = WorkspaceManager()
         svc = WorkspaceService(workspace=manager)
         ws = tmp_path / "ws"
         svc.init_workspace(ws)
         content = (ws / "README.md").read_text().lower()
-        for provider in _PROVIDER_ENV_KEYS:
+        for provider in BUILTIN_PROVIDERS:
+            if provider == "stub":
+                continue
             assert provider in content, (
                 f"Provider '{provider}' missing from workspace README"
             )

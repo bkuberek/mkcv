@@ -14,6 +14,8 @@ from mkcv.core.ports.prompts import PromptLoaderPort
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_TEMPERATURE = 0.3
+JD_ANALYSIS_TEMPERATURE = 0.2
 DEFAULT_MAX_TOKENS = 8192
 YAML_EXTENSIONS = {".yaml", ".yml"}
 PDF_EXTENSIONS = {".pdf"}
@@ -35,24 +37,39 @@ class ValidationService:
         prompts: PromptLoaderPort,
         *,
         pdf_reader: PdfReaderPort | None = None,
+        model: str = DEFAULT_MODEL,
+        temperature: float = DEFAULT_TEMPERATURE,
     ) -> None:
+        """Create the service.
+
+        Args:
+            llm: LLM used for the JD analysis and the review.
+            prompts: Prompt template loader.
+            pdf_reader: Reader for PDF resumes; PDFs are rejected without one.
+            model: Model used when ``validate`` is not given one.
+            temperature: Sampling temperature of the review call (the
+                ``validate`` stage setting). The JD analysis keeps its own.
+        """
         self._llm = llm
         self._prompts = prompts
         self._pdf_reader = pdf_reader
+        self._model = model
+        self._temperature = temperature
 
     async def validate(
         self,
         resume_path: Path,
         *,
         jd_path: Path | None = None,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
     ) -> ReviewReport:
         """Validate a resume for ATS compliance and quality.
 
         Args:
             resume_path: Path to resume file (YAML or PDF).
             jd_path: Optional JD for keyword coverage analysis.
-            model: LLM model identifier.
+            model: LLM model identifier; defaults to the model the service
+                was constructed with.
 
         Returns:
             ReviewReport with scores and suggestions.
@@ -61,6 +78,7 @@ class ValidationService:
             ValidationError: If the file type is unsupported or
                 PDF reading fails.
         """
+        model = model or self._model
         resume_text = self._read_resume(resume_path)
 
         jd_analysis: JDAnalysis | None = None
@@ -160,7 +178,7 @@ class ValidationService:
             messages,
             model=model,
             response_model=JDAnalysis,
-            temperature=0.2,
+            temperature=JD_ANALYSIS_TEMPERATURE,
         )
         analysis = cast("JDAnalysis", raw)
 
@@ -208,7 +226,7 @@ class ValidationService:
             messages,
             model=model,
             response_model=ReviewReport,
-            temperature=0.3,
+            temperature=self._temperature,
             max_tokens=DEFAULT_MAX_TOKENS,
         )
         report = cast("ReviewReport", raw)

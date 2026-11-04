@@ -49,7 +49,7 @@ src/mkcv/
 ├── adapters/                 # Implementations of core ports
 │   ├── factory.py            # DI wiring -- creates fully-assembled services
 │   ├── filesystem/           # ArtifactStore, PromptLoader, WorkspaceManager, PyPdfReader
-│   ├── llm/                  # Anthropic, OpenAI, Ollama, OpenRouter, Stub adapters + retry
+│   ├── llm/                  # Anthropic, OpenAI, Google, OpenAI-compatible, Stub adapters; provider registry, stage resolver, retry
 │   └── renderers/            # RenderCV (Typst -> PDF)
 └── prompts/                  # Jinja2 templates for each pipeline stage (.j2 files)
 ```
@@ -93,7 +93,9 @@ Configuration is resolved through 5 layers (later overrides earlier):
 | 4 | Environment variables | `MKCV_` prefix (double underscores for nesting) |
 | 5 (highest) | CLI flags | Applied at runtime |
 
-API keys are always set via environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`.
+API keys are always set via environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `OPENROUTER_API_KEY`. A provider you define in config names its own variable with `api_key_env`.
+
+In `mkcv.toml` every section header needs the `default.` prefix (for example `[default.pipeline.stages.tailor]`); without it the setting is silently ignored. The models behind each stage are decided by the stage resolver (CLI flags, then per-stage config, then a model profile); see [Models and providers](models.md).
 
 ## Testing
 
@@ -205,9 +207,26 @@ Never catch bare `Exception` -- always catch specific exception types.
 
 ### Adding an LLM Provider
 
-1. Create a new adapter in `src/mkcv/adapters/llm/` implementing `LLMPort`
-2. Register it in the factory's provider resolution logic
-3. Add any required config defaults to `src/mkcv/config/settings.toml`
+Providers are data. Nothing in `adapters/factory.py` dispatches on a provider name.
+
+1. If the endpoint speaks the OpenAI Chat Completions API, add a `ProviderSpec` to `BUILTIN_PROVIDERS` in `src/mkcv/adapters/llm/builtin_providers.py` (kind `openai-compatible`, a `base_url`, and `api_key_env`). Users can do the same in `mkcv.toml` with `[default.providers.<name>]`, with no code change.
+2. For a new API, add a `ProviderKind`, an adapter in `src/mkcv/adapters/llm/` implementing `LLMPort`, the kind's defaults in `KIND_DEFAULTS`, and a builder in `_BUILDERS` in `provider_registry.py`. Import the vendor SDK inside the builder so it loads lazily.
+3. Describe its models in `src/mkcv/core/catalog/builtin_models.py` (tier, prices, how requests are shaped) and, if it should have a recommended model per stage, add a profile to `builtin_model_profiles.py`. Every profile model needs a catalog entry.
+4. Cover it with tests that mock the SDK client; never call a real provider.
+
+### Changing Recommended Models
+
+Profiles in `src/mkcv/core/catalog/builtin_model_profiles.py` are provisional
+until an eval run backs them. Document any change in [`models.md`](models.md).
+
+### Evaluating Models
+
+The `evals/` directory holds an offline harness that scores models on each
+pipeline stage and suggests profile changes. It is not part of the installed
+package and never runs in CI beyond its unit tests, which use stub providers.
+Run it with `uv run python -m evals --help`; `evals/README.md` explains the
+keys it needs, what a run costs, how to read the report, and how to apply the
+results.
 
 ## Reference Documentation
 

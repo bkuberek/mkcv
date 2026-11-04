@@ -1,0 +1,69 @@
+# Eval cases: synthetic personas paired with synthetic job descriptions.
+# Every person, employer, and number here is invented.
+#
+# forbidden_claims are terms the job description asks for that the persona's
+# knowledge base lacks; a faithful resume must not claim them.
+
+[[cases]]
+id = "backend-platform-match"
+persona = "personas/backend-engineer.md"
+jd = "jds/backend-platform-match.md"
+expected_keywords = ["Kubernetes", "Go", "PostgreSQL", "observability", "incident response", "Terraform"]
+forbidden_claims = []
+review_probe_defects = []
+
+[[cases]]
+id = "backend-ml-stretch"
+persona = "personas/backend-engineer.md"
+jd = "jds/backend-ml-stretch.md"
+expected_keywords = ["Kubernetes", "Go", "PyTorch", "MLflow", "model training", "GPU scheduling"]
+forbidden_claims = ["PyTorch", "model training", "MLflow"]
+review_probe_defects = []
+
+[[cases]]
+id = "product-pm-match"
+persona = "personas/product-switcher.md"
+jd = "jds/product-pm-match.md"
+expected_keywords = ["roadmap", "customer interviews", "product requirement documents", "prioritization", "stakeholder", "beta programs"]
+forbidden_claims = []
+review_probe_defects = []
+
+[[cases]]
+id = "product-growth-stretch"
+persona = "personas/product-switcher.md"
+jd = "jds/product-growth-stretch.md"
+expected_keywords = ["activation", "retention", "experiments", "SQL", "A/B testing platform", "Amplitude"]
+forbidden_claims = ["SQL", "A/B testing platform", "Amplitude"]
+review_probe_defects = []
+
+[[cases]]
+id = "data-analytics-match"
+persona = "personas/data-scientist.md"
+jd = "jds/data-analytics-match.md"
+expected_keywords = ["Python", "SQL", "Tableau", "regression", "dashboards", "hypothesis testing"]
+forbidden_claims = []
+review_probe_defects = []
+
+[[cases]]
+id = "data-mlops-stretch"
+persona = "personas/data-scientist.md"
+jd = "jds/data-mlops-stretch.md"
+expected_keywords = ["Airflow", "Kubernetes", "model monitoring", "Python", "feature pipelines", "team lead"]
+forbidden_claims = ["Kubernetes", "Airflow", "team lead"]
+review_probe_defects = []
+
+# The review stage is evaluated on one hand-written resume with seeded defects
+# (reference/review-probe/resume.yaml). Its stage 1-3 references are copied
+# from backend-platform-match by `bootstrap-reference`.
+[[cases]]
+id = "review-probe"
+persona = "personas/backend-engineer.md"
+jd = "jds/backend-platform-match.md"
+expected_keywords = []
+forbidden_claims = []
+review_probe_defects = [
+  "first-person pronoun in a bullet",
+  "a metric (\"cut costs by 73%\") that is not in the knowledge base",
+  "the JD keyword 'Terraform' is missing from the resume",
+]
+stages = ["review"]

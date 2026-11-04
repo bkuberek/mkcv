@@ -8,7 +8,6 @@ from mkcv.core.models.profile_preset import (
     Preset,
     resolve_preset,
 )
-from mkcv.core.models.stage_config import StageConfig
 
 
 class TestContentDensity:
@@ -40,12 +39,25 @@ class TestPresetModel:
             max_bullets_primary=5,
             max_bullets_secondary=3,
             include_earlier_experience=True,
-            stage_configs={
-                1: StageConfig(provider="stub", model="m", temperature=0.2),
-            },
         )
         assert preset.name == "test"
         assert preset.density == ContentDensity.STANDARD
+
+    def test_economy_and_provider_default_to_off(self) -> None:
+        preset = Preset(
+            name="test",
+            description="A test preset",
+            density=ContentDensity.STANDARD,
+            page_budget="1-2",
+            max_roles=4,
+            max_bullets_primary=5,
+            max_bullets_secondary=3,
+            include_earlier_experience=True,
+        )
+        assert (preset.economy, preset.provider) == (False, None)
+
+    def test_preset_no_longer_carries_stage_configs(self) -> None:
+        assert "stage_configs" not in Preset.model_fields
 
     def test_preset_serializes_to_dict(self) -> None:
         preset = Preset(
@@ -57,7 +69,6 @@ class TestPresetModel:
             max_bullets_primary=4,
             max_bullets_secondary=2,
             include_earlier_experience=False,
-            stage_configs={},
         )
         data = preset.model_dump()
         assert data["density"] == "concise"
@@ -113,39 +124,17 @@ class TestBuiltInPresets:
     def test_comprehensive_includes_earlier_experience(self) -> None:
         assert BUILT_IN_PRESETS["comprehensive"].include_earlier_experience is True
 
-    def test_concise_uses_haiku(self) -> None:
-        preset = BUILT_IN_PRESETS["concise"]
-        for sc in preset.stage_configs.values():
-            assert sc.provider == "anthropic"
-            assert "haiku" in sc.model
+    def test_concise_is_an_economy_preset(self) -> None:
+        assert BUILT_IN_PRESETS["concise"].economy is True
 
-    def test_standard_uses_smart_mix(self) -> None:
-        preset = BUILT_IN_PRESETS["standard"]
-        for sc in preset.stage_configs.values():
-            assert sc.provider == "anthropic"
-        # Smart mix: stage 1 = Haiku; stages 2,3,5 = Opus; stage 4 = Sonnet
-        assert "haiku" in preset.stage_configs[1].model
-        assert "opus" in preset.stage_configs[2].model
-        assert "opus" in preset.stage_configs[3].model
-        assert "sonnet" in preset.stage_configs[4].model
-        assert "opus" in preset.stage_configs[5].model
+    def test_standard_is_not_an_economy_preset(self) -> None:
+        assert BUILT_IN_PRESETS["standard"].economy is False
 
-    def test_comprehensive_uses_smart_mix(self) -> None:
-        preset = BUILT_IN_PRESETS["comprehensive"]
-        for sc in preset.stage_configs.values():
-            assert sc.provider == "anthropic"
-        # Smart mix: stage 1 = Haiku; stages 2,3,5 = Opus; stage 4 = Sonnet
-        assert "haiku" in preset.stage_configs[1].model
-        assert "opus" in preset.stage_configs[2].model
-        assert "opus" in preset.stage_configs[3].model
-        assert "sonnet" in preset.stage_configs[4].model
-        assert "opus" in preset.stage_configs[5].model
+    def test_comprehensive_is_not_an_economy_preset(self) -> None:
+        assert BUILT_IN_PRESETS["comprehensive"].economy is False
 
-    def test_all_presets_have_five_stages(self) -> None:
-        for name, preset in BUILT_IN_PRESETS.items():
-            assert set(preset.stage_configs.keys()) == {1, 2, 3, 4, 5}, (
-                f"Preset '{name}' missing stages"
-            )
+    def test_no_built_in_preset_pins_a_provider(self) -> None:
+        assert {preset.provider for preset in BUILT_IN_PRESETS.values()} == {None}
 
     def test_concise_bullet_counts(self) -> None:
         preset = BUILT_IN_PRESETS["concise"]
@@ -195,28 +184,54 @@ class TestBackwardCompatibility:
         for name in VALID_PRESET_NAMES:
             assert name in VALID_PROFILES
 
-    def test_resolve_budget_returns_ollama_preset(self) -> None:
+    def test_resolve_budget_returns_the_budget_preset(self) -> None:
         preset = resolve_preset("budget")
         assert preset is not None
         assert preset.name == "budget"
-        for sc in preset.stage_configs.values():
-            assert sc.provider == "ollama"
+
+    def test_resolve_budget_pins_the_ollama_provider(self) -> None:
+        preset = resolve_preset("budget")
+        assert preset is not None
+        assert preset.provider == "ollama"
 
     def test_resolve_budget_uses_concise_density(self) -> None:
         preset = resolve_preset("budget")
         assert preset is not None
         assert preset.density == ContentDensity.CONCISE
 
+    def test_resolve_budget_is_an_economy_preset(self) -> None:
+        preset = resolve_preset("budget")
+        assert preset is not None
+        assert preset.economy is True
+
+    def test_budget_describes_itself_as_a_legacy_local_preset(self) -> None:
+        preset = resolve_preset("budget")
+        assert preset is not None
+        assert (
+            preset.description == "Concise resume on local Ollama models (legacy name)"
+        )
+
+    def test_budget_matches_concise_apart_from_name_description_and_provider(
+        self,
+    ) -> None:
+        budget = resolve_preset("budget")
+        concise = resolve_preset("concise")
+        assert budget is not None and concise is not None
+        ignored = {"name", "description", "provider"}
+        assert budget.model_dump(exclude=ignored) == concise.model_dump(exclude=ignored)
+
     def test_resolve_premium_returns_standard_preset(self) -> None:
         preset = resolve_preset("premium")
         assert preset is not None
         assert preset.density == ContentDensity.STANDARD
 
-    def test_resolve_premium_uses_anthropic(self) -> None:
+    def test_premium_equals_standard(self) -> None:
+        assert resolve_preset("premium") == BUILT_IN_PRESETS["standard"]
+
+    def test_premium_pins_no_provider(self) -> None:
         preset = resolve_preset("premium")
         assert preset is not None
-        for sc in preset.stage_configs.values():
-            assert sc.provider == "anthropic"
+        assert preset.provider is None
 
 
 class TestResolvePreset:

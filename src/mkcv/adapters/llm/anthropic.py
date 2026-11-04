@@ -3,10 +3,16 @@
 Uses streaming for all API calls to avoid the 10-minute timeout on
 long-running requests (required by the Anthropic API for operations
 that may produce large outputs).
+
+How a request is shaped (sampling parameters, output floor, structured-output
+mechanism) comes from the model capability catalog, not from model-name
+checks in this module.
 """
 
+import functools
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anthropic
@@ -19,55 +25,41 @@ from mkcv.adapters.llm._utils import (
     split_system_message,
     validate_structured_response,
 )
+from mkcv.adapters.llm.model_resolver import ModelResolver, builtin_resolver
+from mkcv.adapters.llm.request_adaptation import rejected_parameter
 from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.exceptions.context_length import ContextLengthError
 from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.rate_limit import RateLimitError
+from mkcv.core.models.provider_kind import ProviderKind
+from mkcv.core.models.resolved_model import ResolvedModel
+from mkcv.core.models.structured_output_mode import StructuredOutputMode
 from mkcv.core.models.token_usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
-_STRICT_REQUEST_PREFIXES = (
-    "claude-opus-5",
-    "claude-sonnet-5",
-    "claude-haiku-5",
-    "claude-fable-",
-    "claude-mythos-",
-    # Opus 4.7/4.8 already reject sampling parameters
-    "claude-opus-4-7",
-    "claude-opus-4-8",
-)
-
 CLAUDE_5_MIN_MAX_TOKENS = 16_000
 """Output floor for Claude 5.x, whose always-on thinking counts against max_tokens."""
+
+_DROP_TEMPERATURE = "drop_temperature"
+
+type _RequestBuilder = Callable[[], dict[str, Any]]
+
+
+@functools.cache
+def _builtin_anthropic_resolver() -> ModelResolver:
+    return builtin_resolver(ProviderKind.ANTHROPIC)
 
 
 def uses_strict_request_rules(model: str) -> bool:
     """Return True for models with the Claude 5.x request rules (incl. Opus 4.7/4.8).
 
     These models reject sampling parameters and forced ``tool_choice``,
-    and always think before answering.
+    and always think before answering. The answer comes from the built-in
+    capability catalog; models it does not know get the same conservative
+    treatment.
     """
-    return model.startswith(_STRICT_REQUEST_PREFIXES)
-
-
-def _build_request(
-    messages: list[dict[str, str]],
-    model: str,
-    temperature: float,
-    max_tokens: int,
-) -> dict[str, Any]:
-    """Build the request kwargs shared by plain and structured calls."""
-    system, user_messages = split_system_message(messages)
-    request: dict[str, Any] = {"model": model, "messages": user_messages}
-    if uses_strict_request_rules(model):
-        request["max_tokens"] = max(max_tokens, CLAUDE_5_MIN_MAX_TOKENS)
-    else:
-        request["temperature"] = temperature
-        request["max_tokens"] = max_tokens
-    if system:
-        request["system"] = system
-    return request
+    return not _builtin_anthropic_resolver()("anthropic", model).accepts_sampling_params
 
 
 def _join_text_blocks(response: Message) -> str:
@@ -83,19 +75,32 @@ class AnthropicAdapter:
     All calls use streaming to comply with Anthropic's requirement
     that requests potentially exceeding 10 minutes must stream.
 
-    Claude 5.x models get no sampling parameters, a larger output
-    budget, and structured outputs (``output_config``) instead of a
-    forced tool call. Older models keep temperature and forced tool use.
+    Per model, the capability resolver decides whether ``temperature`` is
+    sent, the output-token floor, and how structured output is requested:
+    ``json_schema`` uses structured outputs (``output_config``), anything
+    else uses a forced tool call. If the API rejects ``temperature`` for a
+    model the catalog thought accepted it, the call is retried once without
+    it and the model is remembered for the life of the adapter.
 
     Implements: LLMPort
     """
 
-    def __init__(self, api_key: str, *, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str | None = None,
+        resolver: ModelResolver | None = None,
+        provider_name: str = "anthropic",
+    ) -> None:
         kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
         self._client = anthropic.AsyncAnthropic(**kwargs)
+        self._resolver = resolver or builtin_resolver(ProviderKind.ANTHROPIC)
+        self._provider_name = provider_name
         self._last_usage = TokenUsage()
+        self._adaptations: dict[str, set[str]] = {}
 
     async def complete(
         self,
@@ -106,23 +111,27 @@ class AnthropicAdapter:
         max_tokens: int = 4096,
     ) -> str:
         """Send a streaming completion request and return the text response."""
-        request = _build_request(messages, model, temperature, max_tokens)
-        try:
-            async with self._client.messages.stream(**request) as stream:
-                response = await stream.get_final_message()
+        resolved = self._resolver(self._provider_name, model)
 
+        def build() -> dict[str, Any]:
+            return self._build_request(
+                messages, model, temperature, max_tokens, resolved
+            )
+
+        try:
+            response = await self._with_adaptation(model, build, self._stream_message)
             self._record_usage(response)
             return _join_text_blocks(response)
         except anthropic.RateLimitError as e:
-            raise RateLimitError(str(e), provider="anthropic") from e
+            raise RateLimitError(str(e), provider=self._provider_name) from e
         except anthropic.AuthenticationError as e:
-            raise AuthenticationError(str(e), provider="anthropic") from e
+            raise AuthenticationError(str(e), provider=self._provider_name) from e
         except anthropic.BadRequestError as e:
             if "context" in str(e).lower() or "token" in str(e).lower():
-                raise ContextLengthError(str(e), provider="anthropic") from e
-            raise ProviderError(str(e), provider="anthropic") from e
+                raise ContextLengthError(str(e), provider=self._provider_name) from e
+            raise ProviderError(str(e), provider=self._provider_name) from e
         except anthropic.APIError as e:
-            raise ProviderError(str(e), provider="anthropic") from e
+            raise ProviderError(str(e), provider=self._provider_name) from e
 
     async def complete_structured(
         self,
@@ -134,11 +143,25 @@ class AnthropicAdapter:
         max_tokens: int = 4096,
     ) -> BaseModel:
         """Send a streaming structured completion and return a Pydantic model."""
-        request = _build_request(messages, model, temperature, max_tokens)
+        resolved = self._resolver(self._provider_name, model)
+
+        def build() -> dict[str, Any]:
+            return self._build_request(
+                messages, model, temperature, max_tokens, resolved
+            )
+
+        call: Callable[[dict[str, Any]], Awaitable[BaseModel]]
+        if resolved.structured_output is StructuredOutputMode.JSON_SCHEMA:
+            call = functools.partial(
+                self._complete_with_output_format, response_model=response_model
+            )
+        else:
+            call = functools.partial(
+                self._complete_with_forced_tool, response_model=response_model
+            )
+
         try:
-            if uses_strict_request_rules(model):
-                return await self._complete_with_output_format(request, response_model)
-            return await self._complete_with_forced_tool(request, response_model)
+            return await self._with_adaptation(model, build, call)
         except (
             RateLimitError,
             AuthenticationError,
@@ -147,15 +170,69 @@ class AnthropicAdapter:
         ):
             raise
         except anthropic.RateLimitError as e:
-            raise RateLimitError(str(e), provider="anthropic") from e
+            raise RateLimitError(str(e), provider=self._provider_name) from e
         except anthropic.AuthenticationError as e:
-            raise AuthenticationError(str(e), provider="anthropic") from e
+            raise AuthenticationError(str(e), provider=self._provider_name) from e
         except anthropic.APIError as e:
-            raise ProviderError(str(e), provider="anthropic") from e
+            raise ProviderError(str(e), provider=self._provider_name) from e
 
     def get_last_usage(self) -> TokenUsage:
         """Return token usage from the most recent API call."""
         return self._last_usage
+
+    def _build_request(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        resolved: ResolvedModel,
+    ) -> dict[str, Any]:
+        """Build the request kwargs shared by plain and structured calls."""
+        system, user_messages = split_system_message(messages)
+        request: dict[str, Any] = {
+            "model": model,
+            "messages": user_messages,
+            "max_tokens": resolved.output_limit(max_tokens),
+        }
+        dropped = _DROP_TEMPERATURE in self._adaptations.get(model, set())
+        if resolved.accepts_sampling_params and not dropped:
+            request["temperature"] = temperature
+        if system:
+            request["system"] = system
+        return request
+
+    async def _with_adaptation[T](
+        self,
+        model: str,
+        build: _RequestBuilder,
+        call: Callable[[dict[str, Any]], Awaitable[T]],
+    ) -> T:
+        """Run ``call``, retrying once if the API rejects ``temperature``."""
+        while True:
+            request = build()
+            try:
+                return await call(request)
+            except anthropic.BadRequestError as error:
+                if not self._adapt(model, request, str(error)):
+                    raise
+
+    def _adapt(self, model: str, request: dict[str, Any], message: str) -> bool:
+        """Record a dropped ``temperature`` for ``model``; False if not applicable."""
+        if rejected_parameter(message) != "temperature" or "temperature" not in request:
+            return False
+        self._adaptations.setdefault(model, set()).add(_DROP_TEMPERATURE)
+        logger.warning(
+            "%s rejected '%s' for model %s; retrying without it",
+            self._provider_name,
+            "temperature",
+            model,
+        )
+        return True
+
+    async def _stream_message(self, request: dict[str, Any]) -> Message:
+        async with self._client.messages.stream(**request) as stream:
+            return await stream.get_final_message()
 
     def _record_usage(self, response: Message) -> None:
         self._last_usage = TokenUsage(
@@ -166,6 +243,7 @@ class AnthropicAdapter:
     async def _complete_with_output_format(
         self,
         request: dict[str, Any],
+        *,
         response_model: type[BaseModel],
     ) -> BaseModel:
         """Constrain the reply to the model's JSON schema via structured outputs."""
@@ -187,7 +265,7 @@ class AnthropicAdapter:
             raise ProviderError(
                 "Anthropic returned no text content "
                 f"(stop_reason={response.stop_reason})",
-                provider="anthropic",
+                provider=self._provider_name,
             )
         try:
             data = extract_json_from_text(text)
@@ -195,13 +273,14 @@ class AnthropicAdapter:
             raise ProviderError(
                 "Anthropic returned unparseable JSON "
                 f"(stop_reason={response.stop_reason})",
-                provider="anthropic",
+                provider=self._provider_name,
             ) from e
         return validate_structured_response(data, response_model)
 
     async def _complete_with_forced_tool(
         self,
         request: dict[str, Any],
+        *,
         response_model: type[BaseModel],
     ) -> BaseModel:
         """Force a single tool call whose input is the structured reply."""
@@ -305,5 +384,5 @@ class AnthropicAdapter:
 
         raise ProviderError(
             "Anthropic returned no tool_use or text content",
-            provider="anthropic",
+            provider=self._provider_name,
         )

@@ -1,0 +1,65 @@
+{
+  "selected_experiences": [
+    {
+      "company": "Initech",
+      "role": "Senior Software Engineer, Platform",
+      "period": "2021-03 to present",
+      "relevance_score": 95,
+      "match_reasons": [
+        "Kubernetes migration at scale",
+        "Observability and incident response ownership",
+        "Terraform modules"
+      ],
+      "suggested_bullets": [
+        "Led the migration of 42 services from VM-based deploys to Kubernetes, cutting deploy time from 45 minutes to 6 minutes",
+        "Reduced p99 latency of the order API by 40% by adding read replicas and a Redis cache layer",
+        "Designed the observability stack (OpenTelemetry, Prometheus, Grafana) covering 120 services, cutting mean time to detect incidents from 25 minutes to 4 minutes",
+        "Wrote shared Terraform modules adopted by 14 teams, saving an estimated $310K per year in duplicated infrastructure work",
+        "Ran the on-call rotation for a team of 9 and introduced incident response runbooks, lowering pages per week from 31 to 12"
+      ],
+      "bullets_to_drop": [
+        "Mentored 5 engineers, two of whom were promoted to senior"
+      ],
+      "reframe_suggestion": "Lead with the Kubernetes migration and the observability stack."
+    },
+    {
+      "company": "Globex",
+      "role": "Software Engineer II",
+      "period": "2018-06 to 2021-02",
+      "relevance_score": 82,
+      "match_reasons": [
+        "Go services at high throughput",
+        "PostgreSQL operations",
+        "Cloud cost reduction"
+      ],
+      "suggested_bullets": [
+        "Built a Go ingestion service handling 85,000 events per second at 99.95% availability",
+        "Migrated a 3 TB PostgreSQL database to a partitioned schema with zero downtime, making report queries 8x faster",
+        "Cut cloud spend by $1.2M per year by right-sizing instances and moving batch jobs to spot capacity",
+        "Reduced CI build times from 22 minutes to 7 minutes by caching dependencies and parallelizing test suites"
+      ],
+      "bullets_to_drop": [
+        "Introduced contract tests between 6 services, which prevented an estimated 15 production regressions in the first year"
+      ],
+      "reframe_suggestion": "Emphasize Go and PostgreSQL work, then cost savings."
+    }
+  ],
+  "skills_to_highlight": [
+    "Kubernetes",
+    "Go",
+    "PostgreSQL",
+    "Terraform",
+    "OpenTelemetry",
+    "Prometheus"
+  ],
+  "skills_to_omit": [
+    "Java",
+    "Struts"
+  ],
+  "gap_analysis": "No gaps in the stated requirements; the candidate has not used Grafana Loki, which the posting mentions as a plus.",
+  "mission_themes": [
+    "platform reliability",
+    "developer productivity",
+    "cost-aware infrastructure"
+  ]
+}

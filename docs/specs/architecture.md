@@ -52,13 +52,13 @@ Responsibilities:
 - Delegate to services created by `adapters/factory.py`
 - Handle `MkcvError` with exit codes and user-friendly messages
 
-Commands: `generate`, `render`, `validate`, `init`, `themes`, `status`
+Commands: `generate`, `render`, `validate`, `init`, `themes`, `status`, `cover-letter`, `kb`, `models`
 
 The CLI contains **no business logic** — it validates inputs and calls services.
 
 ### 2. `core/` — Business Logic
 
-Four sub-packages, all framework-free:
+Five sub-packages, all framework-free:
 
 **`core/ports/`** — Protocol interfaces that define how services talk to the
 outside world:
@@ -72,6 +72,7 @@ outside world:
 
 **`core/services/`** — Business logic orchestration:
 - `PipelineService` — 5-stage resume generation pipeline with per-stage provider/model config
+- `ModelAdvisor` — checks resolved stage models against the catalog: recommended model, quality tier, estimated cost, and non-blocking warnings (pure logic; produces a `ModelReport`)
 - `RenderService` — YAML-to-PDF rendering
 - `ValidationService` — LLM-powered ATS compliance checking (YAML + PDF support)
 - `WorkspaceService` — Workspace initialization and application setup (delegates to `WorkspacePort`)
@@ -86,9 +87,17 @@ instantiate adapters directly.
 - Pipeline: `JDAnalysis`, `Requirement`, `ExperienceSelection`, `TailoredContent`, `TailoredBullet`, `ReviewReport`, `PipelineResult`, `StageMetadata`, `StageConfig`, `TokenUsage`
 - Resume: `RenderCVResume`, `ResumeCV`, `ResumeDesign`, `ExperienceEntry`, `SkillGroup`, `SkillEntry`, `SocialNetwork`, `MissionStatement`, `TailoredRole`
 - Workspace: `WorkspaceConfig`, `ApplicationMetadata`
-- Configuration: `ProfilePreset` (budget/premium stage configs), `ThemeInfo`
+- Configuration: `Preset` (content density, an economy flag, and for the legacy `budget` preset a provider), `ThemeInfo`
+- Models and providers: `ModelCapability`, `CapabilityOverlay`, `ModelCatalog`, `ResolvedModel`, `ProviderKind`, `StructuredOutputMode`, `ModelTier`, `TokenParam`
+- Stage resolution: `StageKey`, `StageRequirement`, `ModelProfile`, `StageAssignment`
+- Advice: `ModelWarning`, `ModelWarningKind`, `StageAdvice`, `ModelReport`
 - Validation: `KBValidationResult`, `ATSCheck`, `KeywordCoverage`, `BulletReview`
-- Pricing: `pricing` module with `MODEL_PRICING` and `calculate_cost()`
+- Pricing: `pricing` module with `MODEL_PRICING` (derived from the catalog) and `calculate_cost()`
+
+**`core/catalog/`** — Static data shipped with mkcv, with no behaviour:
+- `builtin_models` — capabilities, quality tiers, and prices of known models
+- `builtin_model_profiles` — the recommended model per stage for each provider (all provisional), plus `get_profile`, `profile_stage_model`, `profile_for_provider`
+- `stage_requirements` — per stage: config section, default temperature, minimum tier, rough token counts
 
 **`core/exceptions/`** — Error hierarchy rooted at `MkcvError`. One class per file.
 Each exception carries an `exit_code` for the CLI layer.
@@ -123,17 +132,33 @@ Concrete implementations of core ports:
 - `WorkspaceManager` — implements `WorkspacePort` (workspace/application creation)
 - `PyPdfReader` — implements `PdfReaderPort` (text extraction via pypdf)
 
-**`adapters/llm/`** — Provider-agnostic LLM adapters. The factory selects
-the adapter based on configuration and available API keys:
-- `AnthropicAdapter` — Anthropic Claude (structured output via tool-use)
-- `OpenAIAdapter` — OpenAI GPT models (structured output via JSON mode)
-- `OllamaAdapter` — Local Ollama models via OpenAI-compatible API (no API key)
+**`adapters/llm/`** — Provider-agnostic LLM adapters. Providers are data
+(`ProviderSpec`): the built-in ones plus any a user defines under
+`[default.providers.<name>]`. `ProviderRegistry` builds the adapter for a
+provider by dispatching on its *kind*, never on its name:
+- `AnthropicAdapter` — Anthropic Claude (schema-constrained output, or a forced tool call for older models)
+- `OpenAICompatibleAdapter` — any OpenAI Chat Completions endpoint, with a structured-output fallback chain. Ollama and OpenRouter are built-in instances of it; so is any provider a user defines with `type = "openai-compatible"`
+- `OpenAIAdapter` — OpenAI GPT models; subclass of the above with strict JSON-schema output and no fallback
+- `GoogleGeminiAdapter` — Google Gemini through the `google-genai` SDK (imported lazily)
 - `StubLLMAdapter` — deterministic test/dev stub (no API key needed)
 - `RetryingLLMAdapter` — decorator that wraps any adapter with exponential backoff on `RateLimitError`
+- `request_adaptation.py` — one-shot adaptation when a provider rejects `temperature` or the output-limit parameter
+- `strict_schema.py` — converts a Pydantic model to an OpenAI-strict JSON schema
 - `_utils.py` — shared utilities (schema prompts, JSON extraction, validation)
 
-Provider selection: config → profile preset → API key lookup → adapter
-instantiation. Falls back to `StubLLMAdapter` if no API key is found.
+Resolution and configuration:
+- `ProviderRegistry` (`provider_registry.py`) — names, specs, API keys, capability defaults, and adapter creation; raises `ConfigurationError` (exit 3) if a provider needs a key and none is found (only an explicit `stub` provider runs offline)
+- `builtin_providers.py` — the built-in providers and the per-kind capability defaults
+- `model_catalog_loader.py` — layers the user's `[[default.model_catalog]]` entries over the built-in catalog
+- `StageResolver` (`stage_resolver.py`) — decides the provider, model, and temperature of each stage and returns `ResolvedStages`
+
+Stage resolution, highest priority first: `--model-profile` / `--provider` flags,
+per-stage config (`[default.pipeline.stages.*]`, `[default.cover_letter.stages.*]`,
+`[default.kb]`, `[default.validate]`), then the model profile
+(`pipeline.model_profile`, else the profile of `pipeline.provider`, else
+`anthropic`). A preset adds only the economy flag and, for `budget`, a provider.
+Unresolvable configurations raise `ConfigurationError` (exit code 3) before any
+LLM call. See [`docs/models.md`](../models.md).
 
 **`adapters/renderers/`** — PDF rendering backends:
 - `RenderCVAdapter` — renders via RenderCV's Python API (Typst engine).
@@ -143,17 +168,23 @@ instantiation. Falls back to `StubLLMAdapter` if no API key is found.
 **`adapters/factory.py`** — Manual DI wiring. Factory functions assemble
 fully-wired service instances:
 ```python
-def create_pipeline_service(config, profile="default") -> PipelineService:
-    stage_configs = _resolve_stage_configs(config, profile)  # budget/premium/default
-    providers = _create_providers(config, stage_configs)      # one adapter per provider
-    prompts = FileSystemPromptLoader(override_dir=...)
-    artifacts = FileSystemArtifactStore()
-    return PipelineService(providers=providers, prompts=prompts,
-                           artifacts=artifacts, stage_configs=stage_configs)
+def create_pipeline_service(config, preset_name="default", *, provider_override=None,
+                            model_profile=None, theme="sb2nov") -> PipelineService:
+    registry = _registry(config)                          # providers + model catalog
+    resolved = StageResolver(config, registry).resolve(PIPELINE_STAGES, ResolutionRequest(...))
+    stage_configs = resolved.pipeline_stage_configs()     # flags > config > profile
+    providers = _create_providers(config, stage_configs, registry)  # one adapter per provider
+    return PipelineService(providers=providers, prompts=FileSystemPromptLoader(...),
+                           artifacts=FileSystemArtifactStore(), stage_configs=stage_configs,
+                           preset=resolve_preset(preset_name), catalog=registry.catalog, ...)
 ```
 
-Factory functions: `create_pipeline_service`, `create_render_service`,
-`create_validation_service`, `create_workspace_service`.
+Factory functions: `create_pipeline_service`, `create_cover_letter_service`,
+`create_regeneration_service`, `create_validation_service`,
+`create_kb_generation_service`, `create_render_service`,
+`create_batch_render_service`, `create_workspace_service`,
+`create_model_report` (the advice behind warnings and `mkcv models`), and
+`create_provider_registry` (lets the CLI list providers and the catalog).
 
 ---
 
@@ -225,6 +256,7 @@ previously saved artifacts from `.mkcv/` instead of re-running earlier stages.
 ```
 MkcvError (exit_code=1)
 ├── JDReadError (2)
+├── ConfigurationError (3)     → unknown provider/profile, unresolvable models, bad settings
 ├── ProviderError (4)
 │   ├── RateLimitError (4)     → exponential backoff retry
 │   ├── AuthenticationError (4) → fail fast, show config help
@@ -245,7 +277,7 @@ The CLI meta handler catches `MkcvError` and exits with the appropriate code.
 
 ## Security
 
-1. **API keys** via env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) — never in config files or logs
+1. **API keys** via env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, or the `api_key_env` of a provider you define) — never in config files or logs
 2. **Knowledge base** may contain PII — local stub adapter provides offline processing
 3. **Artifacts** may contain sensitive data — `.mkcv/` is in `.gitignore`
 4. **Provider calls** use HTTPS only

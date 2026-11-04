@@ -1,7 +1,8 @@
 """mkcv CLI application.
 
 Cyclopts-based CLI with global options (--verbose, --workspace, --version)
-and subcommands: generate, render, validate, init, themes, kb.
+and subcommands: generate, render, validate, init, themes, status, cover-letter,
+kb, models.
 """
 
 import logging
@@ -11,6 +12,7 @@ from typing import Annotated
 
 import cyclopts
 from rich.console import Console
+from rich.markup import escape
 
 from mkcv import __version__
 from mkcv.config import find_workspace_root, settings
@@ -41,6 +43,7 @@ app.command("mkcv.cli.commands.themes:themes_command", name="themes")
 app.command("mkcv.cli.commands.status:status_command", name="status")
 app.command("mkcv.cli.commands.cover_letter:cover_letter_command", name="cover-letter")
 app.command("mkcv.cli.commands.kb:kb_app", name="kb")
+app.command("mkcv.cli.commands.models:models_command", name="models")
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +102,7 @@ def meta_handler(
     try:
         app(tokens)
     except MkcvError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         sys.exit(exc.exit_code)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")

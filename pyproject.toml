@@ -40,6 +40,7 @@ dependencies = [
     "python-docx>=1.1",
     "beautifulsoup4>=4.12",
     "html2text>=2024.2",
+    "google-genai>=2.34.0",
 ]
 
 [project.urls]
@@ -88,10 +89,11 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["mkcv"]
+known-first-party = ["mkcv", "evals"]
 
 [tool.mypy]
 python_version = "3.12"
+files = ["src", "evals"]
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -103,6 +105,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 addopts = "-ra -q"
 markers = [

@@ -10,15 +10,22 @@
 #   4. Environment variables (MKCV_ prefix)
 #   5. CLI flags
 #
+# Every section header needs the [default.] prefix (mkcv uses Dynaconf
+# environments). Without it the setting is silently ignored.
+#
 # API keys are always set via environment variables:
 #   export ANTHROPIC_API_KEY=sk-ant-...
 #   export OPENAI_API_KEY=sk-...
+#   export GEMINI_API_KEY=...          (GOOGLE_API_KEY also works)
 #   export OPENROUTER_API_KEY=sk-or-...
+#
+# Run `mkcv models` to see which model every stage will use, what mkcv
+# recommends, and an estimated cost. See docs/models.md for the details.
 
 # ---------------------------------------------------------------------------
 # General settings
 # ---------------------------------------------------------------------------
-[general]
+[default.general]
 # Enable verbose (DEBUG) logging. Overridden by --verbose / -v CLI flag.
 # verbose = false
 
@@ -31,7 +38,7 @@
 # ---------------------------------------------------------------------------
 # Resume generation pipeline
 # ---------------------------------------------------------------------------
-[pipeline]
+[default.pipeline]
 # Which stage to start from (1-5). Useful for re-running from a specific stage.
 # Stages: 1=analyze, 2=select, 3=tailor, 4=structure, 5=review
 # from_stage = 1
@@ -42,36 +49,53 @@
 # Pause after each pipeline stage for review before proceeding.
 # interactive = false
 
+# Which models run each stage. Precedence, highest first:
+#   1. --model-profile / --provider on the command line
+#   2. the per-stage settings below
+#   3. the model profile (model_profile), else the profile of provider
+# Every profile is a provisional recommendation, not a benchmark result.
+
+# Model profile for every stage: anthropic, anthropic-economy, openai,
+# openai-economy, google, google-economy, local. Default: anthropic.
+# model_profile = "anthropic"
+
+# Provider to use when model_profile is not set: anthropic, openai, google,
+# ollama, openrouter, or one you define under [default.providers.<name>].
+# provider = "anthropic"
+
+# Warn before a run about weak or unknown models, or a missing API key.
+# model_warnings = true
+
 # Per-stage LLM configuration
-# Each stage can use a different provider, model, and temperature.
-# Supported providers: anthropic, openai, ollama, openrouter
+# Each stage can use a different provider, model, and temperature. A stage
+# that sets only "model" runs on the provider that offers that model.
 
 # Stage 1: Analyze the job description -- extract requirements, keywords, priorities
-[pipeline.stages.analyze]
+[default.pipeline.stages.analyze]
 # provider = "anthropic"
 # model = "claude-haiku-5-5"
 # temperature = 0.2
 
 # Stage 2: Select the most relevant experience from your knowledge base
-[pipeline.stages.select]
+[default.pipeline.stages.select]
 # provider = "anthropic"
 # model = "claude-opus-5-5"
 # temperature = 0.3
 
 # Stage 3: Tailor bullet points -- rewrite with XYZ formula, weave in keywords
-[pipeline.stages.tailor]
+[default.pipeline.stages.tailor]
 # provider = "anthropic"
 # model = "claude-opus-5-5"
 # temperature = 0.5
 
 # Stage 4: Structure the resume into RenderCV-compatible YAML
-[pipeline.stages.structure]
+[default.pipeline.stages.structure]
 # provider = "anthropic"
 # model = "claude-sonnet-5-5"
 # temperature = 0.1
 
 # Stage 5: Review for ATS compliance, scoring, improvement suggestions
-[pipeline.stages.review]
+[default.pipeline.stages.review]
 # provider = "anthropic"
 # model = "claude-opus-5-5"
 # temperature = 0.3
@@ -79,24 +103,24 @@
 # ---------------------------------------------------------------------------
 # Cover letter generation
 # ---------------------------------------------------------------------------
-[cover_letter]
+[default.cover_letter]
 # Automatically render the cover letter to PDF after generation.
 # auto_render = true
 
 # LLM configuration for cover letter stages
-[cover_letter.stages.generate]
+[default.cover_letter.stages.generate]
 # provider = "anthropic"
 # model = "claude-opus-5-5"
 # temperature = 0.6
 
-[cover_letter.stages.review]
+[default.cover_letter.stages.review]
 # provider = "anthropic"
 # model = "claude-haiku-5-5"
 # temperature = 0.2
 
 # Cover letter layout and design
 # Uncomment and modify to customize cover letter appearance.
-# [cover_letter.design]
+# [default.cover_letter.design]
 # page_size = "us-letter"           # Page size: "us-letter" or "a4"
 # margin_top = "1.2in"              # Top margin
 # margin_bottom = "1in"             # Bottom margin
@@ -111,7 +135,7 @@
 # ---------------------------------------------------------------------------
 # Resume rendering (PDF output)
 # ---------------------------------------------------------------------------
-[rendering]
+[default.rendering]
 # Resume theme. Available themes: sb2nov, classic, moderncv, engineeringresumes
 # Use `mkcv themes` to see all available themes and `mkcv themes --preview <name>` for details.
 # theme = "sb2nov"
@@ -127,7 +151,7 @@
 
 # Theme property overrides
 # These override the theme's built-in defaults for specific properties.
-[rendering.overrides]
+[default.rendering.overrides]
 # font = "Charter"                  # Override font family
 # font_size = "11pt"                # Override font size
 # page_size = "a4paper"             # Override page size
@@ -135,7 +159,7 @@
 
 # Page geometry (margins)
 # Overrides the theme's default page margins.
-# [rendering.page]
+# [default.rendering.page]
 # top_margin = "0.7in"
 # bottom_margin = "0.7in"
 # left_margin = "0.5in"
@@ -143,33 +167,60 @@
 
 # Header layout
 # Controls spacing below name, headline, and connections in the resume header.
-# [rendering.header]
+# [default.rendering.header]
 # space_below_name = "0.15cm"
 # space_below_headline = "0.15cm"
 # space_below_connections = "0.3cm"
 
 # Entry layout
 # Controls experience section geometry.
-# [rendering.entries]
+# [default.rendering.entries]
 # date_and_location_width = "3.6cm"
 
 # Section titles
 # Controls heading style for resume sections (Experience, Education, etc.).
-# [rendering.section_titles]
+# [default.rendering.section_titles]
 # type = "with_full_line"           # Options: "with_full_line", "with_parial_line", "moderncv", "with_line"
 # space_above = "0.3cm"
 # space_below = "0.15cm"
 
 # Typography
 # Controls text line spacing and alignment.
-# [rendering.typography]
+# [default.rendering.typography]
 # line_spacing = "0.7em"
 # alignment = "justified"           # Options: "justified", "left-aligned"
 
 # ---------------------------------------------------------------------------
+# Providers and models
+# ---------------------------------------------------------------------------
+# Built-in providers: anthropic, openai, google, openrouter, ollama.
+# Override a built-in one, or define any OpenAI-compatible endpoint:
+#
+# [default.providers.groq]
+# type = "openai-compatible"
+# base_url = "https://api.groq.com/openai/v1"
+# api_key_env = "GROQ_API_KEY"          # a name or a list of names
+# requires_api_key = true
+#
+# A provider with no model profile needs a "model" on every stage that uses it.
+#
+# Tell mkcv about a model it does not know: quality tier (minimal, efficient,
+# strong, frontier), prices (USD per 1M tokens), and structured output mode
+# (json_schema, tool, json_object, prompt). Run `mkcv models --catalog` to
+# list what mkcv already knows.
+#
+# [[default.model_catalog]]
+# provider = "groq"
+# match = "llama-3.3-70b-versatile"     # a model ID, or a prefix with match_type = "prefix"
+# tier = "efficient"
+# structured_output = "json_object"
+# input_price_per_mtok = 0.59
+# output_price_per_mtok = 0.79
+
+# ---------------------------------------------------------------------------
 # Workspace settings
 # ---------------------------------------------------------------------------
-[workspace]
+[default.workspace]
 # Path to knowledge base file (relative to workspace root)
 # knowledge_base = "knowledge-base/career.md"
 
@@ -189,7 +240,7 @@
 # ---------------------------------------------------------------------------
 # Voice and writing style
 # ---------------------------------------------------------------------------
-[voice]
+[default.voice]
 # Custom writing guidelines for the AI. Describe your preferred tone, style,
 # and any specific instructions for how bullets should be written.
 # Example: "Use active voice. Prefer concise, metric-driven statements.

@@ -1,0 +1,42 @@
+cv:
+  name: Alex Rivera
+  headline: Platform engineer who moves services onto Kubernetes, builds observability that shortens incidents, and keeps infrastructure costs down.
+  location: Austin, TX
+  email: alex.rivera@example.com
+  sections:
+    experience:
+      - company: Initech
+        position: Senior Software Engineer, Platform
+        location: Austin, TX
+        start_date: 2021-03
+        end_date: present
+        highlights:
+          - I migrated 42 services from VM-based deploys to Kubernetes, cutting deploy time from 45 minutes to 6 minutes
+          - Designed an OpenTelemetry, Prometheus, and Grafana observability stack covering 120 services, cutting mean time to detect incidents from 25 minutes to 4 minutes
+          - Cut p99 latency of the order API by 40% with read replicas and a Redis cache layer
+          - Wrote shared Terraform modules adopted by 14 teams, saving an estimated $310K per year
+          - Ran the on-call rotation for a team of 9 and added incident response runbooks, lowering pages per week from 31 to 12
+      - company: Globex
+        position: Software Engineer II
+        location: Austin, TX
+        start_date: 2018-06
+        end_date: 2021-02
+        highlights:
+          - Built a Go ingestion service handling 85,000 events per second at 99.95% availability
+          - Migrated a 3 TB PostgreSQL database to a partitioned schema with zero downtime, making report queries 8x faster
+          - Cut cloud spend by $1.2M per year by right-sizing instances and moving batch jobs to spot capacity
+    skills:
+      - label: Platform
+        details: Kubernetes, Terraform, Docker
+      - label: Languages
+        details: Go, Python, SQL
+      - label: Data and observability
+        details: PostgreSQL, Redis, OpenTelemetry, Prometheus, Grafana
+    education:
+      - institution: State University
+        area: Computer Science
+        degree: BS
+        start_date: 2010-09
+        end_date: 2014-06
+design:
+  theme: sb2nov
