@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- version list -->
 
+## v1.3.0 (2026-11-04)
+
+### Features
+
+- **kb**: Add knowledge base generation from existing documents
+  ([#5](https://github.com/bkuberek/mkcv/pull/5),
+  [`53e67fd`](https://github.com/bkuberek/mkcv/commit/53e67fd2b0a71e59caf418ad3787e945623ad223))
+
+
 ## v1.2.0 (2026-03-20)
 
 ### Bug Fixes
