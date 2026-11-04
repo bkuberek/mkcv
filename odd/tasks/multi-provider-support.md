@@ -37,7 +37,7 @@ Route legend: `delegated` = one bounded writer (2+ non-trivial files, writer tri
 - [x] T01: Model capability catalog and catalog-derived pricing (route: delegated; 11 new core modules + pricing) - `dc5a0ad`
 - [x] T02: OpenAI-compatible adapter with structured-output fallback chain (route: delegated; 6 new adapter modules) - `703caff`
 - [x] T03: Native OpenAI adapter with strict structured outputs (route: delegated; adapter rewrite + test rewrite) - `baecd67`
-- [ ] T04: Capability-driven Anthropic request shaping (route: delegated; adapter + tests)
+- [x] T04: Capability-driven Anthropic request shaping (route: delegated; adapter + tests) - `9333892`
 - [ ] T05: Provider registry, catalog overrides, and factory dispatch (route: delegated; registry, loader, factory, services, workspace README)
 
 ### P2: Google Gemini
@@ -98,6 +98,7 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 | T01 | `dc5a0ad` | `ModuleNotFoundError: No module named 'mkcv.core.models.capability_overlay'` | 269 focused, 1799 full | pending (parent runs `gentle-ai review assess`) |
 | T02 | `703caff` | `ModuleNotFoundError: No module named 'mkcv.adapters.llm.strict_schema'` | 311 focused, 2110 full | pending (parent runs `gentle-ai review assess`) |
 | T03 | `baecd67` | `KeyError: 'max_completion_tokens'` (request still sent json_object, temperature, max_tokens) | 82 focused (test_openai + test_factory), 2148 full | pending (parent runs `gentle-ai review assess`) |
+| T04 | `9333892` | `TypeError: AnthropicAdapter.__init__() got an unexpected keyword argument 'resolver'` | 68 focused (test_anthropic), 2184 full | pending (parent runs `gentle-ai review assess`) |
 
 ### Task notes
 
@@ -123,6 +124,14 @@ Plus the focused pytest command listed in each task of `tasks.md`.
 - Verification: `uv run pytest -q tests/test_adapters/test_llm/test_openai.py tests/test_adapters/test_llm/test_factory.py`: 82 passed; ruff check/format, `uv run mypy src/`: clean; `uv run pytest -q`: 2148 passed, exit 0.
 - `OpenAIAdapter` has no method overrides, as the design predicted: refusal, truncation, adaptation, and repair live in the parent. The rewritten `test_openai.py` covers REQ-OAI-1 to 10 with SDK `ChatCompletion` objects; the max_tokens-to-max_completion_tokens adaptation (REQ-OAI-8) is exercised with a custom resolver whose `token_param` is `max_tokens`.
 - `factory.py` still constructs `OpenAIAdapter(api_key=..., base_url=...)` for `openai` and `openrouter`; `test_factory.py` passes unchanged. Note that until T05 `openrouter` runs on `OpenAIAdapter`, so it now gets strict JSON-schema output with no degradation; T05 moves it to `OpenAICompatibleAdapter`.
+
+**T04** (route: delegated writer, trigger: adapter refactor plus test additions).
+
+- Verification: `uv run pytest -q tests/test_adapters/test_llm/test_anthropic.py`: 68 passed; ruff check/format, `uv run mypy src/`: clean; `uv run pytest -q`: 2184 passed, exit 0.
+- Equivalence evidence: a scratch script loaded the pre-change `anthropic.py` from `c1f464b` and compared `_build_request` output with the new adapter for 30 Claude model IDs (every catalog entry plus dated and legacy variants) at 4 token limits: 0 mismatches. 9 one-line mutations of the new logic were all caught.
+- All pre-existing Anthropic tests pass unchanged (no constructor edits were needed); new classes cover REQ-CAT-9, catalog-driven shaping (tool/temperature, output_config/no temperature, JSON_OBJECT and PROMPT treated as tool), and the one-shot temperature adaptation (complete, forced-tool, and output_config paths).
+- Error mapping is deliberately unchanged (context-length mapping only in `complete`); only the `provider` label now comes from `provider_name`. The temperature retry loop is bounded because the retried request no longer contains `temperature`.
+- Behaviour change (design D20): a Claude model unknown to the catalog now resolves to the strict defaults (no `temperature`, 16000 floor, `output_config`) where the old prefix check treated it as a 4.x model.
 
 ## Decisions (rationale in `design.md` §1 and §15)
 
