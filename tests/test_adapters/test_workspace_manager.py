@@ -507,3 +507,51 @@ class TestListApplications:
         # Both created "today" so timestamps are very close
         # Just verify we get 2 results
         assert len(result) == 2
+
+
+class TestWorkspaceReadmeCredentials:
+    """REQ-PR-7: the README credentials block comes from the provider registry."""
+
+    @staticmethod
+    def _credentials_block(tmp_path: Path) -> str:
+        target = tmp_path / "ws"
+        WorkspaceManager().create_workspace(target)
+        readme = (target / "README.md").read_text()
+        section = readme.split("### 2. Set up an API key", 1)[1].split("### 3.", 1)[0]
+        return section.split("```bash", 1)[1].split("```", 1)[0]
+
+    @pytest.mark.parametrize(
+        "export_line",
+        [
+            "export ANTHROPIC_API_KEY=sk-ant-...",
+            "export OPENAI_API_KEY=sk-...",
+            "export GEMINI_API_KEY=...",
+            "export OPENROUTER_API_KEY=sk-or-...",
+        ],
+    )
+    def test_block_lists_each_keyed_provider(
+        self, tmp_path: Path, export_line: str
+    ) -> None:
+        assert export_line in self._credentials_block(tmp_path)
+
+    def test_google_hint_names_gemini(self, tmp_path: Path) -> None:
+        block = self._credentials_block(tmp_path)
+        assert "# Google Gemini\nexport GEMINI_API_KEY=..." in block
+
+    def test_block_lists_providers_in_registry_order_with_ollama_last(
+        self, tmp_path: Path
+    ) -> None:
+        block = self._credentials_block(tmp_path)
+        positions = [
+            block.index(marker)
+            for marker in ("ANTHROPIC", "OPENAI", "GEMINI", "OPENROUTER", "Ollama")
+        ]
+        assert positions == sorted(positions)
+
+    def test_ollama_hint_needs_no_key(self, tmp_path: Path) -> None:
+        block = self._credentials_block(tmp_path)
+        assert "ollama serve" in block
+        assert block.strip().endswith("# Just run: ollama serve")
+
+    def test_block_never_mentions_the_stub_provider(self, tmp_path: Path) -> None:
+        assert "stub" not in self._credentials_block(tmp_path).lower()

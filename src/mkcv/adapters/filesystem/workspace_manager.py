@@ -12,6 +12,7 @@ import tomli_w
 from ruamel.yaml import YAML
 
 from mkcv import __version__
+from mkcv.adapters.llm.builtin_providers import BUILTIN_PROVIDERS
 from mkcv.core.exceptions.workspace import WorkspaceError, WorkspaceExistsError
 from mkcv.core.models.application_metadata import ApplicationMetadata
 from mkcv.core.models.jd_document import JDDocument
@@ -286,26 +287,27 @@ def _build_readme() -> str:
     so the README always matches the installed mkcv version.
     """
     from mkcv import __version__
-    from mkcv.adapters.factory import _PROVIDER_ENV_KEYS
 
-    # Build credentials block from actual provider registry
+    # Build credentials block from the built-in provider registry
     provider_hints: dict[str, str] = {
         "anthropic": "# Anthropic (recommended)\nexport ANTHROPIC_API_KEY=sk-ant-...",
         "openai": "# OpenAI\nexport OPENAI_API_KEY=sk-...",
+        "google": "# Google Gemini\nexport GEMINI_API_KEY=...",
         "openrouter": (
             "# OpenRouter (access Claude, GPT, Gemini, DeepSeek, etc. "
             "with one key)\nexport OPENROUTER_API_KEY=sk-or-..."
         ),
         "ollama": "# Ollama (free, local — no key needed)\n# Just run: ollama serve",
     }
-    credential_lines = "\n\n".join(
-        provider_hints.get(p, f"# {p}\nexport {env}=...")
-        for p, env in _PROVIDER_ENV_KEYS.items()
-        if p != "ollama"
-    )
+    credential_blocks = [
+        provider_hints.get(name, f"# {name}\nexport {spec.api_key_env[0]}=...")
+        for name, spec in BUILTIN_PROVIDERS.items()
+        if spec.api_key_env
+    ]
     # Ollama always last (no key needed)
-    if "ollama" in _PROVIDER_ENV_KEYS:
-        credential_lines += "\n\n" + provider_hints["ollama"]
+    if "ollama" in BUILTIN_PROVIDERS:
+        credential_blocks.append(provider_hints["ollama"])
+    credential_lines = "\n\n".join(credential_blocks)
 
     # Build command list from actual CLI registrations
     try:

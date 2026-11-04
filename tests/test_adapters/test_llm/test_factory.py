@@ -1,9 +1,13 @@
 """Tests for factory provider selection logic."""
 
+from pathlib import Path
+from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
+from dynaconf import Dynaconf
 
+from mkcv.adapters import factory as factory_module
 from mkcv.adapters.factory import (
     _create_llm_adapter,
     _resolve_preset,
@@ -14,35 +18,38 @@ from mkcv.adapters.factory import (
 )
 from mkcv.adapters.llm.anthropic import AnthropicAdapter
 from mkcv.adapters.llm.openai import OpenAIAdapter
+from mkcv.adapters.llm.openai_compatible import OpenAICompatibleAdapter
 from mkcv.adapters.llm.retry import RetryingLLMAdapter
 from mkcv.adapters.llm.stub import StubLLMAdapter
+from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.models.profile_preset import ContentDensity
 from mkcv.core.services.regeneration import RegenerationService
 from mkcv.core.services.workspace import WorkspaceService
+
+
+def _blank_config(**values: Any) -> MagicMock:
+    """Build a mock Configuration whose ``get`` resolves ``values`` by key.
+
+    Keys that are not given resolve to the caller's default, like a Dynaconf
+    object with nothing configured. The attribute pattern the legacy stage
+    resolution still uses (``config.pipeline.stages...``) stays a MagicMock.
+    """
+    config = MagicMock()
+    config.get.side_effect = lambda key, default=None: values.get(key, default)
+    config.providers = None
+    config.in_workspace = False
+    config.workspace_root = None
+    return config
 
 
 def _make_config(
     api_key: str | None = None,
     provider: str = "stub",
 ) -> MagicMock:
-    """Build a mock Configuration with optional API key.
-
-    Simulates Dynaconf's attribute access pattern.
-    """
-    config = MagicMock()
-
-    # config.providers.<provider>.api_key — only set when api_key is given
-    if api_key is not None:
-        provider_section = MagicMock()
-        provider_section.api_key = api_key
-        providers = MagicMock()
-        setattr(providers, provider, provider_section)
-        config.providers = providers
-    else:
-        # Simulate missing providers section
-        config.providers = None
-
-    return config
+    """Build a mock Configuration with an optional config-file API key."""
+    if api_key is None:
+        return _blank_config()
+    return _blank_config(providers={provider: {"api_key": api_key}})
 
 
 def _unwrap(adapter: object) -> object:
@@ -109,6 +116,51 @@ class TestCreateLLMAdapter:
         config = _make_config(provider="anthropic", api_key="sk-test")
         adapter = _create_llm_adapter("anthropic", config, with_retry=False)
         assert isinstance(adapter, AnthropicAdapter)
+
+    def test_ollama_is_an_openai_compatible_adapter(self) -> None:
+        adapter = _create_llm_adapter("ollama", _make_config())
+        assert isinstance(adapter, RetryingLLMAdapter)
+        assert type(_unwrap(adapter)) is OpenAICompatibleAdapter
+
+    def test_ollama_without_retry_returns_raw_adapter(self) -> None:
+        adapter = _create_llm_adapter("ollama", _make_config(), with_retry=False)
+        assert type(adapter) is OpenAICompatibleAdapter
+
+    def test_openrouter_is_an_openai_compatible_adapter(self) -> None:
+        config = _make_config(provider="openrouter", api_key="sk-or-test")
+        adapter = _create_llm_adapter("openrouter", config, with_retry=False)
+        assert type(adapter) is OpenAICompatibleAdapter
+
+    def test_openrouter_without_a_key_falls_back_to_the_stub(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        adapter = _create_llm_adapter("openrouter", _make_config())
+        assert isinstance(adapter, StubLLMAdapter)
+
+    def test_unknown_provider_is_a_configuration_error(self) -> None:
+        with pytest.raises(ConfigurationError, match="Unknown LLM provider 'nope'"):
+            _create_llm_adapter("nope", _make_config())
+
+    def test_provider_defined_in_config_is_created(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GROQ_API_KEY", "gk-test")
+        config = _blank_config(
+            providers={
+                "groq": {
+                    "type": "openai-compatible",
+                    "base_url": "https://api.groq.com/openai/v1",
+                    "api_key_env": "GROQ_API_KEY",
+                }
+            }
+        )
+        adapter = _create_llm_adapter("groq", config, with_retry=False)
+        assert type(adapter) is OpenAICompatibleAdapter
+
+    def test_legacy_key_helpers_are_gone(self) -> None:
+        assert not hasattr(factory_module, "_PROVIDER_ENV_KEYS")
+        assert not hasattr(factory_module, "_resolve_api_key")
 
 
 class TestResolvePreset:
@@ -246,18 +298,12 @@ class TestCreatePipelineServiceWithPreset:
     """Tests for create_pipeline_service preset_name parameter."""
 
     def test_budget_preset_creates_ollama_provider(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         service = create_pipeline_service(config, preset_name="budget")
         assert "ollama" in service._providers
 
     def test_default_preset_uses_config_providers(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         analyze = MagicMock()
         analyze.provider = "stub"
         analyze.model = "stub-model"
@@ -272,37 +318,25 @@ class TestCreatePipelineServiceWithPreset:
         assert "stub" in service._providers
 
     def test_concise_preset_sets_preset_on_service(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         service = create_pipeline_service(config, preset_name="concise")
         assert service._preset is not None
         assert service._preset.density == ContentDensity.CONCISE
 
     def test_standard_preset_sets_preset_on_service(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         service = create_pipeline_service(config, preset_name="standard")
         assert service._preset is not None
         assert service._preset.density == ContentDensity.STANDARD
 
     def test_comprehensive_preset_sets_preset_on_service(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         service = create_pipeline_service(config, preset_name="comprehensive")
         assert service._preset is not None
         assert service._preset.density == ContentDensity.COMPREHENSIVE
 
     def test_default_preset_has_no_preset(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         analyze = MagicMock()
         analyze.provider = "stub"
         analyze.model = "stub-model"
@@ -317,15 +351,143 @@ class TestCreatePipelineServiceWithPreset:
         assert service._preset is None
 
     def test_provider_override_changes_all_stages(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         service = create_pipeline_service(
             config, preset_name="standard", provider_override="openrouter"
         )
         for sc in service._stage_configs.values():
             assert sc.provider == "openrouter"
+
+
+def _real_config(tmp_path: Path, toml_text: str) -> Dynaconf:
+    """A real Dynaconf, so ``get`` and attribute access behave as in production."""
+    path = tmp_path / "settings.toml"
+    path.write_text(toml_text)
+    config = Dynaconf(
+        settings_files=[str(path)],
+        environments=True,
+        default_env="default",
+        merge_enabled=True,
+    )
+    config.set("in_workspace", False)
+    config.set("workspace_root", None)
+    return config
+
+
+class TestBuiltinCompatibleProvidersEndToEnd:
+    """REQ-OC-10: ``ollama`` and ``openrouter`` keep working by name."""
+
+    def test_ollama_stage_uses_a_compatible_adapter_on_the_local_endpoint(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.analyze]
+provider = "ollama"
+model = "llama3.1:8b"
+temperature = 0.2
+""",
+        )
+        service = create_pipeline_service(config, preset_name="default")
+        adapter = _unwrap(service._providers["ollama"])
+        assert type(adapter) is OpenAICompatibleAdapter
+        assert str(adapter._client.base_url).startswith("http://localhost:11434/v1")
+
+    def test_openrouter_stage_uses_a_compatible_adapter_on_the_openrouter_endpoint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+        config = _real_config(
+            tmp_path,
+            """
+[default.pipeline.stages.analyze]
+provider = "openrouter"
+model = "openai/gpt-4o"
+temperature = 0.2
+""",
+        )
+        service = create_pipeline_service(config, preset_name="default")
+        adapter = _unwrap(service._providers["openrouter"])
+        assert type(adapter) is OpenAICompatibleAdapter
+        assert str(adapter._client.base_url).startswith("https://openrouter.ai/api/v1")
+
+    def test_user_defined_provider_can_serve_a_stage(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GROQ_API_KEY", "gk")
+        config = _real_config(
+            tmp_path,
+            """
+[default.providers.groq]
+type = "openai-compatible"
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+
+[default.pipeline.stages.analyze]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+temperature = 0.2
+""",
+        )
+        service = create_pipeline_service(config, preset_name="default")
+        adapter = _unwrap(service._providers["groq"])
+        assert type(adapter) is OpenAICompatibleAdapter
+        assert str(adapter._client.base_url).startswith(
+            "https://api.groq.com/openai/v1"
+        )
+
+
+class TestCatalogInjection:
+    """The factory loads the catalog once and hands it to the services."""
+
+    OVERRIDE: ClassVar[list[dict[str, Any]]] = [
+        {
+            "provider": "anthropic",
+            "match": "claude-opus-5-5",
+            "input_price_per_mtok": 100.0,
+        }
+    ]
+
+    def test_pipeline_service_receives_the_loaded_catalog(self) -> None:
+        config = _blank_config(model_catalog=self.OVERRIDE)
+        service = create_pipeline_service(config, preset_name="standard")
+        assert service._catalog is not None
+        assert service._catalog.price_for("claude-opus-5-5", provider="anthropic") == (
+            100.0,
+            20.0,
+        )
+
+    def test_pipeline_service_catalog_defaults_to_the_builtin_entries(self) -> None:
+        service = create_pipeline_service(_blank_config(), preset_name="standard")
+        assert service._catalog is not None
+        assert service._catalog.price_for("claude-opus-5-5", provider="anthropic") == (
+            4.0,
+            20.0,
+        )
+
+    def test_cover_letter_service_receives_the_loaded_catalog(self) -> None:
+        from mkcv.adapters.factory import create_cover_letter_service
+
+        config = _blank_config(model_catalog=self.OVERRIDE)
+        config.cover_letter = None  # use the built-in cover letter defaults
+        service = create_cover_letter_service(config)
+        assert service._catalog is not None
+        assert service._catalog.price_for("claude-opus-5-5", provider="anthropic") == (
+            100.0,
+            20.0,
+        )
+
+    def test_invalid_catalog_override_fails_before_any_llm_call(self) -> None:
+        config = _blank_config(model_catalog="not a list")
+        with pytest.raises(ConfigurationError, match="array of tables"):
+            create_pipeline_service(config, preset_name="standard")
+
+    def test_unknown_provider_override_is_a_configuration_error(self) -> None:
+        with pytest.raises(ConfigurationError, match="Unknown LLM provider"):
+            create_pipeline_service(
+                _blank_config(), preset_name="standard", provider_override="nope"
+            )
 
 
 class TestCreateWorkspaceService:
@@ -347,10 +509,7 @@ class TestCreateRegenerationService:
 
     def _make_stub_config(self) -> MagicMock:
         """Build a config that resolves to stub provider for all stages."""
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
         stage = MagicMock()
         stage.provider = "stub"
         stage.model = "stub-model"
@@ -380,10 +539,7 @@ class TestCreateRegenerationService:
         assert svc._temperature == 0.7
 
     def test_preset_uses_stage3_model(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
 
         svc = create_regeneration_service(config, preset_name="standard")
         # Standard preset stage 3 uses Opus
@@ -391,10 +547,7 @@ class TestCreateRegenerationService:
         assert svc._temperature == 0.5
 
     def test_provider_override_changes_provider(self) -> None:
-        config = MagicMock()
-        config.providers = None
-        config.in_workspace = False
-        config.workspace_root = None
+        config = _blank_config()
 
         svc = create_regeneration_service(
             config, preset_name="standard", provider_override="stub"

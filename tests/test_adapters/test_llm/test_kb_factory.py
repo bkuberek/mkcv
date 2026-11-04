@@ -1,5 +1,6 @@
 """Tests for create_kb_generation_service factory function."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from mkcv.adapters.factory import create_kb_generation_service
@@ -14,14 +15,13 @@ def _make_config(
     """Build a mock Configuration for KB generation tests."""
     config = MagicMock()
 
+    # Registry lookups go through ``config.get``; nothing is configured except
+    # an optional config-file API key.
+    values: dict[str, Any] = {}
     if api_key is not None:
-        provider_section = MagicMock()
-        provider_section.api_key = api_key
-        providers = MagicMock()
-        setattr(providers, provider, provider_section)
-        config.providers = providers
-    else:
-        config.providers = None
+        values["providers"] = {provider: {"api_key": api_key}}
+    config.get.side_effect = lambda key, default=None: values.get(key, default)
+    config.providers = None
 
     # Simulate no [kb] config section
     config.kb = None

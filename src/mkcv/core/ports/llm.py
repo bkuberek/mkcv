@@ -11,7 +11,7 @@ from mkcv.core.models.token_usage import TokenUsage
 class LLMPort(Protocol):
     """Interface for AI language model providers.
 
-    Implementations: AnthropicAdapter, OpenAIAdapter, OllamaAdapter, etc.
+    Implementations: AnthropicAdapter, OpenAIAdapter, OpenAICompatibleAdapter, etc.
     """
 
     async def complete(

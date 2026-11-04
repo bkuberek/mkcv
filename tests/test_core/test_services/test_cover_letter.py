@@ -12,7 +12,10 @@ from mkcv.core.exceptions.cover_letter import CoverLetterError
 from mkcv.core.models.cover_letter import CoverLetter
 from mkcv.core.models.cover_letter_result import CoverLetterResult
 from mkcv.core.models.cover_letter_review import CoverLetterReview
+from mkcv.core.models.model_capability import ModelCapability
+from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.stage_config import StageConfig
+from mkcv.core.models.token_usage import TokenUsage
 from mkcv.core.ports.cover_letter_renderer import CoverLetterRenderedOutput
 from mkcv.core.services.cover_letter import CoverLetterService
 
@@ -607,3 +610,88 @@ class TestCoverLetterLLMCalls:
 
         for call in stub_llm.call_log:
             assert call["method"] == "complete_structured"
+
+
+# ------------------------------------------------------------------
+# Test: stage cost uses the injected catalog (REQ-CAT-8)
+# ------------------------------------------------------------------
+
+
+class _MillionInputTokensStub(StubLLMAdapter):
+    """Stub that reports one million input tokens for every call."""
+
+    def get_last_usage(self) -> TokenUsage:
+        return TokenUsage(input_tokens=1_000_000, output_tokens=0)
+
+
+class TestCoverLetterCostUsesInjectedCatalog:
+    """REQ-CAT-8 for the cover letter pipeline."""
+
+    @staticmethod
+    def _service(
+        sample_cover_letter: CoverLetter,
+        sample_review: CoverLetterReview,
+        mock_renderer: MagicMock,
+        *,
+        catalog: ModelCatalog | None = None,
+    ) -> CoverLetterService:
+        stub = _MillionInputTokensStub(
+            responses={
+                CoverLetter: sample_cover_letter,
+                CoverLetterReview: sample_review,
+            }
+        )
+        return CoverLetterService(
+            providers={"anthropic": stub},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            renderer=mock_renderer,
+            stage_configs={
+                number: StageConfig(
+                    provider="anthropic", model="claude-sonnet-5-5", temperature=0.3
+                )
+                for number in (1, 2)
+            },
+            catalog=catalog,
+        )
+
+    async def test_injected_catalog_price_is_used(
+        self,
+        sample_cover_letter: CoverLetter,
+        sample_review: CoverLetterReview,
+        mock_renderer: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        catalog = ModelCatalog.builtin().with_overrides(
+            [
+                ModelCapability(
+                    provider="anthropic",
+                    match="claude-sonnet-5-5",
+                    input_price_per_mtok=100.0,
+                )
+            ]
+        )
+        service = self._service(
+            sample_cover_letter, sample_review, mock_renderer, catalog=catalog
+        )
+
+        result = await service.generate(
+            "SWE at TestCorp", kb_text="# Jane Doe", output_dir=tmp_path / "out"
+        )
+
+        assert all(stage.cost_usd >= 100.0 for stage in result.stages)
+
+    async def test_without_a_catalog_builtin_prices_apply(
+        self,
+        sample_cover_letter: CoverLetter,
+        sample_review: CoverLetterReview,
+        mock_renderer: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        service = self._service(sample_cover_letter, sample_review, mock_renderer)
+
+        result = await service.generate(
+            "SWE at TestCorp", kb_text="# Jane Doe", output_dir=tmp_path / "out"
+        )
+
+        assert all(stage.cost_usd == pytest.approx(2.0) for stage in result.stages)

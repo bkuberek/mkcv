@@ -7,7 +7,6 @@ the appropriate adapters based on configuration.
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -23,9 +22,9 @@ from mkcv.adapters.filesystem.artifact_store import FileSystemArtifactStore
 from mkcv.adapters.filesystem.pdf_reader import PyPdfReader
 from mkcv.adapters.filesystem.prompt_loader import FileSystemPromptLoader
 from mkcv.adapters.filesystem.workspace_manager import WorkspaceManager
-from mkcv.adapters.llm.retry import RetryingLLMAdapter
+from mkcv.adapters.llm.model_catalog_loader import load_model_catalog
+from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.adapters.renderers.rendercv import RenderCVAdapter
-from mkcv.core.exceptions.authentication import AuthenticationError
 from mkcv.core.models.cover_letter_design import CoverLetterDesign
 from mkcv.core.models.entry_layout import EntryLayout
 from mkcv.core.models.header_layout import HeaderLayout
@@ -43,13 +42,6 @@ from mkcv.core.services.workspace import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
-_PROVIDER_ENV_KEYS: dict[str, str] = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "ollama": "",  # Ollama doesn't require an API key
-}
-
 _STAGE_CONFIG_KEYS: dict[int, str] = {
     1: "analyze",
     2: "select",
@@ -59,34 +51,16 @@ _STAGE_CONFIG_KEYS: dict[int, str] = {
 }
 
 
-def _resolve_api_key(provider: str, config: Configuration) -> str | None:
-    """Resolve the API key for a provider from config or environment.
+def _registry(config: Configuration) -> ProviderRegistry:
+    """Build the provider registry for the current configuration.
 
-    Args:
-        provider: Provider name (e.g. "anthropic", "openai").
-        config: Application configuration.
+    Built on every call, not cached: configuration can change between
+    commands (and between tests).
 
-    Returns:
-        The API key string, or None if not found.
+    Raises:
+        ConfigurationError: If the provider or model-catalog settings are invalid.
     """
-    # Try config first: config.providers.<provider>.api_key
-    try:
-        providers_section = getattr(config, "providers", None)
-        if providers_section is not None:
-            provider_section = getattr(providers_section, provider, None)
-            if provider_section is not None:
-                api_key = getattr(provider_section, "api_key", None)
-                if api_key:
-                    return str(api_key)
-    except (AttributeError, KeyError):
-        pass
-
-    # Fall back to environment variable
-    env_key = _PROVIDER_ENV_KEYS.get(provider)
-    if env_key:
-        return os.environ.get(env_key)
-
-    return None
+    return ProviderRegistry.from_config(config, load_model_catalog(config))
 
 
 def _resolve_preset(
@@ -160,89 +134,39 @@ def _create_llm_adapter(
     """Create an LLM adapter for a specific provider.
 
     Args:
-        provider: Provider name ("anthropic", "openai", "stub").
+        provider: Provider name, built in or defined under
+            ``[default.providers.<name>]``.
         config: Application configuration.
         with_retry: Wrap with exponential backoff retry (default True).
 
     Returns:
         An object implementing LLMPort.
+
+    Raises:
+        ConfigurationError: If the provider is unknown or misconfigured.
     """
-    adapter: LLMPort
-
-    if provider == "stub":
-        from mkcv.adapters.llm.stub import StubLLMAdapter
-
-        return StubLLMAdapter()
-
-    if provider == "ollama":
-        from mkcv.adapters.llm.ollama import OllamaAdapter
-
-        inner: LLMPort = OllamaAdapter()
-        if with_retry:
-            inner = RetryingLLMAdapter(inner)
-        return inner
-
-    api_key = _resolve_api_key(provider, config)
-
-    if not api_key:
-        logger.warning(
-            "No API key for provider '%s'; falling back to stub.",
-            provider,
-        )
-        from mkcv.adapters.llm.stub import StubLLMAdapter
-
-        return StubLLMAdapter()
-
-    if provider == "anthropic":
-        from mkcv.adapters.llm.anthropic import AnthropicAdapter
-
-        adapter = AnthropicAdapter(api_key=api_key)
-
-    elif provider == "openai":
-        from mkcv.adapters.llm.openai import OpenAIAdapter
-
-        adapter = OpenAIAdapter(api_key=api_key)
-
-    elif provider == "openrouter":
-        from mkcv.adapters.llm.openai import OpenAIAdapter
-
-        adapter = OpenAIAdapter(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
-        )
-
-    else:
-        raise AuthenticationError(
-            f"Unknown LLM provider: '{provider}'",
-            provider=provider,
-        )
-
-    if with_retry:
-        adapter = RetryingLLMAdapter(adapter)
-
-    return adapter
+    return _registry(config).create_adapter(provider, with_retry=with_retry)
 
 
 def _create_providers(
     config: Configuration,
     stage_configs: dict[int, StageConfig],
+    registry: ProviderRegistry | None = None,
 ) -> dict[str, LLMPort]:
     """Create one LLM adapter per unique provider in the stage configs.
 
     Args:
         config: Application configuration.
         stage_configs: Per-stage LLM configuration.
+        registry: Provider registry to create adapters from; built from
+            ``config`` when omitted.
 
     Returns:
         Dict mapping provider name to LLMPort adapter.
     """
+    registry = registry or _registry(config)
     unique_providers = {sc.provider for sc in stage_configs.values()}
-    providers: dict[str, LLMPort] = {}
-
-    for provider_name in unique_providers:
-        providers[provider_name] = _create_llm_adapter(provider_name, config)
-
-    return providers
+    return {name: registry.create_adapter(name) for name in unique_providers}
 
 
 def _build_resume_design(config: Configuration, theme: str) -> ResumeDesign:
@@ -460,7 +384,8 @@ def create_pipeline_service(
             for num, sc in stage_configs.items()
         }
 
-    providers = _create_providers(config, stage_configs)
+    registry = _registry(config)
+    providers = _create_providers(config, stage_configs, registry)
     resume_design = _build_resume_design(config, theme)
 
     return PipelineService(
@@ -470,6 +395,7 @@ def create_pipeline_service(
         stage_configs=stage_configs,
         preset=preset,
         resume_design=resume_design,
+        catalog=registry.catalog,
     )
 
 
@@ -614,7 +540,8 @@ def create_cover_letter_service(
             for num, sc in stage_configs.items()
         }
 
-    providers = _create_providers(config, stage_configs)
+    registry = _registry(config)
+    providers = _create_providers(config, stage_configs, registry)
     design = _build_cover_letter_design(config)
 
     return CoverLetterService(
@@ -624,6 +551,7 @@ def create_cover_letter_service(
         renderer=renderer,
         stage_configs=stage_configs,
         design=design,
+        catalog=registry.catalog,
     )
 
 

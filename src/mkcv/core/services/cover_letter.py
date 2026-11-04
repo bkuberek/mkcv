@@ -22,6 +22,7 @@ from mkcv.core.models.cover_letter_design import CoverLetterDesign
 from mkcv.core.models.cover_letter_result import CoverLetterResult
 from mkcv.core.models.cover_letter_review import CoverLetterReview
 from mkcv.core.models.jd_analysis import JDAnalysis
+from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.pricing import calculate_cost
 from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_metadata import StageMetadata
@@ -67,6 +68,8 @@ class CoverLetterService:
         renderer: CoverLetterRendererPort,
         stage_configs: dict[int, StageConfig] | None = None,
         design: CoverLetterDesign | None = None,
+        *,
+        catalog: ModelCatalog | None = None,
     ) -> None:
         self._providers = providers
         self._prompts = prompts
@@ -74,6 +77,7 @@ class CoverLetterService:
         self._renderer = renderer
         self._stage_configs = stage_configs or DEFAULT_COVER_LETTER_STAGE_CONFIGS
         self._design = design
+        self._catalog = catalog
 
     async def generate(
         self,
@@ -505,8 +509,8 @@ class CoverLetterService:
 
         return cast("_T", result)
 
-    @staticmethod
     def _build_stage_metadata(
+        self,
         *,
         stage_number: int,
         provider: str,
@@ -520,7 +524,7 @@ class CoverLetterService:
         output_tokens = usage.output_tokens if usage else 0
 
         resolved_usage = usage or TokenUsage()
-        cost = calculate_cost(model, resolved_usage)
+        cost = calculate_cost(model, resolved_usage, self._catalog, provider=provider)
 
         return StageMetadata(
             stage_number=stage_number,

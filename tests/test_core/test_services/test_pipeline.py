@@ -17,6 +17,8 @@ from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.jd_frontmatter import JDFrontmatter
 from mkcv.core.models.keyword_coverage import KeywordCoverage
 from mkcv.core.models.mission_statement import MissionStatement
+from mkcv.core.models.model_capability import ModelCapability
+from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.pipeline_result import PipelineResult
 from mkcv.core.models.profile_preset import BUILT_IN_PRESETS
 from mkcv.core.models.requirement import Requirement
@@ -28,6 +30,7 @@ from mkcv.core.models.stage_metadata import StageMetadata
 from mkcv.core.models.tailored_bullet import TailoredBullet
 from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.models.tailored_role import TailoredRole
+from mkcv.core.models.token_usage import TokenUsage
 from mkcv.core.services.pipeline import PipelineService, _strip_code_fences
 
 # ------------------------------------------------------------------
@@ -1540,3 +1543,144 @@ class TestExtractJDMetadata:
 
         with pytest.raises(PipelineStageError, match="JD metadata extraction"):
             await pipeline.extract_jd_metadata("Some JD text")
+
+
+# ------------------------------------------------------------------
+# Test: stage cost uses the injected catalog (REQ-CAT-8)
+# ------------------------------------------------------------------
+
+
+class _MillionInputTokensStub(StubLLMAdapter):
+    """Stub that reports one million input tokens for every call."""
+
+    def get_last_usage(self) -> TokenUsage:
+        return TokenUsage(input_tokens=1_000_000, output_tokens=0)
+
+
+class TestPipelineCostUsesInjectedCatalog:
+    """REQ-CAT-8: ``StageMetadata.cost_usd`` is priced from the catalog."""
+
+    @staticmethod
+    def _pipeline(
+        stub: StubLLMAdapter,
+        *,
+        catalog: ModelCatalog | None = None,
+    ) -> PipelineService:
+        stage_configs = {
+            number: StageConfig(
+                provider="anthropic", model="claude-sonnet-5-5", temperature=0.2
+            )
+            for number in range(1, 6)
+        }
+        return PipelineService(
+            providers={"anthropic": stub},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            stage_configs=stage_configs,
+            catalog=catalog,
+        )
+
+    @staticmethod
+    def _stub(
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+        sample_review_report: ReviewReport,
+    ) -> StubLLMAdapter:
+        return _MillionInputTokensStub(
+            default_response="cv:\n  name: Test\n  summary: Test resume",
+            responses={
+                JDAnalysis: sample_jd_analysis,
+                ExperienceSelection: sample_selection,
+                TailoredContent: sample_tailored_content,
+                ReviewReport: sample_review_report,
+            },
+        )
+
+    async def test_injected_catalog_price_is_used(
+        self,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+        sample_review_report: ReviewReport,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        catalog = ModelCatalog.builtin().with_overrides(
+            [
+                ModelCapability(
+                    provider="anthropic",
+                    match="claude-sonnet-5-5",
+                    input_price_per_mtok=100.0,
+                )
+            ]
+        )
+        pipeline = self._pipeline(
+            self._stub(
+                sample_jd_analysis,
+                sample_selection,
+                sample_tailored_content,
+                sample_review_report,
+            ),
+            catalog=catalog,
+        )
+
+        result = await pipeline.generate(jd_file, kb_file, output_dir=tmp_path / "out")
+
+        assert all(stage.cost_usd >= 100.0 for stage in result.stages)
+
+    async def test_without_a_catalog_builtin_prices_apply(
+        self,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+        sample_review_report: ReviewReport,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        pipeline = self._pipeline(
+            self._stub(
+                sample_jd_analysis,
+                sample_selection,
+                sample_tailored_content,
+                sample_review_report,
+            )
+        )
+
+        result = await pipeline.generate(jd_file, kb_file, output_dir=tmp_path / "out")
+
+        assert all(stage.cost_usd == pytest.approx(2.0) for stage in result.stages)
+
+    async def test_price_is_looked_up_for_the_stage_provider(
+        self,
+        sample_jd_analysis: JDAnalysis,
+        sample_selection: ExperienceSelection,
+        sample_tailored_content: TailoredContent,
+        sample_review_report: ReviewReport,
+        jd_file: Path,
+        kb_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        stub = self._stub(
+            sample_jd_analysis,
+            sample_selection,
+            sample_tailored_content,
+            sample_review_report,
+        )
+        pipeline = PipelineService(
+            providers={"openai": stub},
+            prompts=FileSystemPromptLoader(),
+            artifacts=FileSystemArtifactStore(),
+            stage_configs={
+                number: StageConfig(
+                    provider="openai", model="claude-sonnet-5-5", temperature=0.2
+                )
+                for number in range(1, 6)
+            },
+        )
+
+        result = await pipeline.generate(jd_file, kb_file, output_dir=tmp_path / "out")
+
+        assert all(stage.cost_usd == 0.0 for stage in result.stages)

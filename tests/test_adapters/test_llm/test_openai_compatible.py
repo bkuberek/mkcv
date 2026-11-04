@@ -18,6 +18,7 @@ from mkcv.adapters.llm.model_resolver import ModelResolver, builtin_resolver
 from mkcv.adapters.llm.openai_compatible import (
     REPAIR_PROMPT,
     OpenAICompatibleAdapter,
+    _augment_with_schema,
 )
 from mkcv.adapters.llm.strict_schema import to_strict_json_schema
 from mkcv.core.exceptions.authentication import AuthenticationError
@@ -26,9 +27,11 @@ from mkcv.core.exceptions.provider import ProviderError
 from mkcv.core.exceptions.rate_limit import RateLimitError
 from mkcv.core.exceptions.validation import ValidationError
 from mkcv.core.models.capability_overlay import CapabilityOverlay
+from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.model_capability import ModelCapability
 from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.provider_kind import ProviderKind
+from mkcv.core.models.requirement import Requirement
 from mkcv.core.models.resolved_model import ResolvedModel
 from mkcv.core.models.structured_output_mode import StructuredOutputMode
 from mkcv.core.models.token_param import TokenParam
@@ -884,3 +887,139 @@ class TestConnectionErrors:
             ProviderError, match=f"Cannot connect to {PROVIDER} at {BASE_URL}"
         ):
             await _structured(adapter)
+
+
+JD_DATA: dict[str, Any] = {
+    "company": "TestCo",
+    "role_title": "Engineer",
+    "seniority_level": "Senior",
+    "core_requirements": [
+        {
+            "skill": "Python",
+            "importance": "must_have",
+            "context": "Backend development",
+        }
+    ],
+    "technical_stack": ["Python"],
+    "soft_skills": ["Communication"],
+    "leadership_signals": [],
+    "culture_keywords": [],
+    "ats_keywords": ["Python"],
+    "hidden_requirements": [],
+    "role_summary": "A senior engineer role.",
+}
+
+
+class TestAugmentWithSchema:
+    """Behaviour carried over from the removed OllamaAdapter helper."""
+
+    def test_adds_schema_to_existing_system_message(self) -> None:
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hi"},
+        ]
+        result = _augment_with_schema(messages, "\nSCHEMA")
+        assert result[0]["content"] == "You are helpful.\nSCHEMA"
+        assert len(result) == 2
+
+    def test_prepends_system_message_if_missing(self) -> None:
+        messages = [{"role": "user", "content": "Hi"}]
+        result = _augment_with_schema(messages, "\nSCHEMA")
+        assert result[0]["role"] == "system"
+        assert "SCHEMA" in result[0]["content"]
+        assert len(result) == 2
+
+    def test_preserves_user_and_assistant_messages(self) -> None:
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        result = _augment_with_schema(messages, "\nS")
+        assert result[1]["content"] == "Hello"
+        assert result[2]["content"] == "Hi"
+
+    def test_input_list_is_not_modified(self) -> None:
+        messages = [{"role": "user", "content": "Hi"}]
+        _augment_with_schema(messages, "\nS")
+        assert messages == [{"role": "user", "content": "Hi"}]
+
+
+class TestRealResponseModels:
+    """End-to-end parsing with a production response model."""
+
+    async def test_json_object_mode_returns_the_model(self) -> None:
+        resolver = _resolver(_entry(structured_output=StructuredOutputMode.JSON_OBJECT))
+        adapter, _ = _adapter(_completion(json.dumps(JD_DATA)), resolver=resolver)
+        result = await adapter.complete_structured(
+            [{"role": "user", "content": "analyze this JD"}],
+            model=MODEL,
+            response_model=JDAnalysis,
+        )
+        assert isinstance(result, JDAnalysis)
+        assert result.company == "TestCo"
+        assert isinstance(result.core_requirements[0], Requirement)
+
+    async def test_strict_schema_mode_accepts_nulls_for_optional_fields(self) -> None:
+        reply = {**JD_DATA, "compensation": None, "team_or_org": None}
+        adapter, _ = _adapter(_completion(json.dumps(reply)))
+        result = await adapter.complete_structured(
+            [{"role": "user", "content": "analyze this JD"}],
+            model=MODEL,
+            response_model=JDAnalysis,
+        )
+        assert isinstance(result, JDAnalysis)
+
+    async def test_usage_of_a_structured_call_is_recorded(self) -> None:
+        adapter, _ = _adapter(
+            _completion(json.dumps(JD_DATA), prompt_tokens=50, completion_tokens=100)
+        )
+        await adapter.complete_structured(
+            [{"role": "user", "content": "analyze this JD"}],
+            model=MODEL,
+            response_model=JDAnalysis,
+        )
+        assert adapter.get_last_usage() == TokenUsage(
+            input_tokens=50, output_tokens=100
+        )
+
+    async def test_unparseable_reply_raises_after_one_repair(self) -> None:
+        adapter, create = _adapter(
+            _completion("not valid json at all {{{"),
+            _completion("still {{{ not json"),
+        )
+        with pytest.raises(ValidationError):
+            await adapter.complete_structured(
+                [{"role": "user", "content": "analyze this JD"}],
+                model=MODEL,
+                response_model=JDAnalysis,
+            )
+        assert create.await_count == 2
+
+    async def test_incomplete_data_raises_a_validation_error(self) -> None:
+        incomplete = _completion(json.dumps({"company": "TestCo"}))
+        adapter, _ = _adapter(incomplete, incomplete)
+        with pytest.raises(ValidationError):
+            await adapter.complete_structured(
+                [{"role": "user", "content": "analyze this JD"}],
+                model=MODEL,
+                response_model=JDAnalysis,
+            )
+
+    async def test_generic_status_error_maps_to_a_provider_error(self) -> None:
+        error = openai.APIStatusError(
+            "internal server error", response=_http_response(500), body=None
+        )
+        adapter, _ = _adapter(error)
+        with pytest.raises(ProviderError):
+            await adapter.complete(MESSAGES, model=MODEL)
+
+    async def test_connection_error_with_a_bare_request_is_handled(self) -> None:
+        adapter, _ = _adapter(
+            openai.APIConnectionError(request=httpx.Request("GET", BASE_URL))
+        )
+        with pytest.raises(ProviderError, match=f"Cannot connect to {PROVIDER}"):
+            await adapter.complete_structured(
+                [{"role": "user", "content": "analyze"}],
+                model=MODEL,
+                response_model=JDAnalysis,
+            )
