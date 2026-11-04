@@ -51,6 +51,16 @@ class TestEvalsReadme:
         assert "docs/models.md" in README
         assert 'evidence="eval"' in README
 
+    def test_it_explains_the_tournament_batching_and_caching(self) -> None:
+        for term in (
+            "--round",
+            "--resume",
+            "--no-batch",
+            "[caching]",
+            "check-reference",
+        ):
+            assert term in README
+
     def test_it_says_the_judge_needs_a_key_too(self) -> None:
         assert "judge" in README.lower()
         assert "self-judged" in README
@@ -67,9 +77,18 @@ class TestModelsDoc:
         section = _section(MODELS, "How recommendations are made")
         assert "provisional" in section
 
-    def test_the_section_reuses_the_within_point_05_wording(self) -> None:
+    def test_the_section_states_the_quality_first_rule(self) -> None:
         section = _section(MODELS, "How recommendations are made")
-        assert "within 0.05 of the best" in section
+        assert "highest primary quality score" in section
+        assert "within 0.01" in section
+
+    def test_the_section_explains_the_judge_panel_and_self_preference(
+        self,
+    ) -> None:
+        section = _section(MODELS, "How recommendations are made")
+        assert "judge panel" in section
+        assert "self-judged" in section
+        assert "too close to call" in section
 
     def test_the_planned_harness_wording_is_gone(self) -> None:
         assert "is planned" not in MODELS
