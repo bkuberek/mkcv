@@ -1,7 +1,8 @@
 """mkcv CLI application.
 
 Cyclopts-based CLI with global options (--verbose, --workspace, --version)
-and subcommands: generate, render, validate, init, themes, kb.
+and subcommands: generate, render, validate, init, themes, status, cover-letter,
+kb, models.
 """
 
 import logging
@@ -42,6 +43,7 @@ app.command("mkcv.cli.commands.themes:themes_command", name="themes")
 app.command("mkcv.cli.commands.status:status_command", name="status")
 app.command("mkcv.cli.commands.cover_letter:cover_letter_command", name="cover-letter")
 app.command("mkcv.cli.commands.kb:kb_app", name="kb")
+app.command("mkcv.cli.commands.models:models_command", name="models")
 
 
 # ---------------------------------------------------------------------------

@@ -68,6 +68,18 @@ def _registry(config: Configuration) -> ProviderRegistry:
     return ProviderRegistry.from_config(config, load_model_catalog(config))
 
 
+def create_provider_registry(config: Configuration) -> ProviderRegistry:
+    """Return the provider registry for ``config``.
+
+    Lets the CLI list providers and the model catalog (built-in entries plus
+    the user's ``[[default.model_catalog]]`` overrides).
+
+    Raises:
+        ConfigurationError: If the provider or model-catalog settings are invalid.
+    """
+    return _registry(config)
+
+
 def _create_llm_adapter(
     provider: str,
     config: Configuration,

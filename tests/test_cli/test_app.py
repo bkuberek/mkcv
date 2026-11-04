@@ -96,3 +96,25 @@ class TestMkcvGenerate:
     def test_generate_help_mentions_model_profile(self) -> None:
         result = _run_mkcv("generate", "--help")
         assert "--model-profile" in result.stdout
+
+
+class TestMkcvModels:
+    """Tests for the mkcv models command."""
+
+    def test_models_help_exits_zero(self) -> None:
+        result = _run_mkcv("models", "--help")
+        assert result.returncode == 0
+
+    def test_models_help_mentions_its_views(self) -> None:
+        result = _run_mkcv("models", "--help")
+        for flag in ("--profiles", "--catalog", "--json", "--model-profile"):
+            assert flag in result.stdout
+
+    def test_the_command_is_listed_in_the_top_level_help(self) -> None:
+        result = _run_mkcv("--help")
+        assert "models" in result.stdout
+
+    def test_profiles_view_needs_no_keys(self, tmp_path: Path) -> None:
+        result = _run_mkcv("models", "--profiles", cwd=tmp_path)
+        assert result.returncode == 0
+        assert "anthropic-economy" in result.stdout
