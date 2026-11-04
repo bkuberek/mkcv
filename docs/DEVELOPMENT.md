@@ -228,6 +228,82 @@ Run it with `uv run python -m evals --help`; `evals/README.md` explains the
 keys it needs, what a run costs, how to read the report, and how to apply the
 results.
 
+## Releases and the Homebrew Tap
+
+Versions come from [Conventional Commits](https://www.conventionalcommits.org) on
+`main`: `fix:` and `perf:` bump the patch, `feat:` the minor, a breaking change the
+major. `docs:`, `ci:`, `build:`, `chore:`, `refactor:`, `style:` and `test:` do not
+release. Nothing is uploaded to PyPI.
+
+`.github/workflows/ci.yml` lints and tests every push and pull request. On `main`,
+only after lint and tests pass for that commit, three more jobs run in order:
+
+| Job | Does |
+|-----|------|
+| `version` | `semantic-release` bumps `pyproject.toml`, refreshes `uv.lock` (its `build_command`), updates `CHANGELOG.md`, commits `chore(release): vX.Y.Z` and tags `vX.Y.Z`, when a commit warrants it |
+| `release` | Builds the wheel (`uv build --wheel`) and a hashed `requirements.txt` (`uv export --no-dev --no-emit-project`) from the tag and attaches them to the GitHub release `vX.Y.Z`, whose notes are that version's `CHANGELOG.md` section |
+| `homebrew` | Renders `packaging/homebrew/mkcv.rb.template` against those two files and pushes `Formula/mkcv.rb` to `main` of [`bkuberek/homebrew-tap`](https://github.com/bkuberek/homebrew-tap) |
+
+Publishing is part of this workflow, not a workflow triggered by the tag, because
+events caused by `GITHUB_TOKEN` (the tag push) never start other workflow runs.
+Both publish jobs skip what is already done: a release that has both files is left
+alone, and an unchanged formula is not committed.
+
+The formula installs `requirements.txt` as binary wheels only (`pip install
+--require-hashes --only-binary=:all: --no-deps`), then the mkcv wheel, inside a
+virtual environment on Homebrew's `python@3.13`. Every dependency in `uv.lock` has a
+cp313 wheel for macOS arm64 and Linux x86_64/aarch64, but `cryptography` (via
+`google-genai`) has none for macOS x86_64, so the formula requires Apple silicon on
+macOS. Change the formula in the template, never in the tap: the next publish
+overwrites the tap's copy.
+
+### Secret
+
+The `homebrew` job pushes with `HOMEBREW_TAP_GITHUB_TOKEN`, an environment secret of
+the `production` environment of this repository. Only the `homebrew` job declares
+`environment: production`, so no other job can read it. The token is a fine-grained
+personal access token whose only repository is `bkuberek/homebrew-tap`, with
+**Contents** read and write. When it expires, the `homebrew` job fails at its
+checkout of the tap: renew the secret and run the workflow by hand.
+
+### Publishing again
+
+A manual run on `main` publishes the newest tag reachable from `main`, skipping the
+steps already done, so it repairs a publish that failed or never ran, or publishes a
+release without waiting for a new one:
+
+```bash
+gh workflow run ci.yml --ref main
+```
+
+The run first lints and tests that commit, then cuts a release if an unreleased
+commit warrants one, then publishes the newest tag. To replace the files of a
+published release, delete them from the GitHub release first; the next manual run
+uploads them again and updates the formula. A manual run on another branch publishes
+nothing.
+
+### Testing the formula locally
+
+Before merging a template change, install it from a local build through a throwaway
+tap, from the repository root:
+
+```bash
+uv build --wheel --out-dir /tmp/mkcv-dist
+uv export --frozen --no-dev --no-emit-project --no-header --format requirements.txt \
+  --output-file /tmp/mkcv-dist/requirements.txt
+brew tap-new --no-git bkuberek/mkcvtest
+python3 packaging/homebrew/render_formula.py --base-url file:///tmp/mkcv-dist \
+  --wheel /tmp/mkcv-dist/mkcv-*-py3-none-any.whl --requirements /tmp/mkcv-dist/requirements.txt \
+  --output "$(brew --repository bkuberek/mkcvtest)/Formula/mkcv.rb"
+HOMEBREW_NO_INSTALL_FROM_API=1 brew install --formula bkuberek/mkcvtest/mkcv
+brew test bkuberek/mkcvtest/mkcv
+brew audit --strict --formula bkuberek/mkcvtest/mkcv
+HOMEBREW_NO_AUTOREMOVE=1 brew uninstall --formula mkcv
+brew untap bkuberek/mkcvtest
+```
+
+The release tooling has its own tests: `uv run pytest packaging`.
+
 ## Reference Documentation
 
 - [Architecture spec](specs/architecture.md)

@@ -28,8 +28,8 @@ mkcv takes your career knowledge base and a job description, then produces a pol
 ## Quick Start
 
 ```bash
-# Install
-pip install git+https://github.com/bkuberek/mkcv.git
+# Install (macOS on Apple silicon, or Linux)
+brew install bkuberek/tap/mkcv
 
 # Set up an API key (at least one provider)
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -48,7 +48,19 @@ mkcv generate --jd https://example.com/job-posting.txt \
 
 ## Installation
 
-Requires **Python 3.12+**.
+### Homebrew (macOS on Apple silicon, Linux)
+
+```bash
+brew install bkuberek/tap/mkcv
+```
+
+Homebrew installs mkcv with its own Python 3.13, so nothing else is required.
+Update it with `brew update && brew upgrade mkcv`. The formula installs binary
+wheels only, so it needs network access to PyPI. It does not support Intel
+Macs, because a dependency (`cryptography`) no longer publishes macOS x86_64
+wheels; use `uv` or `pipx` there.
+
+The other methods require **Python 3.12+**.
 
 ### pip
 
