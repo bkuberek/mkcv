@@ -938,6 +938,13 @@ model = "m"
         )
         assert "(set api_key in [default.providers.keyed])" in warning.message
 
+    def test_an_economy_profile_chosen_by_flag_has_no_tier_warnings(
+        self, tmp_path: Path
+    ) -> None:
+        config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
+        report = create_model_report(config, model_profile="anthropic-economy")
+        assert report.warnings == []
+
     def test_the_local_profile_never_needs_a_key(self, tmp_path: Path) -> None:
         config = _real_config(tmp_path, _EMPTY_USER_CONFIG)
         report = create_model_report(config, model_profile="local")

@@ -525,6 +525,63 @@ class TestReportMetadata:
         ]
 
 
+class TestRunningTheActiveProfilesModel:
+    """A profile the user picked on purpose is not second-guessed."""
+
+    @staticmethod
+    def _economy_report(source: str) -> ModelReport:
+        economy = BUILTIN_MODEL_PROFILES["anthropic-economy"]
+        assignments = [
+            _assignment(stage, "anthropic", "claude-haiku-5-5", source)
+            for stage in PIPELINE_STAGES
+        ]
+        return ModelAdvisor(ModelCatalog.builtin()).advise(
+            assignments, profile=economy, profile_source="cli", preset_name="standard"
+        )
+
+    def test_economy_models_chosen_with_a_profile_flag_are_not_flagged(self) -> None:
+        assert self._economy_report("cli").warnings == []
+
+    def test_the_same_models_in_another_profiles_context_are_flagged(self) -> None:
+        assignments = [
+            _assignment(StageKey.SELECT, "anthropic", "claude-haiku-5-5", "cli")
+        ]
+        report = ModelAdvisor(ModelCatalog.builtin()).advise(
+            assignments,
+            profile=BUILTIN_MODEL_PROFILES["anthropic"],
+            profile_source="cli",
+            preset_name="standard",
+        )
+        assert _warning_kinds(report) == [ModelWarningKind.BELOW_RECOMMENDED_TIER]
+
+    def test_a_stage_that_departs_from_the_profile_is_still_flagged(self) -> None:
+        economy = BUILTIN_MODEL_PROFILES["anthropic-economy"]
+        assignments = [
+            _assignment(StageKey.SELECT, "openai", "gpt-6.1-terra", "config")
+        ]
+        report = ModelAdvisor(ModelCatalog.builtin()).advise(
+            assignments, profile=economy, profile_source="cli", preset_name="standard"
+        )
+        assert _warning_kinds(report) == [ModelWarningKind.BELOW_RECOMMENDED_TIER]
+
+    def test_a_profile_from_another_provider_does_not_excuse_the_model(self) -> None:
+        catalog = ModelCatalog.builtin().with_overrides(
+            [
+                ModelCapability(
+                    provider="groq", match="gpt-6.1-sol", tier=ModelTier.EFFICIENT
+                )
+            ]
+        )
+        assignments = [_assignment(StageKey.SELECT, "groq", "gpt-6.1-sol", "config")]
+        report = ModelAdvisor(catalog).advise(
+            assignments,
+            profile=BUILTIN_MODEL_PROFILES["openai"],
+            profile_source="config",
+            preset_name="standard",
+        )
+        assert _warning_kinds(report) == [ModelWarningKind.BELOW_RECOMMENDED_TIER]
+
+
 class TestRunningTheRecommendedModel:
     """A tier warning that recommends the model already in use is pointless."""
 

@@ -71,7 +71,7 @@ class ModelAdvisor:
                 price models the catalog has no price for (e.g. local models).
         """
         defaults = provider_defaults or {}
-        advice = [self._advise_stage(a, defaults) for a in assignments]
+        advice = [self._advise_stage(a, profile, defaults) for a in assignments]
         total, is_partial = summarize_costs(item.estimated_cost_usd for item in advice)
         return ModelReport(
             profile_name=profile.name if profile else None,
@@ -88,7 +88,10 @@ class ModelAdvisor:
         )
 
     def _advise_stage(
-        self, assignment: StageAssignment, defaults: Mapping[str, CapabilityOverlay]
+        self,
+        assignment: StageAssignment,
+        profile: ModelProfile | None,
+        defaults: Mapping[str, CapabilityOverlay],
     ) -> StageAdvice:
         requirement = self._requirements[assignment.stage]
         canonical = _canonical_provider(assignment)
@@ -110,8 +113,9 @@ class ModelAdvisor:
                 requirement,
                 entry,
                 recommended=_describe(recommended_provider, recommended_model),
-                already_recommended=(recommended_provider, recommended_model)
-                == (assignment.provider, assignment.model),
+                mkcv_choice=_is_mkcv_choice(
+                    assignment, profile, (recommended_provider, recommended_model)
+                ),
             ),
         )
 
@@ -166,6 +170,27 @@ def _canonical_provider(assignment: StageAssignment) -> str | None:
     return kind if kind in _NATIVE_PROVIDERS else None
 
 
+def _is_mkcv_choice(
+    assignment: StageAssignment,
+    profile: ModelProfile | None,
+    recommended: tuple[str | None, str | None],
+) -> bool:
+    """Return True when the stage runs a model mkcv itself picked for it.
+
+    That is the model the active profile assigns to the stage (reached through
+    ``--model-profile`` or ``--provider``, which label their rows ``cli``), or
+    the model mkcv recommends for the provider.
+    """
+    chosen = (assignment.provider, assignment.model)
+    if chosen == recommended:
+        return True
+    return (
+        profile is not None
+        and profile.provider == assignment.provider
+        and profile_stage_model(profile, assignment.stage) == assignment.model
+    )
+
+
 def _default_price(overlay: CapabilityOverlay | None) -> tuple[float, float] | None:
     if overlay is None:
         return None
@@ -184,20 +209,21 @@ def _stage_warnings(
     entry: CapabilityOverlay | None,
     *,
     recommended: str,
-    already_recommended: bool,
+    mkcv_choice: bool,
 ) -> list[ModelWarning]:
     """Warnings for one stage.
 
-    The offline stub is never second-guessed, and a tier warning is pointless
-    when the model in use is the one mkcv recommends (for example the only
-    local model), so those are skipped.
+    The offline stub is never second-guessed, and neither is a model mkcv
+    itself chose (see ``_is_mkcv_choice``): a tier warning that recommends the
+    model already in use, or that questions a profile the user picked on
+    purpose, only adds noise.
     """
     if assignment.provider_kind is ProviderKind.STUB:
         return []
 
     stage = assignment.stage.value
     subject = f"{assignment.provider}/{assignment.model}"
-    questioned = assignment.source != "profile" and not already_recommended
+    questioned = assignment.source != "profile" and not mkcv_choice
 
     def warn(kind: ModelWarningKind, message: str) -> ModelWarning:
         return ModelWarning(
