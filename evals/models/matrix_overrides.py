@@ -9,8 +9,9 @@ from evals.models.run_settings import RunSettings
 
 
 class MatrixOverrides(BaseModel):
-    """Values for ``--stages``, ``--cases``, ``--models``, ``--judge``, and
-    ``--concurrency``; None leaves the matrix file's value in place."""
+    """Values for ``--stages``, ``--cases``, ``--models``, ``--judge``,
+    ``--concurrency``, and ``--single-round``; None (or False) leaves the
+    matrix file's value in place."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -19,6 +20,7 @@ class MatrixOverrides(BaseModel):
     models: list[str] | None = None
     judges: list[str] | None = None
     concurrency: int | None = None
+    single_round: bool = False
 
     def apply(self, matrix: MatrixConfig) -> MatrixConfig:
         """Return ``matrix`` with the given overrides applied.
@@ -38,6 +40,11 @@ class MatrixOverrides(BaseModel):
             reference=matrix.reference,
             models=self._models(matrix.models),
             recommendation=matrix.recommendation,
+            tournament=(
+                matrix.tournament.model_copy(update={"enabled": False})
+                if self.single_round
+                else matrix.tournament
+            ),
         )
 
     def _run_settings(self, current: RunSettings) -> RunSettings:

@@ -5,7 +5,9 @@ import pytest
 from evals.harness.cost_estimator import (
     JUDGE_INPUT_TOKENS,
     JUDGE_OUTPUT_TOKENS,
+    assumed_survivors,
     estimate_matrix_cost,
+    estimate_tournament_cost,
 )
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import EvalCase
@@ -13,6 +15,7 @@ from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.run_settings import RunSettings
+from evals.models.tournament_settings import TournamentSettings
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.models.model_capability import ModelCapability
 from mkcv.core.models.model_catalog import ModelCatalog
@@ -339,3 +342,100 @@ class TestJudgeSkipped:
         estimate = self._estimate([StageKey.TAILOR], None)
         assert estimate.judge_calls == 2
         assert estimate.skipped_judges == {}
+
+
+MODELS = [
+    MatrixModel(provider="anthropic", model="claude-opus-5-5"),
+    MatrixModel(provider="anthropic", model="claude-haiku-5-5"),
+    MatrixModel(provider="openai", model="gpt-6-astra"),
+    MatrixModel(provider="openai", model="gpt-6-luna"),
+    MatrixModel(provider="google", model="gemini-4-argon"),
+    MatrixModel(provider="google", model="gemini-3.5-flash-lite"),
+]
+
+
+def _tournament(**settings: object) -> MatrixConfig:
+    return MatrixConfig(
+        run=RunSettings(stages=[StageKey.TAILOR], repeats=2),
+        judges=PANEL,
+        reference=JUDGE,
+        models=MODELS,
+        tournament=TournamentSettings(screening_cases=["one"], **settings),  # type: ignore[arg-type]
+    )
+
+
+class TestTournamentEstimate:
+    cases = (_case("one"), _case("two"), _case("three"))
+
+    def test_screening_runs_every_model_on_the_subset_once(self) -> None:
+        estimate = estimate_tournament_cost(
+            _tournament(), list(self.cases), ModelCatalog.builtin()
+        )
+        assert estimate.screening.runs_per_model == 1
+        assert set(estimate.screening.model_costs) == {m.label for m in MODELS}
+
+    def test_screening_asks_one_judge_per_model(self) -> None:
+        estimate = estimate_tournament_cost(
+            _tournament(), list(self.cases), ModelCatalog.builtin()
+        )
+        calls = estimate.screening.judge_call_counts
+        assert sum(calls.values()) == len(MODELS) * 2  # tailor: two judge calls
+
+    def test_the_screening_judge_is_never_the_models_own_provider(self) -> None:
+        estimate = estimate_tournament_cost(
+            _tournament(), list(self.cases), ModelCatalog.builtin()
+        )
+        # two Anthropic models go to Google, four others to Anthropic's judge
+        assert estimate.screening.judge_call_counts == {
+            "anthropic/claude-opus-5-5": 8,
+            "google/gemini-4-argon": 4,
+        }
+
+    def test_the_finals_run_the_assumed_survivors_on_every_case(self) -> None:
+        estimate = estimate_tournament_cost(
+            _tournament(), list(self.cases), ModelCatalog.builtin()
+        )
+        assert estimate.finals.runs_per_model == 3 * 2
+        assert set(estimate.finals.model_costs) == {
+            "anthropic/claude-opus-5-5",
+            "openai/gpt-6-astra",
+            "google/gemini-4-argon",
+        }
+        assert estimate.finals.judge_calls == 3 * 3 * 2 * 2
+
+    def test_the_worst_case_keeps_every_model(self) -> None:
+        estimate = estimate_tournament_cost(
+            _tournament(), list(self.cases), ModelCatalog.builtin()
+        )
+        assert set(estimate.finals_worst_case.model_costs) == {m.label for m in MODELS}
+
+    def test_the_total_is_screening_plus_finals(self) -> None:
+        estimate = estimate_tournament_cost(
+            _tournament(), list(self.cases), ModelCatalog.builtin()
+        )
+        assert estimate.screening.total_usd is not None
+        assert estimate.finals.total_usd is not None
+        assert estimate.total_usd == pytest.approx(
+            estimate.screening.total_usd + estimate.finals.total_usd
+        )
+
+
+class TestAssumedSurvivors:
+    def test_it_is_the_dearest_model_of_each_provider(self) -> None:
+        labels = [
+            m.label
+            for m in assumed_survivors(
+                MODELS, TournamentSettings(), ModelCatalog.builtin()
+            )
+        ]
+        assert labels == [
+            "anthropic/claude-opus-5-5",
+            "openai/gpt-6-astra",
+            "google/gemini-4-argon",
+        ]
+
+    def test_it_fills_up_to_the_top_count_with_the_next_dearest(self) -> None:
+        survivors = assumed_survivors(
+            MODELS, TournamentSettings(keep_top=4), ModelCatalog.builtin()
+        )
+        assert [m.label for m in survivors][3:] == ["google/gemini-3.5-flash-lite"]

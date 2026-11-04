@@ -6,6 +6,7 @@ from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.runner_up import RunnerUp
+from evals.models.screening_decision import ScreeningDecision
 from evals.report.markdown_report import render_markdown
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.models.stage_key import StageKey
@@ -567,3 +568,56 @@ def test_models_from_the_matrix_without_results_do_not_appear_in_tables() -> Non
         summaries=[summary()],
     )
     assert "ghost" not in _section(report, "Stage: tailor")
+
+
+class TestTournamentSection:
+    DECISIONS = (
+        ScreeningDecision(
+            stage=StageKey.TAILOR,
+            provider="openai",
+            model="gpt-6.1-sol",
+            score=0.9,
+            kept=True,
+            reason="in the top 3",
+        ),
+        ScreeningDecision(
+            stage=StageKey.TAILOR,
+            provider="openai",
+            model="gpt-6-luna",
+            score=0.6,
+            kept=False,
+            reason=(
+                "0.30 behind the leader openai/gpt-6.1-sol (margin 0.05 + noise 0.02)"
+            ),
+        ),
+    )
+
+    def _report(self, **options: object) -> str:
+        return render_markdown(
+            manifest(),
+            [summary()],
+            [recommendation()],
+            screening=self.DECISIONS,
+            **options,  # type: ignore[arg-type]
+        )
+
+    def test_it_comes_before_the_stage_sections(self) -> None:
+        headings = _headings(self._report())
+        assert headings.index("## Tournament") < headings.index("## Stage: tailor")
+
+    def test_it_shows_who_went_on_and_why_the_others_did_not(self) -> None:
+        section = _section(self._report(), "Tournament")
+        assert (
+            "| tailor | openai | gpt-6.1-sol | 0.90 | yes | in the top 3 |" in section
+        )
+        assert "| tailor | openai | gpt-6-luna | 0.60 | no | 0.30 behind" in section
+
+    def test_it_counts_the_eliminations(self) -> None:
+        assert "1 of 2" in _section(self._report(), "Tournament")
+
+    def test_a_run_without_screening_has_no_tournament_section(self) -> None:
+        assert "## Tournament" not in _render()
+
+    def test_screening_results_alone_are_flagged_as_provisional(self) -> None:
+        section = _section(self._report(screening_only=True), "Caveats")
+        assert "Only the screening round has run" in section

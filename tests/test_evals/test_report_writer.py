@@ -190,3 +190,42 @@ class TestPublishRun:
     ) -> None:
         with pytest.raises(FileNotFoundError, match=r"summary\.json"):
             publish_run(run_dir, tmp_path / "published")
+
+
+class TestRounds:
+    def _write(self, run_dir: Path, records: list[object]) -> RunSummary:
+        (run_dir / "results.jsonl").write_text(
+            "".join(r.model_dump_json() + "\n" for r in records),  # type: ignore[attr-defined]
+            encoding="utf-8",
+        )
+        write_report_files(run_dir)
+        return RunSummary.model_validate_json((run_dir / "summary.json").read_text())
+
+    def _records(
+        self, round_: str, model: str, score: float, n: int = 2
+    ) -> list[object]:
+        return [
+            record(
+                stage=StageKey.TAILOR,
+                model=model,
+                repeat=i,
+                grades=[grade("schema", 1.0), grade("tailoring_judge", score)],
+            ).model_copy(update={"round": round_})
+            for i in range(n)
+        ]
+
+    def test_the_finals_decide_the_recommendations(self, run_dir: Path) -> None:
+        loaded = self._write(
+            run_dir,
+            [
+                *self._records("screening", "screened-only", 0.99),
+                *self._records("finals", "finalist", 0.8),
+            ],
+        )
+        assert {s.model for s in loaded.stages} == {"finalist"}
+        assert [s.model for s in loaded.screening] == ["screened-only"]
+
+    def test_screening_alone_still_gives_a_report(self, run_dir: Path) -> None:
+        loaded = self._write(run_dir, self._records("screening", "screened", 0.9))
+        assert {s.model for s in loaded.stages} == {"screened"}
+        assert "Only the screening round has run" in (run_dir / "report.md").read_text()

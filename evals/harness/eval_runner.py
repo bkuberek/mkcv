@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TextIO
+from typing import Any, Literal, TextIO
 
 import mkcv
 from evals.graders.grader import Grader
@@ -19,13 +19,22 @@ from evals.harness.judge_factory import create_judge, split_judges
 from evals.harness.run_files import MANIFEST_FILE, RESULTS_FILE
 from evals.harness.stage_run import StageRun
 from evals.harness.stage_runner import StageRunner, work_dir_for
+from evals.harness.tournament import (
+    decide_survivors,
+    finals_models,
+    screening_cases,
+    screening_judge,
+)
 from evals.models.eval_case import REFERENCE_FILES, UPSTREAM_STAGES, EvalCase
 from evals.models.eval_record import EvalRecord
 from evals.models.grade import Grade
+from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
+from evals.models.round import ROUNDS, Round
 from evals.models.run_manifest import RunManifest
-from evals.report.report_writer import write_report_files
+from evals.report.aggregator import aggregate
+from evals.report.report_writer import read_records, write_report_files
 from mkcv.adapters.factory import create_provider_registry
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.config.configuration import Configuration
@@ -33,9 +42,6 @@ from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.stage_key import StageKey
 from mkcv.core.ports.llm import LLMPort
-
-if TYPE_CHECKING:
-    from evals.models.judge_config import JudgeConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,14 +80,48 @@ class _Judge:
 
 
 @dataclass(frozen=True)
+class _Job:
+    """One stage run to make and grade, with the judges that grade it."""
+
+    round: Round | None
+    case: EvalCase
+    stage: StageKey
+    model: MatrixModel
+    repeat: int
+    judges: tuple[_Judge, ...]
+
+    @property
+    def key(self) -> str:
+        return job_key(
+            self.round, self.case.id, self.stage, self.model.label, self.repeat
+        )
+
+
+@dataclass(frozen=True)
 class _RunTools:
     """What every job of one run shares."""
 
     runner: StageRunner
     gate: asyncio.Semaphore
     sink: TextIO
-    judges: tuple[_Judge, ...]
-    judged_stages: frozenset[StageKey]
+
+
+def job_key(
+    round_: "Round | None", case_id: str, stage: StageKey, label: str, repeat: int
+) -> str:
+    """Identify one stage run of a run: round, case, stage, model, and repeat."""
+    return f"{round_ or 'single'}/{case_id}/{stage.value}/{label}/r{repeat}"
+
+
+def record_key(record: EvalRecord) -> str:
+    """The ``job_key`` of the run a record holds."""
+    return job_key(
+        record.round,
+        record.case_id,
+        record.stage,
+        f"{record.provider}/{record.model}",
+        record.repeat,
+    )
 
 
 class EvalRunner:
@@ -96,6 +136,12 @@ class EvalRunner:
     manifest says why; with no judge at all the run goes on without judge
     grades. When the records are in, ``summary.json`` and ``report.md`` are
     written beside them.
+
+    With ``[tournament]`` enabled the run has two rounds (see
+    ``evals.harness.tournament``): screening, graded by one judge from
+    another provider, then the finals for the survivors with the whole
+    panel. With ``resume`` the records already in ``results.jsonl`` are kept
+    and their runs are not made again.
     """
 
     def __init__(
@@ -106,12 +152,14 @@ class EvalRunner:
         run_id: str,
         on_record: Callable[[EvalRecord], None] | None = None,
         graders: Mapping[StageKey, Sequence[Grader]] | None = None,
+        resume: bool = False,
     ) -> None:
         self._config = config
         self._out_dir = out_dir
         self._run_id = run_id
         self._on_record = on_record
         self._graders = STAGE_GRADERS if graders is None else graders
+        self._resume = resume
 
     async def run(
         self,
@@ -119,20 +167,27 @@ class EvalRunner:
         cases: Sequence[EvalCase],
         *,
         skipped_models: Sequence[str] = (),
+        rounds: Sequence[Round] = ROUNDS,
     ) -> list[EvalRecord]:
-        """Run the matrix and return its records in plan order.
+        """Run the matrix and return its records: kept ones, then new ones.
 
         Args:
             matrix: What to run; models without credentials are already out.
             cases: The cases to evaluate.
             skipped_models: ``provider/model: reason`` for models left out,
                 recorded in the manifest.
+            rounds: Which tournament rounds to run (both by default); the
+                finals read the screening records already in the run.
+
+        Raises:
+            ValueError: If the finals are asked for without screening records.
         """
         registry = create_provider_registry(self._config)
         runnable, skipped_judges = split_judges(registry, matrix.panel)
         judges = tuple(_create_judge(registry, judge) for judge in runnable)
 
         self._out_dir.mkdir(parents=True, exist_ok=True)
+        kept = self._kept_records()
         manifest = self._manifest(
             matrix, cases, skipped_models, registry.catalog, skipped_judges
         )
@@ -140,40 +195,59 @@ class EvalRunner:
 
         runner = StageRunner(self._config, preset=matrix.run.preset)
         gate = asyncio.Semaphore(matrix.run.concurrency)
-        with (self._out_dir / RESULTS_FILE).open("w", encoding="utf-8") as sink:
-            tools = _RunTools(
-                runner, gate, sink, judges, frozenset(matrix.run.judged_stages)
-            )
-            async with asyncio.TaskGroup() as group:
-                tasks = [
-                    group.create_task(self._run_job(tools, case, stage, model, repeat))
-                    for model in matrix.models
-                    for case in cases
-                    for stage in matrix.run.stages
-                    if case.applies_to(stage)
-                    for repeat in range(matrix.run.repeats)
-                ]
-        records = [task.result() for task in tasks]
+        records = list(kept)
+        mode: Literal["a", "w"] = "a" if self._resume else "w"
+        with (self._out_dir / RESULTS_FILE).open(mode, encoding="utf-8") as sink:
+            tools = _RunTools(runner, gate, sink)
+            if not matrix.tournament.enabled:
+                plan = _single_round(matrix, cases, judges)
+                records += await self._run_jobs(tools, plan, kept)
+            else:
+                if "screening" in rounds:
+                    plan = _screening(matrix, cases, judges, registry.catalog)
+                    records += await self._run_jobs(tools, plan, kept)
+                if "finals" in rounds:
+                    plan = _finals(matrix, cases, judges, records)
+                    records += await self._run_jobs(tools, plan, kept)
 
         finished = manifest.model_copy(update={"finished_at": datetime.now(UTC)})
         self._write_manifest(finished)
         write_report_files(self._out_dir)
         return records
 
-    async def _run_job(
-        self,
-        tools: _RunTools,
-        case: EvalCase,
-        stage: StageKey,
-        model: MatrixModel,
-        repeat: int,
-    ) -> EvalRecord:
+    def _kept_records(self) -> list[EvalRecord]:
+        if not self._resume or not (self._out_dir / RESULTS_FILE).is_file():
+            return []
+        return read_records(self._out_dir)
+
+    async def _run_jobs(
+        self, tools: _RunTools, plan: list[_Job], kept: Sequence[EvalRecord]
+    ) -> list[EvalRecord]:
+        done = {record_key(record) for record in kept}
+        async with asyncio.TaskGroup() as group:
+            tasks = [
+                group.create_task(self._run_job(tools, job))
+                for job in plan
+                if job.key not in done
+            ]
+        return [task.result() for task in tasks]
+
+    async def _run_job(self, tools: _RunTools, job: _Job) -> EvalRecord:
         async with tools.gate:
-            work_dir = work_dir_for(self._out_dir, case.id, stage, model, repeat)
-            result = await tools.runner.run(case, stage, model, repeat, work_dir)
-            judges = tools.judges if stage in tools.judged_stages else ()
-            grades = await self._grade(case, stage, model, result, judges)
-            record = self._record(case, stage, model, repeat, result, grades)
+            work_dir = work_dir_for(
+                self._out_dir / (job.round or ""),
+                job.case.id,
+                job.stage,
+                job.model,
+                job.repeat,
+            )
+            result = await tools.runner.run(
+                job.case, job.stage, job.model, job.repeat, work_dir
+            )
+            grades = await self._grade(
+                job.case, job.stage, job.model, result, job.judges
+            )
+            record = self._record(job, result, grades)
             tools.sink.write(record.model_dump_json() + "\n")
             tools.sink.flush()
         if self._on_record is not None:
@@ -217,24 +291,17 @@ class EvalRunner:
                 grades.append(grade)
         return grades
 
-    def _record(
-        self,
-        case: EvalCase,
-        stage: StageKey,
-        model: MatrixModel,
-        repeat: int,
-        result: StageRun,
-        grades: list[Grade],
-    ) -> EvalRecord:
+    def _record(self, job: _Job, result: StageRun, grades: list[Grade]) -> EvalRecord:
         metadata = result.metadata
         judges = _judges_of(grades)
         return EvalRecord(
             run_id=self._run_id,
-            case_id=case.id,
-            stage=stage,
-            provider=model.provider,
-            model=model.model,
-            repeat=repeat,
+            round=job.round,
+            case_id=job.case.id,
+            stage=job.stage,
+            provider=job.model.provider,
+            model=job.model.model,
+            repeat=job.repeat,
             status=result.status,
             error=result.error,
             input_tokens=metadata.input_tokens if metadata else 0,
@@ -273,7 +340,77 @@ class EvalRunner:
         )
 
 
-def _create_judge(registry: ProviderRegistry, config: "JudgeConfig") -> _Judge:
+def _single_round(
+    matrix: MatrixConfig, cases: Sequence[EvalCase], judges: tuple[_Judge, ...]
+) -> list[_Job]:
+    return [
+        _Job(None, case, stage, model, repeat, _judges_for(matrix, stage, judges))
+        for model in matrix.models
+        for case in cases
+        for stage in matrix.run.stages
+        if case.applies_to(stage)
+        for repeat in range(matrix.run.repeats)
+    ]
+
+
+def _screening(
+    matrix: MatrixConfig,
+    cases: Sequence[EvalCase],
+    judges: tuple[_Judge, ...],
+    catalog: ModelCatalog,
+) -> list[_Job]:
+    """Every model on the screening cases, each graded by one judge."""
+    by_label = {judge.label: judge for judge in judges}
+    configs = [JudgeConfig(provider=j.provider, model=j.model) for j in judges]
+    plan: list[_Job] = []
+    for model in matrix.models:
+        chosen = screening_judge(model, configs, catalog)
+        own = (by_label[chosen.label],) if chosen is not None else ()
+        for case in screening_cases(cases, matrix.tournament):
+            for stage in matrix.run.stages:
+                if not case.applies_to(stage):
+                    continue
+                stage_judges = own if stage in matrix.run.judged_stages else ()
+                plan.extend(
+                    _Job("screening", case, stage, model, repeat, stage_judges)
+                    for repeat in range(matrix.tournament.screening_repeats)
+                )
+    return plan
+
+
+def _finals(
+    matrix: MatrixConfig,
+    cases: Sequence[EvalCase],
+    judges: tuple[_Judge, ...],
+    records: Sequence[EvalRecord],
+) -> list[_Job]:
+    """The survivors of each stage on every case, graded by the whole panel."""
+    screened = [record for record in records if record.round == "screening"]
+    if not matrix.models:
+        return []
+    if not screened:
+        raise ValueError(
+            "The finals need the screening results; run the screening round first"
+        )
+    summaries = aggregate(screened, matrix.recommendation)
+    survivors = finals_models(decide_survivors(summaries, matrix.tournament))
+    return [
+        _Job("finals", case, stage, model, repeat, _judges_for(matrix, stage, judges))
+        for model in matrix.models
+        for case in cases
+        for stage in matrix.run.stages
+        if case.applies_to(stage) and model.label in survivors.get(stage, set())
+        for repeat in range(matrix.run.repeats)
+    ]
+
+
+def _judges_for(
+    matrix: MatrixConfig, stage: StageKey, judges: tuple[_Judge, ...]
+) -> tuple[_Judge, ...]:
+    return judges if stage in matrix.run.judged_stages else ()
+
+
+def _create_judge(registry: ProviderRegistry, config: JudgeConfig) -> _Judge:
     adapter, model = create_judge(registry, config)
     return _Judge(adapter=adapter, provider=config.provider, model=model)
 

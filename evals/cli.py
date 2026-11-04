@@ -16,11 +16,15 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 
 from evals.harness.case_loader import load_cases, load_matrix, select_cases
-from evals.harness.cost_estimator import estimate_matrix_cost
+from evals.harness.cost_estimator import (
+    estimate_matrix_cost,
+    estimate_tournament_cost,
+)
 from evals.harness.credentials import split_by_credentials
 from evals.harness.judge_factory import split_judges
 from evals.harness.logging_setup import configure_logging
 from evals.harness.run_files import REPORT_FILE
+from evals.harness.tournament import unknown_screening_cases
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import DEFAULT_FIXTURES_DIR, EvalCase
 from evals.models.eval_record import EvalRecord
@@ -29,8 +33,14 @@ from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.matrix_overrides import MatrixOverrides
 from evals.models.reference_outcome import ReferenceOutcome
+from evals.models.round import ROUNDS, Round
 from evals.models.run_settings import RunSettings
-from evals.report.report_writer import publish_run, write_report_files
+from evals.models.tournament_estimate import TournamentEstimate
+from evals.report.report_writer import (
+    publish_run,
+    read_manifest,
+    write_report_files,
+)
 from evals.stages import EVALUATED_STAGES
 from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.stage_key import StageKey
@@ -169,6 +179,11 @@ def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
         help="evaluate these models instead of the matrix's",
     )
     parser.add_argument(
+        "--single-round",
+        action="store_true",
+        help="run (or price) one round of every model on every case, no screening",
+    )
+    parser.add_argument(
         "--judge",
         nargs="+",
         metavar="PROVIDER:MODEL",
@@ -181,6 +196,18 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--out", type=Path, help="output directory (default: evals/results/<run id>)"
     )
     parser.add_argument("--concurrency", type=int, help="stage runs in flight at once")
+    parser.add_argument(
+        "--round",
+        choices=("all", "screening", "finals"),
+        default="all",
+        help="run one tournament round (the finals read the screening of --resume)",
+    )
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        metavar="DIR",
+        help="continue the run in DIR: keep its records and make only the rest",
+    )
     parser.add_argument(
         "--yes", action="store_true", help="run without asking for confirmation"
     )
@@ -227,8 +254,16 @@ def _list_cases(args: argparse.Namespace, config: "Configuration") -> int:
 
 def _estimate(args: argparse.Namespace, config: "Configuration") -> int:
     matrix, cases, registry = _load_plan(args, config)
-    estimate = estimate_matrix_cost(matrix, cases, registry.catalog)
-    for line in _estimate_lines(estimate, case_count=len(cases)):
+    if matrix.tournament.enabled:
+        lines = _tournament_lines(
+            estimate_tournament_cost(matrix, cases, registry.catalog), matrix
+        )
+    else:
+        lines = _estimate_lines(
+            estimate_matrix_cost(matrix, cases, registry.catalog),
+            case_count=len(cases),
+        )
+    for line in lines:
         _out(line)
     return 0
 
@@ -260,15 +295,37 @@ def _run(args: argparse.Namespace, config: "Configuration") -> int:
         _err("warning: no judge can run; scores that need a judge will be missing")
     if estimate.skipped_judges and args.strict:
         return _fail("--strict: some judges have no credentials (see warnings above)")
-    for line in _estimate_lines(estimate, case_count=len(cases)):
+    if effective.tournament.enabled:
+        lines = _tournament_lines(
+            estimate_tournament_cost(
+                effective, cases, registry.catalog, skipped_judges=skipped_judges
+            ),
+            effective,
+        )
+    else:
+        lines = _estimate_lines(estimate, case_count=len(cases))
+    for line in lines:
         _out(line)
     if not args.yes and not _confirmed():
         return EXIT_USAGE
 
-    run_id = new_run_id(datetime.now(UTC), current_git_sha(REPO_ROOT))
-    out_dir = args.out or default_out_dir(run_id)
-    runner = EvalRunner(config, out_dir=out_dir, run_id=run_id, on_record=_progress)
-    records = asyncio.run(runner.run(effective, cases, skipped_models=skipped))
+    if args.resume is not None:
+        out_dir = args.resume
+        run_id = read_manifest(out_dir).run_id
+    else:
+        run_id = new_run_id(datetime.now(UTC), current_git_sha(REPO_ROOT))
+        out_dir = args.out or default_out_dir(run_id)
+    runner = EvalRunner(
+        config,
+        out_dir=out_dir,
+        run_id=run_id,
+        on_record=_progress,
+        resume=args.resume is not None,
+    )
+    rounds: tuple[Round, ...] = ROUNDS if args.round == "all" else (args.round,)
+    records = asyncio.run(
+        runner.run(effective, cases, skipped_models=skipped, rounds=rounds)
+    )
     _out(_run_summary(records, out_dir))
     _out(_report_line(out_dir))
     return 0
@@ -323,9 +380,14 @@ def _load_plan(
         models=args.models,
         judges=args.judge,
         concurrency=getattr(args, "concurrency", None),
+        single_round=args.single_round,
     )
     matrix = overrides.apply(load_matrix(args.matrix))
-    cases = select_cases(load_cases(args.fixtures), matrix.run.cases)
+    known = load_cases(args.fixtures)
+    if matrix.tournament.enabled and not args.cases:
+        for name in unknown_screening_cases(known, matrix.tournament):
+            _err(f"warning: screening case '{name}' is not in {args.fixtures}")
+    cases = select_cases(known, matrix.run.cases)
     return matrix, cases, create_provider_registry(config)
 
 
@@ -369,7 +431,11 @@ def _estimate_lines(estimate: CostEstimate, *, case_count: int) -> list[str]:
         for label, cost in estimate.model_costs.items()
     )
     rows.extend(
-        (f"Judge {label}", f"{estimate.judge_calls} calls", _usd(cost))
+        (
+            f"Judge {label}",
+            f"{estimate.judge_call_counts.get(label, estimate.judge_calls)} calls",
+            _usd(cost),
+        )
         for label, cost in estimate.judge_costs.items()
     )
     rows.extend(
@@ -393,6 +459,30 @@ def _estimate_lines(estimate: CostEstimate, *, case_count: int) -> list[str]:
     note = " (some prices unknown)" if estimate.is_partial else ""
     lines.append(f"Total{note}: {_usd(estimate.total_usd)}")
     return lines
+
+
+def _tournament_lines(estimate: TournamentEstimate, matrix: MatrixConfig) -> list[str]:
+    settings = matrix.tournament
+    screening = estimate.screening
+    lines = [
+        f"Screening: every model, {screening.runs_per_model} run(s) each "
+        f"({settings.screening_repeats} repeat), one judge per model",
+        *("  " + line for line in _estimate_lines(screening, case_count=0)[1:]),
+        f"Finals: assumed survivors {', '.join(estimate.assumed_survivors)}; "
+        f"{estimate.finals.runs_per_model} run(s) each ({matrix.run.repeats} "
+        "repeats), the whole panel",
+        *("  " + line for line in _estimate_lines(estimate.finals, case_count=0)[1:]),
+        f"Total (screening + finals): {_usd(estimate.total_usd)}",
+        "Worst case (no model eliminated): "
+        f"{_usd(_sum(screening.total_usd, estimate.finals_worst_case.total_usd))}",
+    ]
+    return lines
+
+
+def _sum(*amounts: float | None) -> float | None:
+    if any(amount is None for amount in amounts):
+        return None
+    return sum(amount for amount in amounts if amount is not None)
 
 
 def _bootstrap_estimate_line(

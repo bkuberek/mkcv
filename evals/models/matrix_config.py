@@ -6,6 +6,7 @@ from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.run_settings import RunSettings
+from evals.models.tournament_settings import TournamentSettings
 
 
 class MatrixConfig(BaseModel):
@@ -27,6 +28,9 @@ class MatrixConfig(BaseModel):
     models: list[MatrixModel]
     recommendation: RecommendationSettings = Field(
         default_factory=RecommendationSettings
+    )
+    tournament: TournamentSettings = Field(
+        default_factory=lambda: TournamentSettings(enabled=False)
     )
 
     @property

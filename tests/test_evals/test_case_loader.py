@@ -240,7 +240,7 @@ class TestLoadMatrix:
     def test_the_shipped_run_settings_match_the_design(self) -> None:
         run = load_matrix(DEFAULT_MATRIX).run
         assert (run.repeats, run.concurrency, run.preset, run.cases) == (
-            1,
+            2,
             2,
             "standard",
             ["*"],

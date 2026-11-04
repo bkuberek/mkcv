@@ -18,6 +18,9 @@ class CostEstimate(BaseModel):
         default_factory=list, description="'provider/model' of the judges that run"
     )
     judge_calls: int = Field(description="Calls each judge of the panel makes")
+    judge_call_counts: dict[str, int] = Field(
+        default_factory=dict, description="Calls per judge, by 'provider/model'"
+    )
     judge_costs: dict[str, float | None] = Field(default_factory=dict)
     judge_cost_usd: float | None
     provider_costs: dict[str, float | None] = Field(

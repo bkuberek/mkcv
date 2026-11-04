@@ -13,6 +13,7 @@ from evals.harness.run_files import (
     RESULTS_FILE,
     SUMMARY_FILE,
 )
+from evals.harness.tournament import decide_survivors
 from evals.models.eval_record import EvalRecord
 from evals.models.run_manifest import RunManifest
 from evals.models.run_summary import RunSummary
@@ -72,21 +73,37 @@ def write_report_files(out_dir: Path) -> None:
     records = read_records(out_dir)
     manifest = read_manifest(out_dir)
     settings = manifest.matrix.recommendation
-    summaries = aggregate(records, settings)
+    screened = [record for record in records if record.round == "screening"]
+    deciding = [record for record in records if record.round != "screening"]
+    screening_only = not deciding and bool(screened)
+    summaries = aggregate(deciding or screened, settings)
     recommendations = recommend(summaries, tie_epsilon=settings.tie_epsilon)
+    decisions = (
+        decide_survivors(aggregate(screened, settings), manifest.matrix.tournament)
+        if screened
+        else []
+    )
     summary = RunSummary(
         run_id=manifest.run_id,
         primary_metrics=PRIMARY_METRIC,
         stages=summaries,
         recommendations=recommendations,
         suggested_profiles=suggest_profiles(recommendations),
+        screening=decisions,
         not_evaluated=not_evaluated(summaries),
     )
     (out_dir / SUMMARY_FILE).write_text(
         summary.model_dump_json(indent=2) + "\n", encoding="utf-8"
     )
     (out_dir / REPORT_FILE).write_text(
-        render_markdown(manifest, summaries, recommendations), encoding="utf-8"
+        render_markdown(
+            manifest,
+            summaries,
+            recommendations,
+            screening=decisions,
+            screening_only=screening_only,
+        ),
+        encoding="utf-8",
     )
 
 

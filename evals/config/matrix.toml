@@ -2,7 +2,7 @@
 # Mkcv providers, keys, and catalog overrides come from the normal mkcv settings.
 
 [run]
-repeats = 1
+repeats = 2                         # finals repeats (and a single round's)
 concurrency = 2
 stages = [
     "analyze",
@@ -24,6 +24,29 @@ judged_stages = [
 ]
 cases = ["*"]                       # case IDs or "*"
 preset = "standard"
+
+# Two rounds. Screening runs every model on the cases below (plus every review
+# probe) once, graded by one judge from another provider. A model is dropped
+# from a stage only if it fails a hard gate or trails the leader by more than
+# margin plus the noise of that lead; the top keep_top models and the best of
+# each provider always go on. The finals run the survivors on every case with
+# the whole judge panel and [run] repeats.
+[tournament]
+enabled = true
+screening_repeats = 1
+margin = 0.05
+keep_top = 3
+keep_per_provider = 1
+screening_cases = [
+    "backend-platform-match",          # engineering, strong match
+    "data-mlops-stretch",              # data, stretch
+    "security-appsec-stretch",         # security, stretch
+    "product-pm-match",                # career switch, cover letter
+    "clinical-informatics-stretch",    # healthcare, honest gaps, cover letter
+    "accounting-manager-match",        # finance, career break, cover letter
+    "customer-success-ae-overreach",   # overreach, cover letter
+    "marketing-coordinator-match",     # new graduate, sparse KB, cover letter
+]
 
 # Quality first: the best eligible model wins; cost only breaks a tie between
 # models within tie_epsilon of the best score. A model that fabricates in more

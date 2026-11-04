@@ -9,6 +9,7 @@ from evals.graders.stage_graders import JUDGED_GRADES, PRIMARY_METRIC
 from evals.models.judge_config import JudgeConfig
 from evals.models.recommendation import OVERALL, Recommendation
 from evals.models.run_manifest import RunManifest
+from evals.models.screening_decision import ScreeningDecision
 from evals.models.stage_summary import StageSummary
 from evals.models.suggested_profile import SuggestedProfile
 from evals.report.aggregator import LOW_SAMPLE_BELOW
@@ -44,14 +45,23 @@ def render_markdown(
     manifest: RunManifest,
     summaries: Sequence[StageSummary],
     recommendations: Sequence[Recommendation],
+    *,
+    screening: Sequence[ScreeningDecision] = (),
+    screening_only: bool = False,
 ) -> str:
-    """Return the report for one run (design 9.9), ending with a newline."""
+    """Return the report for one run (design 9.9), ending with a newline.
+
+    ``summaries`` and ``recommendations`` come from the finals (or the single
+    round); ``screening`` holds the screening round's decisions, if any, and
+    ``screening_only`` says the summaries are the screening's own.
+    """
     sections = [
         [f"# mkcv eval report: {manifest.run_id}"],
         _run_section(manifest),
-        _caveats_section(manifest, summaries),
+        _caveats_section(manifest, summaries, screening_only=screening_only),
         _judge_panel_section(manifest, summaries),
         _cost_section(summaries),
+        *([_tournament_section(screening)] if screening else []),
         *_stage_sections(summaries, recommendations),
         _recommendations_section(manifest, summaries, recommendations),
         _profile_changes_section(manifest, recommendations),
@@ -79,12 +89,20 @@ def _run_section(manifest: RunManifest) -> list[str]:
 
 
 def _caveats_section(
-    manifest: RunManifest, summaries: Sequence[StageSummary]
+    manifest: RunManifest,
+    summaries: Sequence[StageSummary],
+    *,
+    screening_only: bool = False,
 ) -> list[str]:
     lines = [
         "- All profiles are provisional until a maintainer applies these results "
         "(see `evals/README.md`)."
     ]
+    if screening_only:
+        lines.append(
+            "- Only the screening round has run: one judge per model and a subset "
+            "of cases. Run the finals before adopting anything below."
+        )
     self_judged = [s for s in summaries if s.self_judged]
     if self_judged:
         lines.append(
@@ -170,6 +188,38 @@ def _judge_means(
             cells.append(_score(statistics.fmean(values)) if values else "-")
         rows.append((stage.value, *cells))
     return rows
+
+
+def _tournament_section(decisions: Sequence[ScreeningDecision]) -> list[str]:
+    dropped = sum(1 for d in decisions if not d.kept)
+    rows = [
+        (
+            d.stage.value,
+            d.provider,
+            d.model,
+            _score(d.score),
+            "yes" if d.kept else "no",
+            d.reason,
+        )
+        for d in decisions
+    ]
+    return [
+        "## Tournament",
+        "",
+        "Screening ran every model on a subset of cases (and every review "
+        "probe) once, graded by one judge from another provider. A model left "
+        "a stage only when it failed a hard gate or trailed the leader by more "
+        "than the margin plus the noise of that lead; the top models of each "
+        "stage and the best of each provider always went on. The finals ran "
+        "the survivors on every case with the whole judge panel, and the rest "
+        f"of this report is theirs. {dropped} of {len(decisions)} screened "
+        "stage entries were eliminated.",
+        "",
+        *_table(
+            ("Stage", "Provider", "Model", "Screening quality", "Finals", "Why"),
+            rows,
+        ),
+    ]
 
 
 def _cost_section(summaries: Sequence[StageSummary]) -> list[str]:

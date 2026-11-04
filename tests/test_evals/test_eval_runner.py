@@ -23,6 +23,7 @@ from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.run_manifest import RunManifest
 from evals.models.run_settings import RunSettings
+from evals.models.tournament_settings import TournamentSettings
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.adapters.llm.stub import StubLLMAdapter
 from mkcv.core.exceptions.provider import ProviderError
@@ -30,7 +31,7 @@ from mkcv.core.models.jd_analysis import JDAnalysis
 from mkcv.core.models.stage_key import StageKey
 from mkcv.core.models.tailored_content import TailoredContent
 from mkcv.core.ports.llm import LLMPort
-from tests.test_evals.conftest import FailingStub, UsageStub, recorded
+from tests.test_evals.conftest import RESUME_YAML, FailingStub, UsageStub, recorded
 from tests.test_evals.grading_support import judging_stub
 
 STUB = MatrixModel(provider="stub", model="stub-model")
@@ -1130,3 +1131,158 @@ class TestJudgedStages:
         )
         [record] = await make_runner().run(matrix, judged_cases)
         assert [g.name for g in record.grades] == ["schema", "faithfulness_extraction"]
+
+
+class _PickyStub(StubLLMAdapter):
+    """Answers like the judging stub, but fails every call for model ``bad``."""
+
+    def __init__(self) -> None:
+        stub = judging_stub()
+        super().__init__(default_response=RESUME_YAML, responses=stub._responses)
+
+    async def complete_structured(self, *args: Any, **kwargs: Any) -> BaseModel:
+        if kwargs.get("model") == "bad":
+            raise ProviderError("boom")
+        return await super().complete_structured(*args, **kwargs)
+
+
+class TestTournament:
+    """Screening on a subset with one judge, then the survivors' finals."""
+
+    MODELS = tuple(
+        MatrixModel(provider="stub", model=name) for name in ("a", "b", "c", "bad")
+    )
+
+    @pytest.fixture
+    def tournament_cases(
+        self, cases: list[EvalCase], add_reference: Callable[..., None]
+    ) -> list[EvalCase]:
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT])
+        add_reference(cases[1])
+        return cases
+
+    @pytest.fixture
+    def keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for variable in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+            monkeypatch.setenv(variable, "test-key")
+
+    def _matrix(self, **tournament: Any) -> MatrixConfig:
+        return MatrixConfig(
+            run=RunSettings(stages=[StageKey.TAILOR, StageKey.REVIEW], repeats=2),
+            judges=[JUDGE, JudgeConfig(provider="openai", model="gpt-6-astra")],
+            reference=JUDGE,
+            models=list(self.MODELS),
+            tournament=TournamentSettings(
+                screening_cases=["alpha-match"], **tournament
+            ),
+        )
+
+    async def test_screening_runs_the_subset_once_with_one_judge(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        tournament_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        keys: None,
+    ) -> None:
+        install_adapter(_PickyStub())
+        records = await make_runner().run(
+            self._matrix(), tournament_cases, rounds=("screening",)
+        )
+        assert {r.round for r in records} == {"screening"}
+        assert {r.repeat for r in records} == {0}
+        assert {(r.case_id, r.stage.value) for r in records} == {
+            ("alpha-match", "tailor"),
+            ("alpha-match", "review"),
+            ("alpha-probe", "review"),
+        }
+        judged = [r for r in records if r.status == "ok"]
+        assert {len(r.judges) for r in judged} == {1}
+
+    async def test_the_screening_judge_comes_from_another_provider(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        tournament_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        keys: None,
+    ) -> None:
+        install_adapter(_PickyStub())
+        matrix = self._matrix().model_copy(
+            update={"models": [MatrixModel(provider="anthropic", model="a")]}
+        )
+        records = await make_runner().run(
+            matrix, tournament_cases, rounds=("screening",)
+        )
+        judged = [r for r in records if r.status == "ok"]
+        assert {tuple(r.judges) for r in judged} == {("openai/gpt-6-astra",)}
+
+    async def test_the_finals_run_only_the_survivors_with_the_panel(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        tournament_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        keys: None,
+    ) -> None:
+        install_adapter(_PickyStub())
+        records = await make_runner().run(self._matrix(), tournament_cases)
+        finals = [r for r in records if r.round == "finals"]
+        assert {r.model for r in finals} == {"a", "b", "c"}
+        assert {r.repeat for r in finals} == {0, 1}
+        assert {len(r.judges) for r in finals if r.stage is StageKey.TAILOR} == {2}
+
+    async def test_the_finals_need_the_screening(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        tournament_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        keys: None,
+    ) -> None:
+        install_adapter(_PickyStub())
+        with pytest.raises(ValueError, match="screening"):
+            await make_runner().run(
+                self._matrix(), tournament_cases, rounds=("finals",)
+            )
+
+    async def test_the_finals_can_resume_a_screened_run(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        tournament_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        keys: None,
+        tmp_path: Path,
+    ) -> None:
+        stub = install_adapter(_PickyStub())
+        await make_runner().run(self._matrix(), tournament_cases, rounds=("screening",))
+        screening_calls = len(stub.call_log)  # type: ignore[attr-defined]
+        records = await make_runner(resume=True).run(
+            self._matrix(), tournament_cases, rounds=("finals",)
+        )
+        assert {r.round for r in records} == {"screening", "finals"}
+        lines = (tmp_path / "out" / "results.jsonl").read_text().splitlines()
+        assert len(lines) == len(records)
+        assert len(stub.call_log) > screening_calls  # type: ignore[attr-defined]
+
+    async def test_resuming_a_finished_run_makes_no_call(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        tournament_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        keys: None,
+    ) -> None:
+        stub = install_adapter(_PickyStub())
+        await make_runner().run(self._matrix(), tournament_cases)
+        calls = len(stub.call_log)  # type: ignore[attr-defined]
+        await make_runner(resume=True).run(self._matrix(), tournament_cases)
+        assert len(stub.call_log) == calls  # type: ignore[attr-defined]
+
+    async def test_a_matrix_without_a_tournament_runs_one_round(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        tournament_cases: list[EvalCase],
+        install_adapter: Callable[[LLMPort], LLMPort],
+        keys: None,
+    ) -> None:
+        install_adapter(_PickyStub())
+        matrix = self._matrix(enabled=False)
+        records = await make_runner().run(matrix, tournament_cases)
+        assert {r.round for r in records} == {None}
+        assert {r.model for r in records} == {"a", "b", "c", "bad"}
