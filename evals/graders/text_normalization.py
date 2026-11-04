@@ -88,6 +88,87 @@ def contains_phrase(normalized_text: str, normalized_phrase: str) -> bool:
     return f" {normalized_phrase} " in f" {normalized_text} "
 
 
+COMMON_WORD_NAMES = frozenset(
+    {
+        "airflow",
+        "amplitude",
+        "apollo",
+        "beam",
+        "box",
+        "chef",
+        "chorus",
+        "clarity",
+        "crystal",
+        "dart",
+        "delta",
+        "envoy",
+        "falcon",
+        "flume",
+        "go",
+        "gong",
+        "gusto",
+        "heap",
+        "helm",
+        "hive",
+        "iceberg",
+        "julia",
+        "keystone",
+        "looker",
+        "mode",
+        "nomad",
+        "notion",
+        "oracle",
+        "outreach",
+        "packer",
+        "pig",
+        "prism",
+        "puppet",
+        "python",
+        "ruby",
+        "rust",
+        "sage",
+        "salt",
+        "sap",
+        "segment",
+        "sentinel",
+        "sketch",
+        "slack",
+        "snowflake",
+        "spark",
+        "square",
+        "storm",
+        "stripe",
+        "swift",
+        "tableau",
+        "vault",
+        "workday",
+        "zoom",
+    }
+)
+"""Tool and product names that are also common English words.
+
+A single-word forbidden claim spelled with capitals that is one of these
+matches only in that exact case, so the verb in "spark interest" is not a
+claim of Spark. Add a name here when a case forbids it.
+"""
+
+
+def claims_term(text: str, term: str) -> bool:
+    """Return True if ``text`` claims the forbidden ``term``.
+
+    The term must occur as whole words. A single-word term that is also a
+    common English word (``COMMON_WORD_NAMES``) and is spelled with capitals
+    must match in exact case; every other term matches in any case.
+    """
+    exact = (
+        " " not in term.strip()
+        and term.lower() in COMMON_WORD_NAMES
+        and term != term.lower()
+    )
+    pattern = rf"(?<!\w){re.escape(term)}(?!\w)"
+    return re.search(pattern, text, 0 if exact else re.IGNORECASE) is not None
+
+
 def contains_term(text: str, term: str) -> bool:
     """Return True if ``term`` occurs in ``text`` as a whole word, any case."""
     pattern = rf"(?<!\w){re.escape(term)}(?!\w)"

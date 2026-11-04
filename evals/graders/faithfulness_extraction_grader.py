@@ -3,8 +3,8 @@
 from evals.graders.extracted_claims import ExtractedClaims, extract_claims
 from evals.graders.grading_context import GradingContext
 from evals.graders.text_normalization import (
+    claims_term,
     contains_phrase,
-    contains_term,
     extract_numbers,
     is_supported_number,
     normalize_company,
@@ -91,6 +91,6 @@ def _check_forbidden(
 ) -> int:
     texts = [*claims.bullets, *claims.skills]
     for term in terms:
-        if any(contains_term(text, term) for text in texts):
+        if any(claims_term(text, term) for text in texts):
             violations.append({"type": "forbidden_claim", "text": term})
     return len(terms)

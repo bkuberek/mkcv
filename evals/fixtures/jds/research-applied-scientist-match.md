@@ -48,7 +48,7 @@ side.
 
 - Experience with numerical weather prediction data
 - Experience in renewable energy or power systems forecasting
-- Experience deploying models with Kubernetes or processing data with Spark
+- Experience deploying models with Kubernetes or processing data with Apache Spark
 - Experience working with industry partners or customers
 
 ## How we work

@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from evals.graders.text_normalization import contains_term
+from evals.graders.text_normalization import claims_term
 from evals.models.eval_case import EvalCase
 from mkcv.core.models.stage_key import StageKey
 from tests.test_evals.grading_support import CASE_BY_ID, FIXTURES
@@ -35,9 +35,7 @@ def test_no_term_the_letter_must_not_claim_is_in_the_knowledge_base(
     case: EvalCase,
 ) -> None:
     present = [
-        term
-        for term in case.cover_letter_forbidden
-        if contains_term(case.kb_text, term)
+        term for term in case.cover_letter_forbidden if claims_term(case.kb_text, term)
     ]
     assert present == []
 

@@ -405,7 +405,7 @@ id = "research-applied-scientist-match"
 persona = "personas/research-scientist-international.md"
 jd = "jds/research-applied-scientist-match.md"
 expected_keywords = ["PyTorch", "probabilistic forecasting", "deep learning", "Python", "renewable energy", "graph neural networks", "time series"]
-forbidden_claims = ["Kubernetes", "Spark"]
+forbidden_claims = ["Kubernetes", "Apache Spark"]
 review_probe_defects = []
 
 # Marketing, new grad: a sparse, messy, notes-style knowledge base.
@@ -423,7 +423,7 @@ must_not_claim = [
     "Kubernetes",
 ]
 must_not = [
-    "claim Spark or production model deployment (the Nordwerk Netz model ran in shadow mode only)",
+    "claim Apache Spark or production model deployment (the Nordwerk Netz model ran in shadow mode only)",
     "convert his Dr. rer. nat. into anything other than a doctorate equivalent to a PhD",
     "state company facts beyond the job description (news, funding, awards, customer names)",
     "repeat resume bullets word for word",

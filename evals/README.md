@@ -98,7 +98,7 @@ must_not = ["describe her as an account executive"]
 | Field | Meaning |
 |-------|---------|
 | `company`, `role` | The company and role the letter must name; by default, those of the case's reference JD analysis |
-| `must_not_claim` | Literal terms the letter must not claim, checked by rule and by the faithfulness judge. The case's `forbidden_claims` apply to the letter too. A sentence that states a gap ("I have not used ...") is not a claim. |
+| `must_not_claim` | Literal terms the letter must not claim, checked by rule and by the faithfulness judge. The case's `forbidden_claims` apply to the letter too. A sentence that states a gap ("I have not used ...") is not a claim. Terms match as whole words; a capitalized single-word name that is also a common English word (`Snowflake`, `SAP`) matches only in exact case, so the verb "spark" is not a claim of a tool. |
 | `must`, `should_connect`, `must_not` | Rules only a judge can check; the judges see them as guidance |
 | `min_words`, `max_words` | The letter's word bounds (250 to 400 by default, as the prompt asks) |
 | `review_defects` | Makes the case a cover letter review probe: its `reference/<case>/cover_letter_content.json` is written by hand with these defects planted, and `cover_letter.review` is graded by how many the review catches. Set `stages = ["cover_letter.review"]` on such a case. |

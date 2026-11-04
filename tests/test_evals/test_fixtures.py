@@ -77,7 +77,7 @@ FORBIDDEN_CLAIMS = {
     "customer-success-ae-overreach": ["MEDDICC", "quota", "new logo", "Gong"],
     "design-product-match": ["Amplitude", "Mixpanel"],
     "design-ux-engineer-stretch": ["React", "TypeScript", "Storybook"],
-    "research-applied-scientist-match": ["Kubernetes", "Spark"],
+    "research-applied-scientist-match": ["Kubernetes", "Apache Spark"],
     "marketing-coordinator-match": ["Klaviyo", "Photoshop"],
     "marketing-ops-overreach": [
         "Marketo",

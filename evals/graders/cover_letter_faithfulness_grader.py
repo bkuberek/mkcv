@@ -5,8 +5,8 @@ import re
 from evals.graders.cover_letter_text import load_letter, sentences
 from evals.graders.grading_context import GradingContext
 from evals.graders.text_normalization import (
+    claims_term,
     contains_phrase,
-    contains_term,
     extract_numbers,
     is_supported_number,
     normalize_text,
@@ -128,7 +128,7 @@ def _check_forbidden(
 ) -> int:
     for term in terms:
         if any(
-            contains_term(sentence, term) and not _HONEST_GAP.search(sentence)
+            claims_term(sentence, term) and not _HONEST_GAP.search(sentence)
             for sentence in claims
         ):
             violations.append({"type": "forbidden_claim", "text": term})
