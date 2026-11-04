@@ -139,7 +139,7 @@ provider by dispatching on its *kind*, never on its name:
 - `AnthropicAdapter` — Anthropic Claude (schema-constrained output, or a forced tool call for older models)
 - `OpenAICompatibleAdapter` — any OpenAI Chat Completions endpoint, with a structured-output fallback chain. Ollama and OpenRouter are built-in instances of it; so is any provider a user defines with `type = "openai-compatible"`
 - `OpenAIAdapter` — OpenAI GPT models; subclass of the above with strict JSON-schema output and no fallback
-- `GoogleGeminiAdapter` — Google Gemini through the `google-genai` SDK (imported lazily)
+- `GoogleGeminiAdapter` — Google Gemini through the `google-genai` SDK (imported lazily), with an API key or on Vertex AI with Application Default Credentials (`vertexai = true`, optionally pinned to a `credentials_file`; `google.auth` is also imported lazily)
 - `StubLLMAdapter` — deterministic test/dev stub (no API key needed)
 - `RetryingLLMAdapter` — decorator that wraps any adapter with exponential backoff on `RateLimitError`
 - `request_adaptation.py` — one-shot adaptation when a provider rejects `temperature` or the output-limit parameter

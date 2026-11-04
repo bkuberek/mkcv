@@ -100,6 +100,12 @@ export OPENAI_API_KEY=sk-...
 # Google Gemini (GOOGLE_API_KEY also works; GEMINI_API_KEY wins if both are set)
 export GEMINI_API_KEY=...
 
+# Google Gemini without an API key (Vertex AI + Application Default Credentials):
+# run `gcloud auth application-default login`, then in mkcv.toml set
+#   [default.providers.google]
+#   vertexai = true
+#   project = "my-gcp-project"
+
 # OpenRouter (access 200+ models with one key)
 export OPENROUTER_API_KEY=sk-or-...
 
@@ -312,10 +318,26 @@ export MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5
 |----------|-------|-------|
 | **Anthropic** | `export ANTHROPIC_API_KEY=sk-ant-...` | Default provider, Claude models |
 | **OpenAI** | `export OPENAI_API_KEY=sk-...` | GPT models, strict structured output |
-| **Google Gemini** | `export GEMINI_API_KEY=...` | Gemini models (`GOOGLE_API_KEY` also works) |
+| **Google Gemini** | `export GEMINI_API_KEY=...`, or Vertex AI with ADC (below) | Gemini models (`GOOGLE_API_KEY` also works) |
 | **Ollama** | [Install Ollama](https://ollama.ai), run `ollama serve` | Free, local, no API key |
 | **OpenRouter** | `export OPENROUTER_API_KEY=sk-or-...` | 200+ models via single API key; name a model per stage |
 | **Any OpenAI-compatible endpoint** | Define it in `mkcv.toml` | Groq, Together, vLLM, LM Studio, a company gateway |
+
+If your Google organization disallows API keys, use Vertex AI with Application
+Default Credentials. Log in once with `gcloud auth application-default login`,
+then add this to `mkcv.toml`:
+
+```toml
+[default.providers.google]
+vertexai = true
+project = "my-gcp-project"
+location = "global"
+```
+
+`GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION`
+work too; config wins. With several Google accounts, pin a credentials file with
+`credentials_file = "~/.config/gcloud-mkcv/application_default_credentials.json"`.
+See [docs/models.md](docs/models.md#google-gemini-on-vertex-ai) for the multi-account recipe.
 
 [OpenRouter](https://openrouter.ai) is a good choice if you want access to Claude, GPT, Gemini, DeepSeek, and more through a single API key. It has no model profile, so set `provider = "openrouter"` and an OpenRouter model identifier (for example `anthropic/claude-sonnet-4`) for each stage you run on it.
 
