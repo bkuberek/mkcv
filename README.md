@@ -336,6 +336,10 @@ If mkcv does not know a model, it runs it with conservative defaults and a
 warning; describe the model with a `[[default.model_catalog]]` entry to give
 it a quality tier and prices. See [docs/models.md](docs/models.md).
 
+Upgrading from 1.4? Per-stage config now applies to `generate`, a missing API
+key stops the run, and `http://localhost:11434` is fixed to `/v1` for you. See
+[Upgrading from 1.4](docs/models.md#upgrading-from-14).
+
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.

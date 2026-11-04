@@ -24,9 +24,10 @@ or an API key to check.
 | `ollama` | OpenAI-compatible | none | Local models at `http://localhost:11434/v1`. |
 | `stub` | offline | none | Deterministic placeholder for tests and dry runs. |
 
-If a provider needs a key and none is found, mkcv falls back to the offline
-stub and warns you first (`openai: no API key found ...`). The run then
-produces empty output instead of failing.
+If a provider needs a key and none is found, mkcv warns first
+(`openai: no API key found ...`) and then stops with exit code 3, naming the
+variable to set. Use the `stub` provider (`--provider stub`) for an offline
+dry run.
 
 When both `GEMINI_API_KEY` and `GOOGLE_API_KEY` are set, mkcv uses
 `GEMINI_API_KEY`. The Google SDK on its own prefers `GOOGLE_API_KEY`, but mkcv
@@ -224,7 +225,9 @@ never stops a run.
 | Tier unknown | You chose a model that is in the catalog without a tier. |
 | Unknown model | The catalog has no data for the model. mkcv uses conservative defaults. |
 | Deprecated model | The provider has deprecated the model; the note says where requests go. |
-| Missing API key | A provider's key is not set (reported once per provider). |
+| Missing API key | A provider's key is not set (reported once per provider). The run then stops with exit code 3. |
+| Config overrides provider | A `[default.pipeline.stages.*]` section sends a stage to a different provider than the active profile. |
+| Config overrides model | An economy profile (for example the `concise` preset) would use a cheaper model than the one a stage section names. |
 
 mkcv does not question models it picked itself. A profile's own assignments
 (including `--model-profile anthropic-economy`) never get tier warnings, and
@@ -395,10 +398,42 @@ mkcv's defaults avoid depending on these, and the catalog lets you correct them.
 | OpenRouter model IDs for current models | Not verified, so there is no `openrouter` profile. |
 | GPT-4.x prices in the catalog | Kept from earlier versions for backward compatibility, not re-verified. |
 
+## Upgrading from 1.4
+
+Four behaviours changed for people who configured mkcv under 1.4.
+
+- **Per-stage config is honoured.** `[default.pipeline.stages.*]` `provider` and
+  `model` used to be ignored by `generate` (any preset replaced them). They now
+  win over the model profile, so a model you wrote in `mkcv.toml` is the model
+  that runs, even under the `concise` preset. mkcv warns when this moves a stage
+  to another provider than the active profile, or replaces the cheaper model an
+  economy profile would use. To go back to the profile's choice, delete
+  `provider` and `model` from that section, or pass `--model-profile <name>` (it
+  beats per-stage config). Set `pipeline.model_warnings = false` to silence the
+  warning.
+- **Ollama URLs without a path are fixed.** An OpenAI-compatible `base_url` with
+  no path, such as `http://localhost:11434` (the form older docs showed), gets
+  `/v1` appended, because the client otherwise called a path that returns 404. A
+  URL with any explicit path is left as written.
+- **A missing API key fails fast.** A provider that needs a key and has none
+  now stops the command with exit code 3 and names the variable to set. In 1.4
+  the run continued on the offline stub and wrote empty output. For a dry run
+  choose the `stub` provider on purpose. Keyless providers such as `ollama` are
+  unaffected.
+- **Older OpenAI chat models work.** `gpt-4-*`, `gpt-3.5-*`, `chatgpt-*`, and
+  `gpt-4o-2024-05-13` use JSON mode instead of strict schema output, accept
+  `temperature`, and have no output floor. They carry no price, so cost
+  estimates for them are partial. An OpenAI model the catalog does not know now
+  falls back from the strict schema to JSON mode when the API rejects the schema;
+  catalogued models still fail instead.
+
+An unknown key in `[default.providers.<name>]` is now ignored with a log
+warning rather than aborting every command.
+
 ## Exit codes
 
 A configuration problem exits with **code 3** before any model is called:
 an unknown provider or model profile, `--model-profile` combined with
 `--provider`, a stage with no model, or an invalid `[default.providers.*]` or
-`[[default.model_catalog]]` entry. A missing API key is a warning, not an
-error. See the [CLI reference](specs/cli-interface.md#exit-codes).
+`[[default.model_catalog]]` entry, or a provider that needs an API key and
+has none. `mkcv models` still reports a missing key as a warning. See the [CLI reference](specs/cli-interface.md#exit-codes).
