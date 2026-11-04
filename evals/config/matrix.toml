@@ -8,6 +8,13 @@ stages = ["analyze", "select", "tailor", "structure", "review"]
 cases = ["*"]                       # case IDs or "*"
 preset = "standard"
 
+# Quality first: the best eligible model wins; cost only breaks a tie between
+# models within tie_epsilon of the best score. A model that fabricates in more
+# than max_fabrication_rate of its runs is not eligible.
+[recommendation]
+tie_epsilon = 0.01
+max_fabrication_rate = 0.0
+
 [judge]
 provider = "anthropic"
 model = "claude-opus-5-5"

@@ -4,16 +4,17 @@ import statistics
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from evals.models.recommendation import Recommendation
+from evals.graders.stage_graders import PRIMARY_METRIC
+from evals.models.recommendation import OVERALL, Recommendation
 from evals.models.run_manifest import RunManifest
 from evals.models.stage_summary import StageSummary
-from evals.report.aggregator import LOW_SAMPLE_BELOW, ineligible_reasons
+from evals.report.aggregator import LOW_SAMPLE_BELOW
+from evals.stages import EVALUATED_STAGES
 from mkcv.core.catalog.builtin_model_profiles import (
     BUILTIN_MODEL_PROFILES,
     profile_stage_model,
 )
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
-from mkcv.core.models.stage_key import PIPELINE_STAGES
 
 STAGE_COLUMNS = (
     "Provider",
@@ -21,7 +22,8 @@ STAGE_COLUMNS = (
     "n",
     "OK",
     "Schema",
-    "Faithfulness (det)",
+    "Fabricated (det)",
+    "Fabricated (judge)",
     "Faithfulness (judge)",
     "Quality",
     "Cost/run",
@@ -43,8 +45,8 @@ def render_markdown(
         _run_section(manifest),
         _caveats_section(manifest, summaries),
         _cost_section(summaries),
-        *_stage_sections(summaries),
-        _recommendations_section(recommendations),
+        *_stage_sections(summaries, recommendations),
+        _recommendations_section(manifest, recommendations),
         _profile_changes_section(manifest, recommendations),
         _token_section(summaries),
     ]
@@ -127,15 +129,46 @@ def _cost_section(summaries: Sequence[StageSummary]) -> list[str]:
     ]
 
 
-def _stage_sections(summaries: Sequence[StageSummary]) -> list[list[str]]:
+def _stage_sections(
+    summaries: Sequence[StageSummary], recommendations: Sequence[Recommendation]
+) -> list[list[str]]:
     sections: list[list[str]] = []
-    for stage in PIPELINE_STAGES:
+    for stage in EVALUATED_STAGES:
         rows = [_stage_row(s) for s in summaries if s.stage is stage]
         if rows:
+            recs = [r for r in recommendations if r.stage is stage]
             sections.append(
-                [f"## Stage: {stage.value}", "", *_table(STAGE_COLUMNS, rows)]
+                [
+                    f"## Stage: {stage.value}",
+                    "",
+                    f"Primary score: `{PRIMARY_METRIC.get(stage, '-')}`.",
+                    "",
+                    *_winner_lines(recs),
+                    *_table(STAGE_COLUMNS, rows),
+                ]
             )
     return sections
+
+
+def _winner_lines(recs: Sequence[Recommendation]) -> list[str]:
+    overall = next((r for r in recs if r.scope == OVERALL), None)
+    per_provider = [r for r in recs if r.scope != OVERALL]
+    lines: list[str] = []
+    if overall is not None:
+        lines.extend([_best_overall_line(overall), ""])
+    if per_provider:
+        rows = [
+            (r.scope, r.model or "-", _score(r.score), r.reason) for r in per_provider
+        ]
+        columns = ("Provider", "Best model", "Quality", "Why")
+        lines.extend([*_table(columns, rows), ""])
+    return lines
+
+
+def _best_overall_line(rec: Recommendation) -> str:
+    if rec.label is None:
+        return f"Best overall: none ({rec.reason})"
+    return f"Best overall: **{rec.label}** ({_score(rec.score)}). {rec.reason}."
 
 
 def _stage_row(s: StageSummary) -> tuple[str, ...]:
@@ -145,7 +178,8 @@ def _stage_row(s: StageSummary) -> tuple[str, ...]:
         str(s.n),
         f"{s.ok_rate:.0%}",
         _score(s.mean.get("schema")),
-        _score(s.mean.get("faithfulness_extraction")),
+        _percent(s.fabrication_rate.get("faithfulness_extraction")),
+        _percent(s.fabrication_rate.get("faithfulness_judge")),
         _score(s.mean.get("faithfulness_judge")),
         _score(s.primary_score),
         _usd(s.cost_mean_usd),
@@ -156,7 +190,7 @@ def _stage_row(s: StageSummary) -> tuple[str, ...]:
 
 
 def _notes(s: StageSummary) -> list[str]:
-    notes = [] if s.eligible else ineligible_reasons(s.ok_rate, s.mean)
+    notes = list(s.gate_failures)
     if s.primary_score is None:
         notes.append("no quality score")
     if s.self_judged:
@@ -166,35 +200,74 @@ def _notes(s: StageSummary) -> list[str]:
     return notes
 
 
-def _recommendations_section(recommendations: Sequence[Recommendation]) -> list[str]:
+def _recommendations_section(
+    manifest: RunManifest, recommendations: Sequence[Recommendation]
+) -> list[str]:
     if not recommendations:
         return ["## Recommendations", "", NO_RESULTS]
-    rows = [
-        (
-            r.stage.value,
-            r.provider,
-            r.best or "-",
-            r.recommended or "-",
-            r.economy or "-",
-            r.reason,
+    epsilon = manifest.matrix.recommendation.tie_epsilon
+    providers = sorted({r.scope for r in recommendations if r.scope != OVERALL})
+    rows: list[tuple[str, ...]] = []
+    for stage in EVALUATED_STAGES:
+        overall = next(
+            (r for r in recommendations if r.stage is stage and r.scope == OVERALL),
+            None,
         )
-        for r in recommendations
+        if overall is None:
+            continue
+        cells = {
+            r.scope: _cell(r)
+            for r in recommendations
+            if r.stage is stage and r.scope != OVERALL
+        }
+        rows.append(
+            (
+                stage.value,
+                overall.label or "-",
+                _score(overall.score),
+                *(cells.get(provider, "-") for provider in providers),
+                "; ".join(_recommendation_notes(overall)),
+            )
+        )
+    columns = ("Stage", "Best overall", "Quality", *providers, "Notes")
+    return [
+        "## Recommendations",
+        "",
+        "Each stage recommends the eligible model with the highest quality score, "
+        "across all providers and within each one. Cost only breaks a tie: models "
+        f"within {epsilon} of the best score count as tied, and the cheapest wins.",
+        "",
+        *_table(columns, rows),
     ]
-    columns = ("Stage", "Provider", "Best", "Recommended", "Economy", "Reason")
-    return ["## Recommendations", "", *_table(columns, rows)]
+
+
+def _cell(rec: Recommendation) -> str:
+    return "-" if rec.model is None else f"{rec.model} ({_score(rec.score)})"
+
+
+def _recommendation_notes(rec: Recommendation) -> list[str]:
+    if rec.model is None:
+        return [rec.reason]
+    notes: list[str] = []
+    if rec.decided_by_cost:
+        notes.append(f"cost tie with {', '.join(rec.tied_with)}")
+    return notes
 
 
 def _profile_changes_section(
     manifest: RunManifest, recommendations: Sequence[Recommendation]
 ) -> list[str]:
-    by_stage_provider = {(r.stage, r.provider): r for r in recommendations}
+    best = {
+        (r.stage, r.scope): r.model
+        for r in recommendations
+        if r.scope != OVERALL and r.model is not None
+    }
     changes: list[str] = []
     for profile in BUILTIN_MODEL_PROFILES.values():
-        for stage in PIPELINE_STAGES:
-            rec = by_stage_provider.get((stage, profile.provider))
-            target = (
-                (rec.economy if profile.economy else rec.recommended) if rec else None
-            )
+        if profile.economy:
+            continue
+        for stage in EVALUATED_STAGES:
+            target = best.get((stage, profile.provider))
             current = profile_stage_model(profile, stage)
             if target and target != current:
                 changes.append(
@@ -205,7 +278,9 @@ def _profile_changes_section(
         "",
         "Apply these by hand in `src/mkcv/core/catalog/builtin_model_profiles.py` "
         f'(set `evidence="eval"` and `eval_run="{manifest.run_id}"`) and '
-        "`docs/models.md`, citing the published report.",
+        "`docs/models.md`, citing the published report. Each provider profile "
+        "follows that provider's best model. Economy profiles are not changed: "
+        "this rule recommends the best model, not the cheapest.",
         "",
         *(changes or ["No changes suggested."]),
     ]
@@ -213,7 +288,7 @@ def _profile_changes_section(
 
 def _token_section(summaries: Sequence[StageSummary]) -> list[str]:
     rows: list[tuple[str, ...]] = []
-    for stage in PIPELINE_STAGES:
+    for stage in EVALUATED_STAGES:
         measured_in = [
             s.median_input_tokens
             for s in summaries
@@ -275,6 +350,10 @@ def _timestamp(moment: datetime | None) -> str:
 
 def _score(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f}"
+
+
+def _percent(value: float | None) -> str:
+    return "-" if value is None else f"{value:.0%}"
 
 
 def _usd(value: float | None) -> str:

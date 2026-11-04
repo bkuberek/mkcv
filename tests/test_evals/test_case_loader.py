@@ -248,6 +248,26 @@ class TestLoadMatrix:
         providers = {m.provider for m in load_matrix(DEFAULT_MATRIX).models}
         assert providers <= set(BUILTIN_PROVIDERS)
 
+    def test_the_shipped_recommendation_rule_is_quality_first(self) -> None:
+        settings = load_matrix(DEFAULT_MATRIX).recommendation
+        assert (settings.tie_epsilon, settings.max_fabrication_rate) == (0.01, 0.0)
+
+    def test_recommendation_defaults_apply_when_omitted(self, tmp_path: Path) -> None:
+        settings = load_matrix(_write_matrix(tmp_path, _MINIMAL_MATRIX)).recommendation
+        assert (settings.tie_epsilon, settings.max_fabrication_rate) == (0.01, 0.0)
+
+    def test_the_tie_epsilon_can_be_set(self, tmp_path: Path) -> None:
+        body = "[recommendation]\ntie_epsilon = 0.02\n" + _MINIMAL_MATRIX
+        settings = load_matrix(_write_matrix(tmp_path, body)).recommendation
+        assert settings.tie_epsilon == 0.02
+
+    def test_an_unknown_recommendation_setting_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        body = "[recommendation]\nmargin = 0.05\n" + _MINIMAL_MATRIX
+        with pytest.raises(ValueError, match="margin"):
+            load_matrix(_write_matrix(tmp_path, body))
+
     def test_defaults_apply_when_run_settings_are_omitted(self, tmp_path: Path) -> None:
         matrix = load_matrix(_write_matrix(tmp_path, _MINIMAL_MATRIX))
         assert (matrix.run.repeats, matrix.run.concurrency) == (1, 2)

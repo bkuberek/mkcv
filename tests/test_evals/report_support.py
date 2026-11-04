@@ -8,7 +8,7 @@ from evals.models.grade import Grade
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
-from evals.models.recommendation import Recommendation
+from evals.models.recommendation import OVERALL, Recommendation
 from evals.models.run_manifest import RunManifest
 from evals.models.run_settings import RunSettings
 from evals.models.stage_summary import StageSummary
@@ -18,9 +18,11 @@ RUN_ID = "20261104-010203-abc1234"
 JUDGE = JudgeConfig(provider="anthropic", model="claude-opus-5-5")
 
 
-def grade(name: str, score: float | None, **details: Any) -> Grade:
-    """A grade with the given score and details."""
-    return Grade(name=name, score=score, details=details)
+def grade(
+    name: str, score: float | None, *, passed: bool | None = None, **details: Any
+) -> Grade:
+    """A grade with the given score, pass flag, and details."""
+    return Grade(name=name, score=score, passed=passed, details=details)
 
 
 def record(
@@ -71,9 +73,13 @@ def summary(
     median_in: float | None = 1000.0,
     median_out: float | None = 500.0,
     eligible: bool = True,
+    gate_failures: list[str] | None = None,
     self_judged: bool = False,
 ) -> StageSummary:
-    """A stage summary; ``low_sample`` follows ``n`` as the aggregator sets it."""
+    """A stage summary; ``low_sample`` follows ``n`` as the aggregator sets it.
+
+    An ineligible summary without ``gate_failures`` gets a placeholder one.
+    """
     return StageSummary(
         stage=stage,
         provider=provider,
@@ -88,6 +94,11 @@ def summary(
         median_input_tokens=median_in,
         median_output_tokens=median_out,
         eligible=eligible,
+        gate_failures=(
+            gate_failures
+            if gate_failures is not None
+            else ([] if eligible else ["schema below 0.95"])
+        ),
         self_judged=self_judged,
         low_sample=n < 6,
     )
@@ -96,20 +107,22 @@ def summary(
 def recommendation(
     *,
     stage: StageKey = StageKey.TAILOR,
-    provider: str = "openai",
-    best: str | None = "gpt-6.1-sol",
-    recommended: str | None = "gpt-6.1-terra",
-    economy: str | None = "gpt-6-luna",
+    scope: str = OVERALL,
+    provider: str | None = "openai",
+    model: str | None = "gpt-6.1-sol",
+    score: float | None = 0.9,
     reason: str = "because",
+    **fields: Any,
 ) -> Recommendation:
-    """A recommendation."""
+    """A recommendation; a missing model also has no provider or score."""
     return Recommendation(
         stage=stage,
-        provider=provider,
-        best=best,
-        recommended=recommended,
-        economy=economy,
+        scope=scope,
+        provider=provider if model else None,
+        model=model,
+        score=score if model else None,
         reason=reason,
+        **fields,
     )
 
 

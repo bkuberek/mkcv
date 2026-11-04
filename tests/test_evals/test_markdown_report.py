@@ -3,6 +3,7 @@
 import re
 
 from evals.models.matrix_model import MatrixModel
+from evals.models.recommendation_settings import RecommendationSettings
 from evals.report.markdown_report import render_markdown
 from mkcv.core.catalog.stage_requirements import STAGE_REQUIREMENTS
 from mkcv.core.models.stage_key import StageKey
@@ -14,7 +15,7 @@ from tests.test_evals.report_support import (
 )
 
 TABLE_HEADER = (
-    "| Provider | Model | n | OK | Schema | Faithfulness (det) | "
+    "| Provider | Model | n | OK | Schema | Fabricated (det) | Fabricated (judge) | "
     "Faithfulness (judge) | Quality | Cost/run | p50 latency | Eligible | Notes |"
 )
 
@@ -175,19 +176,22 @@ class TestStageTables:
             model="gpt-x",
             n=8,
             ok_rate=0.875,
-            mean={
-                "schema": 1.0,
-                "faithfulness_extraction": 0.97,
-                "faithfulness_judge": 0.92,
-            },
+            mean={"schema": 1.0, "faithfulness_judge": 0.92},
             primary_score=0.85,
             cost=0.0512,
             p50=3.5,
             eligible=True,
+        ).model_copy(
+            update={
+                "fabrication_rate": {
+                    "faithfulness_extraction": 0.0,
+                    "faithfulness_judge": 0.125,
+                }
+            }
         )
         section = _section(_render(summaries=[row_summary]), "Stage: tailor")
         assert (
-            "| openai | gpt-x | 8 | 88% | 1.00 | 0.97 | 0.92 | 0.85 | $0.0512 "
+            "| openai | gpt-x | 8 | 88% | 1.00 | 0% | 12% | 0.92 | 0.85 | $0.0512 "
             "| 3.5s | yes |" in section
         )
 
@@ -201,7 +205,7 @@ class TestStageTables:
             eligible=False,
         )
         section = _section(_render(summaries=[row_summary]), "Stage: tailor")
-        assert "| 1.00 | - | - | - | - | - | no |" in section
+        assert "| 1.00 | - | - | - | - | - | - | no |" in section
 
     def test_notes_flag_self_judging_and_small_samples(self) -> None:
         row_summary = summary(model="gpt-x", n=3, self_judged=True)
@@ -209,13 +213,15 @@ class TestStageTables:
         assert "self-judged" in section
         assert "low sample" in section
 
-    def test_an_ineligible_row_names_the_threshold_it_missed(self) -> None:
+    def test_an_ineligible_row_names_the_gates_it_missed(self) -> None:
         row_summary = summary(
-            model="gpt-x", ok_rate=0.8, mean={"schema": 0.9}, eligible=False
+            model="gpt-x",
+            ok_rate=0.8,
+            eligible=False,
+            gate_failures=["ok rate below 0.95", "schema below 0.95"],
         )
         section = _section(_render(summaries=[row_summary]), "Stage: tailor")
-        assert "ok rate below 0.95" in section
-        assert "schema below 0.95" in section
+        assert "ok rate below 0.95, schema below 0.95" in section
 
     def test_an_eligible_row_has_no_threshold_notes(self) -> None:
         section = _section(_render(summaries=[summary()]), "Stage: tailor")
@@ -232,98 +238,116 @@ class TestStageTables:
         assert section.count("| openai |") == 2
 
 
-class TestRecommendations:
-    def test_it_lists_the_choices_per_stage_and_provider(self) -> None:
-        section = _section(_render(), "Recommendations")
-        assert (
-            "| tailor | openai | gpt-6.1-sol | gpt-6.1-terra | gpt-6-luna |" in section
+class TestStageWinners:
+    def _stage(self, *recs: object) -> str:
+        report = _render(
+            summaries=[summary(model="gpt-6.1-sol")], recommendations=list(recs)
         )
+        return _section(report, "Stage: tailor")
 
-    def test_a_missing_choice_shows_as_a_dash(self) -> None:
+    def test_it_names_the_primary_metric(self) -> None:
+        assert "Primary score: `tailoring_judge`" in self._stage(recommendation())
+
+    def test_it_names_the_best_model_overall(self) -> None:
+        stage = self._stage(recommendation(model="gpt-6.1-sol", score=0.9))
+        assert "Best overall: **openai/gpt-6.1-sol** (0.90)" in stage
+
+    def test_it_lists_the_best_model_of_each_provider(self) -> None:
+        stage = self._stage(
+            recommendation(),
+            recommendation(scope="openai", model="gpt-6.1-sol", score=0.9),
+            recommendation(scope="google", provider="google", model="argon", score=0.8),
+        )
+        assert "| Provider | Best model | Quality | Why |" in stage
+        assert "| openai | gpt-6.1-sol | 0.90 | because |" in stage
+        assert "| google | argon | 0.80 | because |" in stage
+
+    def test_a_stage_without_a_winner_says_why(self) -> None:
+        stage = self._stage(recommendation(model=None, reason="no eligible model"))
+        assert "Best overall: none (no eligible model)" in stage
+
+
+class TestRecommendations:
+    def test_it_states_the_rule(self) -> None:
+        section = _section(_render(), "Recommendations")
+        assert "highest quality score" in section
+        assert "within 0.01" in section
+
+    def test_the_tie_epsilon_comes_from_the_run(self) -> None:
+        matrix = manifest().matrix.model_copy(
+            update={"recommendation": RecommendationSettings(tie_epsilon=0.03)}
+        )
+        report = _render(manifest=manifest().model_copy(update={"matrix": matrix}))
+        assert "within 0.03" in _section(report, "Recommendations")
+
+    def test_it_has_one_row_per_stage_with_a_column_per_provider(self) -> None:
         recs = [
-            recommendation(
-                best=None, recommended=None, economy=None, reason="no eligible model"
-            )
+            recommendation(),
+            recommendation(scope="google", provider="google", model="argon", score=0.8),
+            recommendation(scope="openai", model="gpt-6.1-sol", score=0.9),
         ]
         section = _section(_render(recommendations=recs), "Recommendations")
-        assert "| - | - | - | no eligible model |" in section
-
-    def test_the_reason_is_shown(self) -> None:
-        recs = [recommendation(reason="cheapest within 0.05")]
-        assert "cheapest within 0.05" in _section(
-            _render(recommendations=recs), "Recommendations"
+        assert "| Stage | Best overall | Quality | google | openai | Notes |" in section
+        assert (
+            "| tailor | openai/gpt-6.1-sol | 0.90 | argon (0.80) | gpt-6.1-sol (0.90) |"
+            in section
         )
+
+    def test_a_missing_winner_shows_as_a_dash(self) -> None:
+        recs = [recommendation(model=None, reason="no eligible model")]
+        section = _section(_render(recommendations=recs), "Recommendations")
+        assert "| tailor | - | - | no eligible model |" in section
+
+    def test_a_tie_decided_by_cost_is_noted(self) -> None:
+        recs = [recommendation(decided_by_cost=True, tied_with=["openai/gpt-6-astra"])]
+        section = _section(_render(recommendations=recs), "Recommendations")
+        assert "cost tie with openai/gpt-6-astra" in section
 
 
 class TestSuggestedProfileChanges:
-    """REQ-EV-18: where a recommendation differs from a built-in profile."""
+    """Built-in provider profiles follow that provider's best model."""
 
     def _suggested(self, *recs: object) -> str:
         return _section(
             _render(recommendations=list(recs)), "Suggested profile changes"
         )  # type: ignore[arg-type]
 
-    def test_a_different_recommended_model_is_listed(self) -> None:
+    def test_a_different_best_model_is_listed(self) -> None:
         rec = recommendation(
-            stage=StageKey.TAILOR,
-            provider="anthropic",
-            recommended="claude-sonnet-5-5",
-            economy="claude-haiku-5-5",
+            scope="anthropic", provider="anthropic", model="claude-sonnet-5-5"
         )
         assert (
             "anthropic / tailor: claude-opus-5-5 → claude-sonnet-5-5"
             in self._suggested(rec)
         )
 
-    def test_a_recommendation_equal_to_the_profile_is_not_listed(self) -> None:
+    def test_a_best_model_equal_to_the_profile_is_not_listed(self) -> None:
         rec = recommendation(
-            stage=StageKey.TAILOR,
-            provider="anthropic",
-            recommended="claude-opus-5-5",
-            economy="claude-haiku-5-5",
+            scope="anthropic", provider="anthropic", model="claude-opus-5-5"
         )
         assert "→" not in self._suggested(rec)
 
-    def test_economy_profiles_follow_the_economy_choice(self) -> None:
-        rec = recommendation(
-            stage=StageKey.TAILOR,
-            provider="openai",
-            recommended="gpt-6-astra",
-            economy="gpt-6-luna",
-        )
-        suggested = self._suggested(rec)
-        assert "openai-economy / tailor: gpt-6.1-terra → gpt-6-luna" in suggested
+    def test_the_overall_winner_does_not_change_provider_profiles(self) -> None:
+        rec = recommendation(provider="anthropic", model="claude-sonnet-5-5")
+        assert "anthropic / tailor" not in self._suggested(rec)
 
-    def test_the_base_profile_follows_the_recommended_choice(self) -> None:
-        rec = recommendation(
-            stage=StageKey.TAILOR,
-            provider="openai",
-            recommended="gpt-6.1-terra",
-            economy="gpt-6.1-terra",
-        )
+    def test_economy_profiles_are_left_alone(self) -> None:
+        rec = recommendation(scope="openai", model="gpt-6-luna")
         suggested = self._suggested(rec)
-        assert "openai / tailor: gpt-6-astra → gpt-6.1-terra" in suggested
+        assert "openai / tailor: gpt-6-astra → gpt-6-luna" in suggested
+        assert "openai-economy /" not in suggested
+        assert "Economy profiles" in suggested
 
     def test_only_profiles_of_the_same_provider_are_compared(self) -> None:
         rec = recommendation(
-            stage=StageKey.TAILOR,
-            provider="google",
-            recommended="gemini-3.8-flash",
-            economy="gemini-3.8-flash",
+            scope="google", provider="google", model="gemini-3.8-flash"
         )
         suggested = self._suggested(rec)
         assert "anthropic /" not in suggested
-        assert "openai" not in suggested
+        assert "openai /" not in suggested
 
-    def test_a_stage_without_a_recommendation_is_left_alone(self) -> None:
-        rec = recommendation(
-            stage=StageKey.TAILOR,
-            provider="anthropic",
-            best=None,
-            recommended=None,
-            economy=None,
-            reason="no eligible model",
-        )
+    def test_a_stage_without_a_winner_is_left_alone(self) -> None:
+        rec = recommendation(scope="anthropic", model=None, reason="no eligible model")
         assert "→" not in self._suggested(rec)
 
     def test_with_nothing_to_change_it_says_so(self) -> None:

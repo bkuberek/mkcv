@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
+from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.run_settings import RunSettings
 
 
@@ -20,6 +21,9 @@ class MatrixConfig(BaseModel):
     judge: JudgeConfig
     reference: JudgeConfig
     models: list[MatrixModel]
+    recommendation: RecommendationSettings = Field(
+        default_factory=RecommendationSettings
+    )
 
     @model_validator(mode="after")
     def _models_are_unique(self) -> "MatrixConfig":

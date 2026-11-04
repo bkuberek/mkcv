@@ -29,8 +29,15 @@ class StageSummary(BaseModel):
     latency_p90_s: float | None = None
     median_input_tokens: float | None = None
     median_output_tokens: float | None = None
+    fabrication_rate: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per faithfulness grade, the share of runs with a fabricated claim",
+    )
     eligible: bool = Field(
         description="Completed, valid, and faithful enough to be recommended"
+    )
+    gate_failures: list[str] = Field(
+        default_factory=list, description="The hard gates the model missed"
     )
     self_judged: bool = Field(
         description="A judge from the model's own provider scored it"

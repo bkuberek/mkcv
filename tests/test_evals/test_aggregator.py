@@ -4,6 +4,7 @@ import pytest
 
 from evals.models.eval_record import EvalRecord
 from evals.models.grade import Grade
+from evals.models.recommendation_settings import RecommendationSettings
 from evals.models.stage_summary import StageSummary
 from evals.report.aggregator import aggregate
 from mkcv.core.models.stage_key import StageKey
@@ -193,7 +194,7 @@ class TestPrimaryScore:
 
 
 class TestEligibility:
-    """Design 9.9: ok_rate and schema 0.95, faithfulness 0.95 and 0.90."""
+    """The hard gates: ok rate, schema, and faithfulness in every run."""
 
     def test_a_clean_run_is_eligible(self) -> None:
         records = [record(grades=_tailor_grades())]
@@ -237,6 +238,16 @@ class TestEligibility:
         records = [record(grades=_tailor_grades(judge=0.9))]
         assert _one(records).eligible is True
 
+    def test_the_gate_failures_name_each_missed_gate(self) -> None:
+        records = [record(grades=_tailor_grades(schema=0.9, judge=0.5))]
+        assert _one(records).gate_failures == [
+            "schema below 0.95",
+            "faithfulness_judge below 0.9",
+        ]
+
+    def test_an_eligible_model_has_no_gate_failures(self) -> None:
+        assert _one([record(grades=_tailor_grades())]).gate_failures == []
+
     def test_a_stage_without_faithfulness_grades_needs_only_ok_rate_and_schema(
         self,
     ) -> None:
@@ -253,6 +264,63 @@ class TestEligibility:
 
     def test_a_missing_schema_grade_is_not_eligible(self) -> None:
         assert _one([record(grades=[])]).eligible is False
+
+
+class TestFabricationGate:
+    """A model that fabricates in any run is not eligible, whatever its mean."""
+
+    def _runs(
+        self, *passes: bool, name: str = "faithfulness_extraction"
+    ) -> list[EvalRecord]:
+        return [
+            record(
+                repeat=i,
+                grades=[
+                    grade("schema", 1.0),
+                    grade(name, 1.0 if passed else 0.98, passed=passed),
+                ],
+            )
+            for i, passed in enumerate(passes)
+        ]
+
+    def test_one_fabricating_run_in_twenty_is_not_eligible(self) -> None:
+        summary = _one(self._runs(*[True] * 19, False))
+        assert summary.mean["faithfulness_extraction"] > 0.95
+        assert summary.eligible is False
+
+    def test_the_fabrication_rate_is_the_share_of_failing_runs(self) -> None:
+        summary = _one(self._runs(True, True, True, False))
+        assert summary.fabrication_rate == {"faithfulness_extraction": 0.25}
+
+    def test_the_gate_failure_gives_the_rate(self) -> None:
+        summary = _one(self._runs(True, False))
+        assert summary.gate_failures == [
+            "faithfulness_extraction: fabricated in 50% of runs (max 0%)"
+        ]
+
+    def test_the_judge_faithfulness_grade_is_gated_the_same_way(self) -> None:
+        summary = _one(self._runs(True, False, name="faithfulness_judge"))
+        assert summary.eligible is False
+
+    def test_runs_that_never_fabricate_pass_the_gate(self) -> None:
+        assert _one(self._runs(True, True)).eligible is True
+
+    def test_a_higher_limit_tolerates_some_fabrication(self) -> None:
+        settings = RecommendationSettings(max_fabrication_rate=0.25)
+        [summary] = aggregate(self._runs(True, True, True, False), settings)
+        assert summary.eligible is True
+
+    def test_grades_that_say_nothing_about_passing_are_not_counted(self) -> None:
+        records = [
+            record(grades=[grade("schema", 1.0), grade("faithfulness_extraction", 1.0)])
+        ]
+        assert _one(records).fabrication_rate == {}
+
+    def test_other_grades_have_no_fabrication_rate(self) -> None:
+        records = [
+            record(grades=[grade("schema", 1.0), grade("ats_rules", 0.5, passed=False)])
+        ]
+        assert _one(records).fabrication_rate == {}
 
 
 class TestSelfJudged:

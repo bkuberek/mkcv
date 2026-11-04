@@ -69,8 +69,9 @@ def write_report_files(out_dir: Path) -> None:
     """
     records = read_records(out_dir)
     manifest = read_manifest(out_dir)
-    summaries = aggregate(records)
-    recommendations = recommend(summaries)
+    settings = manifest.matrix.recommendation
+    summaries = aggregate(records, settings)
+    recommendations = recommend(summaries, tie_epsilon=settings.tie_epsilon)
     (out_dir / SUMMARY_FILE).write_text(
         json.dumps([s.model_dump(mode="json") for s in summaries], indent=2) + "\n",
         encoding="utf-8",

@@ -63,7 +63,7 @@ class TestWriteReportFiles:
     def test_the_report_recommends_the_only_eligible_model(self, run_dir: Path) -> None:
         write_report_files(run_dir)
         assert (
-            "| tailor | openai | gpt-6.1-sol | gpt-6.1-sol | gpt-6.1-sol |"
+            "| tailor | openai/gpt-6.1-sol | 0.80 | gpt-6.1-sol (0.80) |"
             in (run_dir / "report.md").read_text()
         )
 

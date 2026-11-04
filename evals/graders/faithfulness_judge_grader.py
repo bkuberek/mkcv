@@ -14,7 +14,6 @@ from evals.models.faithfulness_judgement import FaithfulnessJudgement
 from evals.models.faithfulness_verdict import FaithfulnessVerdict
 from evals.models.grade import Grade
 
-PASS_THRESHOLD = 0.9
 PARTIAL_CREDIT = 0.5
 MAX_EVIDENCE_CHARS = 300
 
@@ -23,9 +22,11 @@ class FaithfulnessJudgeGrader:
     """A judge's verdict, bullet by bullet, on the tailored content (stage 3).
 
     A supported bullet scores 1, a partial one 0.5, an unsupported one 0; the
-    grade is their mean over all bullets and passes at 0.9. A bullet the judge
-    gave no verdict counts as unsupported. Returns None without a judge or
-    without bullets, and makes no call in either case.
+    grade is their mean over all bullets. It passes only when no bullet is
+    unsupported, so ``passed`` is False for any fabricated claim (an
+    embellished, partial bullet lowers the score but does not fail it). A
+    bullet the judge gave no verdict counts as unsupported. Returns None
+    without a judge or without bullets, and makes no call in either case.
     """
 
     name = "faithfulness_judge"
@@ -49,14 +50,12 @@ class FaithfulnessJudgeGrader:
             credit[verdicts[i].verdict] if i in verdicts else 0.0
             for i in range(1, len(bullets) + 1)
         ) / len(bullets)
+        unsupported = _unsupported(bullets, verdicts)
         return Grade(
             name=self.name,
             score=score,
-            passed=score >= PASS_THRESHOLD,
-            details={
-                **judge_details(ctx),
-                "unsupported": _unsupported(bullets, verdicts),
-            },
+            passed=not unsupported,
+            details={**judge_details(ctx), "unsupported": unsupported},
         )
 
 

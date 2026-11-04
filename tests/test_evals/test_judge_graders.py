@@ -248,21 +248,23 @@ class TestFaithfulnessJudge:
         grade = await _grade(self.grader, _judged(StageKey.TAILOR, _tailored(4), judge))
         assert (grade.score, grade.passed) == (1.0, True)
 
-    async def test_a_score_of_exactly_point_nine_passes(self) -> None:
+    async def test_one_unsupported_bullet_in_ten_fails(self) -> None:
         verdicts = _verdicts(*["supported"] * 9, "unsupported")
         grade = await _grade(
             self.grader,
             _judged(StageKey.TAILOR, _tailored(10), RecordingJudge(verdicts)),
         )
-        assert (grade.score, grade.passed) == (0.9, True)
+        assert (grade.score, grade.passed) == (0.9, False)
 
-    async def test_a_score_below_point_nine_fails(self) -> None:
-        verdicts = _verdicts(*["supported"] * 8, "unsupported", "unsupported")
-        grade = await _grade(
-            self.grader,
-            _judged(StageKey.TAILOR, _tailored(10), RecordingJudge(verdicts)),
-        )
-        assert (grade.score, grade.passed) == (0.8, False)
+    async def test_embellished_bullets_lower_the_score_but_pass(self) -> None:
+        judge = RecordingJudge(_verdicts(*["partial"] * 4))
+        grade = await _grade(self.grader, _judged(StageKey.TAILOR, _tailored(4), judge))
+        assert (grade.score, grade.passed) == (0.5, True)
+
+    async def test_a_bullet_without_a_verdict_fails(self) -> None:
+        judge = RecordingJudge(_verdicts("supported", "supported", "supported"))
+        grade = await _grade(self.grader, _judged(StageKey.TAILOR, _tailored(4), judge))
+        assert grade.passed is False
 
     async def test_a_bullet_the_judge_skipped_counts_as_unsupported(self) -> None:
         judge = RecordingJudge(_verdicts("supported", "supported"))
