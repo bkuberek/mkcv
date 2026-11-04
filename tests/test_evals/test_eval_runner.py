@@ -606,6 +606,68 @@ class TestFiles:
         assert manifest.judge == JUDGE
         assert manifest.cases == ["alpha-match", "alpha-probe"]
 
+    async def test_the_run_ends_with_all_four_files(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        install_adapter(canned_stub)
+        await make_runner().run(_matrix([STUB], [StageKey.ANALYZE]), cases)
+        files = sorted(p.name for p in (tmp_path / "out").iterdir() if p.is_file())
+        assert files == ["report.md", "results.jsonl", "run.json", "summary.json"]
+
+    async def test_the_summary_describes_the_records_of_the_run(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        install_adapter(canned_stub)
+        await make_runner().run(
+            _matrix([STUB], [StageKey.ANALYZE], repeats=2), cases[:1]
+        )
+        [summary] = json.loads((tmp_path / "out" / "summary.json").read_text())
+        assert (summary["stage"], summary["provider"], summary["n"]) == (
+            "analyze",
+            "stub",
+            2,
+        )
+
+    async def test_the_report_names_the_run(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        install_adapter(canned_stub)
+        await make_runner().run(_matrix([STUB], [StageKey.ANALYZE]), cases[:1])
+        report = (tmp_path / "out" / "report.md").read_text()
+        assert report.startswith(f"# mkcv eval report: {RUN_ID}")
+
+    async def test_the_report_sees_the_finished_manifest(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        cases: list[EvalCase],
+        canned_stub: StubLLMAdapter,
+        install_adapter: Callable[[LLMPort], LLMPort],
+        tmp_path: Path,
+    ) -> None:
+        install_adapter(canned_stub)
+        await make_runner().run(
+            _matrix([STUB], [StageKey.ANALYZE]),
+            cases[:1],
+            skipped_models=["openai/gpt-6.1-sol: no API key"],
+        )
+        report = (tmp_path / "out" / "report.md").read_text()
+        assert "openai/gpt-6.1-sol: no API key" in report
+
     async def test_run_json_records_when_the_run_finished(
         self,
         make_runner: Callable[..., EvalRunner],
@@ -720,7 +782,7 @@ class TestFiles:
         await make_runner().run(matrix, cases[:1])
         assert lines_seen == [0, 1, 2]
 
-    async def test_no_models_still_writes_both_files(
+    async def test_no_models_still_writes_every_file(
         self,
         make_runner: Callable[..., EvalRunner],
         cases: list[EvalCase],
@@ -736,6 +798,8 @@ class TestFiles:
         assert records == []
         assert (tmp_path / "out" / "results.jsonl").read_text() == ""
         assert (tmp_path / "out" / "run.json").is_file()
+        assert json.loads((tmp_path / "out" / "summary.json").read_text()) == []
+        assert "No results" in (tmp_path / "out" / "report.md").read_text()
 
 
 class TestConcurrency:

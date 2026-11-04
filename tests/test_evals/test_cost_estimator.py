@@ -215,6 +215,13 @@ class TestJudgeCost:
         )
 
 
+class TestNothingToRun:
+    def test_a_matrix_with_no_models_costs_nothing(self) -> None:
+        matrix = _matrix([StageKey.TAILOR]).model_copy(update={"models": []})
+        estimate = estimate_matrix_cost(matrix, [_case()], ModelCatalog.builtin())
+        assert (estimate.total_usd, estimate.is_partial) == (0.0, False)
+
+
 class TestJudgeSkipped:
     """A judge without credentials makes no calls, so it costs nothing."""
 

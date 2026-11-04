@@ -115,13 +115,15 @@ class TestRun:
     def test_a_run_with_yes_exits_zero(self, run: Callable[..., int]) -> None:
         assert run() == 0
 
-    def test_it_writes_results_and_the_manifest(
+    def test_it_writes_the_results_the_manifest_the_summary_and_the_report(
         self, run: Callable[..., int], out_dir: Path
     ) -> None:
         run()
         assert sorted(p.name for p in out_dir.iterdir() if p.is_file()) == [
+            "report.md",
             "results.jsonl",
             "run.json",
+            "summary.json",
         ]
 
     def test_it_records_every_planned_stage_run(
@@ -156,6 +158,12 @@ class TestRun:
     ) -> None:
         run()
         assert str(out_dir) in capsys.readouterr().out
+
+    def test_it_prints_where_the_report_is(
+        self, run: Callable[..., int], out_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run()
+        assert f"Report: {out_dir / 'report.md'}" in capsys.readouterr().out
 
     def test_failed_records_do_not_change_the_exit_code(
         self,
@@ -562,13 +570,6 @@ class TestBootstrapReference:
         assert "alpha-probe" not in capsys.readouterr().out
 
 
-def test_unfinished_report_command_is_still_registered(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert main(["report"]) == 2
-    assert "not implemented yet" in capsys.readouterr().err
-
-
 def test_the_run_id_default_uses_the_current_time(
     run: Callable[..., int], out_dir: Path
 ) -> None:
@@ -746,3 +747,141 @@ class TestLogging:
     ) -> None:
         assert main([command, "--help"]) == 0
         assert "--verbose" in capsys.readouterr().out
+
+
+def test_runs_are_published_where_git_keeps_them() -> None:
+    from evals.cli import PUBLISHED_DIR
+
+    expected = Path(__file__).resolve().parents[2] / "evals" / "results" / "published"
+    assert expected == PUBLISHED_DIR
+
+
+class TestReport:
+    """``report DIR`` rebuilds the summary and report; ``--publish`` shares a run."""
+
+    @pytest.fixture
+    def finished_run(self, run: Callable[..., int], out_dir: Path) -> Path:
+        run()
+        (out_dir / "summary.json").unlink()
+        (out_dir / "report.md").unlink()
+        return out_dir
+
+    def test_it_rebuilds_the_summary_and_the_report(
+        self, finished_run: Path, make_settings: Callable[..., Dynaconf]
+    ) -> None:
+        assert main(["report", str(finished_run)], config=make_settings()) == 0
+        assert (finished_run / "summary.json").is_file()
+        assert (finished_run / "report.md").is_file()
+
+    def test_it_says_what_it_wrote(
+        self,
+        finished_run: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        main(["report", str(finished_run)], config=make_settings())
+        assert str(finished_run / "report.md") in capsys.readouterr().out
+
+    def test_without_publish_nothing_is_copied(
+        self,
+        finished_run: Path,
+        make_settings: Callable[..., Dynaconf],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        published = tmp_path / "published"
+        monkeypatch.setattr("evals.cli.PUBLISHED_DIR", published)
+        main(["report", str(finished_run)], config=make_settings())
+        assert not published.exists()
+
+    def test_publish_copies_the_four_files_without_the_raw_outputs(
+        self,
+        finished_run: Path,
+        make_settings: Callable[..., Dynaconf],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        published = tmp_path / "published"
+        monkeypatch.setattr("evals.cli.PUBLISHED_DIR", published)
+        code = main(["report", str(finished_run), "--publish"], config=make_settings())
+        [destination] = published.iterdir()
+        assert code == 0
+        assert destination.name == _manifest(finished_run).run_id
+        assert sorted(p.name for p in destination.iterdir()) == [
+            "report.md",
+            "results.jsonl",
+            "run.json",
+            "summary.json",
+        ]
+
+    def test_publish_says_where_the_run_went(
+        self,
+        finished_run: Path,
+        make_settings: Callable[..., Dynaconf],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr("evals.cli.PUBLISHED_DIR", tmp_path / "published")
+        main(["report", str(finished_run), "--publish"], config=make_settings())
+        assert str(tmp_path / "published" / _manifest(finished_run).run_id) in (
+            capsys.readouterr().out
+        )
+
+    def test_a_directory_without_results_exits_two(
+        self,
+        tmp_path: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert main(["report", str(tmp_path)], config=make_settings()) == 2
+        assert "results.jsonl" in capsys.readouterr().err
+
+    def test_the_directory_is_required(
+        self, make_settings: Callable[..., Dynaconf]
+    ) -> None:
+        assert main(["report"], config=make_settings()) == 2
+
+
+class TestOfflineRunWithoutKeys:
+    """T17 acceptance: with every key absent the run skips models and still reports."""
+
+    def test_it_exits_zero_skips_every_model_and_writes_the_four_files(
+        self,
+        fixtures: Path,
+        out_dir: Path,
+        tmp_path: Path,
+        make_settings: Callable[..., Dynaconf],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        matrix = tmp_path / "keyed.toml"
+        matrix.write_text(
+            STUB_MATRIX.replace(
+                '[[models]]\nprovider = "stub"\nmodel = "stub-model"',
+                '[[models]]\nprovider = "openai"\nmodel = "gpt-6.1-sol"\n\n'
+                '[[models]]\nprovider = "google"\nmodel = "gemini-4-argon"',
+            ),
+            encoding="utf-8",
+        )
+        argv = [
+            "run",
+            "--matrix",
+            str(matrix),
+            "--fixtures",
+            str(fixtures),
+            "--out",
+            str(out_dir),
+            "--yes",
+        ]
+        assert main(argv, config=make_settings()) == 0
+        assert sorted(p.name for p in out_dir.iterdir() if p.is_file()) == [
+            "report.md",
+            "results.jsonl",
+            "run.json",
+            "summary.json",
+        ]
+        captured = capsys.readouterr()
+        assert "skipping openai/gpt-6.1-sol" in captured.err
+        assert "skipping google/gemini-4-argon" in captured.err
+        assert "Total: $0.0000" in captured.out
+        assert "No results" in (out_dir / "report.md").read_text()

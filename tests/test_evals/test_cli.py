@@ -287,15 +287,6 @@ class TestEstimate:
         assert (code, "n/a" in capsys.readouterr().out) == (0, False)
 
 
-class TestUnfinishedCommands:
-    @pytest.mark.parametrize("command", ["report"])
-    def test_prints_not_implemented_and_exits_two(
-        self, command: str, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        code = main([command])
-        assert (code, "not implemented yet" in capsys.readouterr().err) == (2, True)
-
-
 class TestUsage:
     def test_no_command_exits_two(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert main([]) == 2

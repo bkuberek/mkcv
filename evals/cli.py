@@ -2,8 +2,7 @@
 
 Exit codes: 0 on success (even when individual records failed), 1 when
 ``bootstrap-reference`` could not produce a case, and 2 when the command did
-not start because of bad input, bad configuration, a missing confirmation, or
-an unfinished command.
+not start because of bad input, bad configuration, or a missing confirmation.
 """
 
 import argparse
@@ -21,6 +20,7 @@ from evals.harness.cost_estimator import estimate_matrix_cost
 from evals.harness.credentials import split_by_credentials
 from evals.harness.judge_factory import judge_unavailable_reason
 from evals.harness.logging_setup import configure_logging
+from evals.harness.run_files import REPORT_FILE
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import DEFAULT_FIXTURES_DIR, REFERENCE_FILES, EvalCase
 from evals.models.eval_record import EvalRecord
@@ -30,6 +30,7 @@ from evals.models.matrix_model import MatrixModel
 from evals.models.matrix_overrides import MatrixOverrides
 from evals.models.reference_outcome import ReferenceOutcome
 from evals.models.run_settings import RunSettings
+from evals.report.report_writer import publish_run, write_report_files
 from mkcv.core.exceptions.base import MkcvError
 from mkcv.core.models.stage_key import PIPELINE_STAGES, StageKey
 
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
 EVALS_DIR = Path(__file__).resolve().parent
 DEFAULT_MATRIX = EVALS_DIR / "config" / "matrix.toml"
 DEFAULT_RESULTS_DIR = EVALS_DIR / "results"
+PUBLISHED_DIR = DEFAULT_RESULTS_DIR / "published"
 EXIT_FAILED = 1
 EXIT_USAGE = 2
 MAX_ERROR_CHARS = 160
@@ -114,7 +116,13 @@ def _build_parser() -> argparse.ArgumentParser:
     report = commands.add_parser(
         "report", help="rebuild summary.json and report.md from a results directory"
     )
-    report.set_defaults(handler=_not_implemented("report"))
+    report.add_argument("dir", type=Path, help="a run's output directory")
+    report.add_argument(
+        "--publish",
+        action="store_true",
+        help="copy the run's result files to evals/results/published/<run id>",
+    )
+    report.set_defaults(handler=_report)
 
     bootstrap = commands.add_parser(
         "bootstrap-reference",
@@ -258,6 +266,15 @@ def _run(args: argparse.Namespace, config: "Configuration") -> int:
     runner = EvalRunner(config, out_dir=out_dir, run_id=run_id, on_record=_progress)
     records = asyncio.run(runner.run(effective, cases, skipped_models=skipped))
     _out(_run_summary(records, out_dir))
+    _out(_report_line(out_dir))
+    return 0
+
+
+def _report(args: argparse.Namespace, config: "Configuration") -> int:
+    write_report_files(args.dir)
+    _out(_report_line(args.dir))
+    if args.publish:
+        _out(f"Published to {publish_run(args.dir, PUBLISHED_DIR)}")
     return 0
 
 
@@ -289,13 +306,6 @@ def _bootstrap_reference(args: argparse.Namespace, config: "Configuration") -> i
         "facts before committing."
     )
     return EXIT_FAILED if any(o.status == "error" for o in outcomes) else 0
-
-
-def _not_implemented(name: str) -> _Handler:
-    def handler(args: argparse.Namespace, config: "Configuration") -> int:
-        return _fail(f"{name} is not implemented yet")
-
-    return handler
 
 
 def _load_plan(
@@ -403,6 +413,10 @@ def _progress(record: EvalRecord) -> None:
     if record.error:
         line += f" ({' '.join(record.error.split())[:MAX_ERROR_CHARS]})"
     _out(line)
+
+
+def _report_line(out_dir: Path) -> str:
+    return f"Report: {out_dir / REPORT_FILE}"
 
 
 def _run_summary(records: Sequence[EvalRecord], out_dir: Path) -> str:

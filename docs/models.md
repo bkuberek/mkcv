@@ -11,7 +11,7 @@ or an API key to check.
 > **Every recommendation here is provisional.** The model choices come from
 > vendors' published positioning and prices (retrieved 2026-11-03), not from
 > measurements on mkcv's own pipeline. `mkcv models` says so in its header:
-> `provisional: not yet backed by an eval run`. See [Evidence](#evidence).
+> `provisional: not yet backed by an eval run`. See [How recommendations are made](#how-recommendations-are-made).
 
 ## Providers
 
@@ -309,19 +309,44 @@ you can correct them for a model that behaves differently.
   estimate is high until then. Claude Haiku 5.5 bills prompts over 100,000
   tokens at the higher $0.50/$2.50 rate, which a long knowledge base can hit.
 
-## Evidence
+## How recommendations are made
 
-A profile is **provisional** until an eval run backs it. The recommendations
-above follow vendor positioning and price. They do not come from scoring the
-models on mkcv's own pipeline, and quality tiers outside Anthropic are
-judgements.
+A profile is **provisional** until an eval run backs it, and every profile in
+this document is provisional today. The recommendations above follow vendor
+positioning and price. They do not come from scoring the models on mkcv's own
+pipeline, and quality tiers outside Anthropic are judgements.
 
-An offline eval harness is planned to replace judgement with measurement: it
-runs each pipeline stage in isolation across a matrix of models on synthetic
-fixtures, grades the outputs (schema, ATS rules, keyword recall, faithfulness,
-and a judge model for the subjective parts), and writes a report with
-suggested profile changes. The maintainer applies those by hand, and the
-profile then reports `eval-backed: <run>` instead of `provisional`. Until the
+The eval harness in the repository's top-level `evals/` directory (not shipped
+with the package; see [evals/README.md](../evals/README.md)) replaces judgement
+with measurement. It runs each of the five resume pipeline stages on its own,
+with the same reference input for every model, across a matrix of models on
+synthetic personas and job descriptions. Each output is graded by rules
+(schema, ATS rules, keyword recall, and whether every number, employer, title,
+and skill traces back to the knowledge base) and, for the subjective parts, by
+a judge model. Faithfulness, meaning no fact that is absent from the knowledge
+base, is the metric that matters most for a resume.
+
+A model is **eligible** for a stage only if at least 95% of its runs completed,
+at least 95% of its outputs had the stage's shape, and, where the stage has
+them, its deterministic faithfulness score is at least 0.95 and its judged one
+at least 0.90. For each stage and provider the report then names:
+
+- **best**: the eligible model with the highest quality score on the stage's
+  primary metric (ties go to the cheaper model, then the faster one).
+- **recommended**: the cheapest eligible model whose score is within 0.05 of the
+  best.
+- **economy**: the cheapest eligible model scoring at least 0.70.
+
+The report ends with the profile changes those results suggest. They are never
+applied automatically: the maintainer edits
+`src/mkcv/core/catalog/builtin_model_profiles.py` (setting `evidence="eval"` and
+the run's ID) and this document, citing the published report under
+`evals/results/published/<run id>/`. A profile that has been updated this way
+reports `eval-backed: <run>` in `mkcv models` instead of `provisional`.
+
+Read an eval-backed row with its caveats in mind: a judge from the same provider
+as the evaluated model may favour it (the report marks those rows as
+self-judged), and a row with fewer than six runs is a low sample. Until the
 first run, treat every recommendation here as a reasonable default, not a
 benchmark result.
 

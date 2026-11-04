@@ -219,6 +219,15 @@ Providers are data. Nothing in `adapters/factory.py` dispatches on a provider na
 Profiles in `src/mkcv/core/catalog/builtin_model_profiles.py` are provisional
 until an eval run backs them. Document any change in [`models.md`](models.md).
 
+### Evaluating Models
+
+The `evals/` directory holds an offline harness that scores models on each
+pipeline stage and suggests profile changes. It is not part of the installed
+package and never runs in CI beyond its unit tests, which use stub providers.
+Run it with `uv run python -m evals --help`; `evals/README.md` explains the
+keys it needs, what a run costs, how to read the report, and how to apply the
+results.
+
 ## Reference Documentation
 
 - [Architecture spec](specs/architecture.md)

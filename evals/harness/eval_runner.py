@@ -14,6 +14,7 @@ from evals.graders.grader import Grader
 from evals.graders.grading_context import GradingContext
 from evals.graders.stage_graders import STAGE_GRADERS
 from evals.harness.judge_factory import create_judge, judge_unavailable_reason
+from evals.harness.run_files import MANIFEST_FILE, RESULTS_FILE
 from evals.harness.stage_run import StageRun
 from evals.harness.stage_runner import StageRunner, work_dir_for
 from evals.models.eval_case import REFERENCE_FILES, EvalCase
@@ -22,6 +23,7 @@ from evals.models.grade import Grade
 from evals.models.matrix_config import MatrixConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.run_manifest import RunManifest
+from evals.report.report_writer import write_report_files
 from mkcv.adapters.factory import create_provider_registry
 from mkcv.adapters.llm.provider_registry import ProviderRegistry
 from mkcv.config.configuration import Configuration
@@ -34,8 +36,6 @@ if TYPE_CHECKING:
     from evals.models.judge_config import JudgeConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RESULTS_FILE = "results.jsonl"
-MANIFEST_FILE = "run.json"
 
 
 def new_run_id(now: datetime, git_sha: str | None) -> str:
@@ -85,7 +85,8 @@ class EvalRunner:
     its results and manifest on disk.
 
     The judge is created once per run. Without credentials for its provider
-    the run goes on without judge grades and the manifest says why.
+    the run goes on without judge grades and the manifest says why. When the
+    records are in, ``summary.json`` and ``report.md`` are written beside them.
     """
 
     def __init__(
@@ -145,6 +146,7 @@ class EvalRunner:
 
         finished = manifest.model_copy(update={"finished_at": datetime.now(UTC)})
         self._write_manifest(finished)
+        write_report_files(self._out_dir)
         return records
 
     async def _run_job(

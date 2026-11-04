@@ -77,7 +77,7 @@ def estimate_matrix_cost(
         judge_calls,
     )
     known_costs = [*model_costs.values(), *([judge_cost] if judge_calls else [])]
-    total, is_partial = summarize_costs(known_costs)
+    total, is_partial = summarize_costs(known_costs) if known_costs else (0.0, False)
     return CostEstimate(
         runs_per_model=len(runs) * repeats,
         model_costs=model_costs,
