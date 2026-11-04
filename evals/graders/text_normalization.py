@@ -2,14 +2,26 @@
 
 import re
 from collections.abc import Iterator
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 NUMBER = re.compile(
-    r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?\s?(?:%|percent|x|k|m|b)?(?![\w])",
+    r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?\s?"
+    r"(?:%|percent|x|thousand|million|billion|mn|bn|k|m|b)?(?![\w])",
     re.IGNORECASE,
 )
+_SCALES = {
+    "k": Decimal(1_000),
+    "thousand": Decimal(1_000),
+    "m": Decimal(1_000_000),
+    "mn": Decimal(1_000_000),
+    "million": Decimal(1_000_000),
+    "b": Decimal(1_000_000_000),
+    "bn": Decimal(1_000_000_000),
+    "billion": Decimal(1_000_000_000),
+}
+_VALUE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*([a-z%]*)")
 ISO_DATE = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
-NUMBER_UNITS = "%xkmb"
 COMPANY_SUFFIXES = frozenset({"inc", "llc", "ltd", "corp", "co"})
 _NON_WORD_RUNS = re.compile(r"[\W_]+")
 
@@ -24,29 +36,38 @@ def extract_numbers(text: str, *, skip_dates: bool = True) -> list[str]:
     return [match.group().strip().rstrip(",") for match in NUMBER.finditer(cleaned)]
 
 
-def normalize_number(raw: str) -> str:
-    """Return ``raw`` without ``$``, commas, or spaces, lowercase, with ``%``."""
-    squeezed = re.sub(r"\s+", "", raw.lower())
-    return squeezed.replace("$", "").replace(",", "").replace("percent", "%")
+def number_values(token: str) -> set[Decimal]:
+    """Return the quantities a number as written can stand for.
+
+    That is its value with any scale applied (``9.8k`` and ``9,800`` are both
+    9800, ``$1.2M`` and ``1.2 million`` both 1,200,000) and the bare digits
+    as written (9.8, 1.2), so a figure the knowledge base gives with a
+    different scale word still matches. Thousands separators, ``$``, and the
+    ``%`` or ``x`` unit are ignored. Empty when ``token`` has no digits.
+    """
+    match = _VALUE.search(token.lower())
+    if match is None:
+        return set()
+    try:
+        digits = Decimal(match.group(1).replace(",", ""))
+    except InvalidOperation:
+        return set()
+    scale = _SCALES.get(match.group(2), Decimal(1))
+    return {digits, digits * scale}
 
 
-def bare_digits(normalized: str) -> str:
-    """Return a normalized number without its unit (``2.4m`` becomes ``2.4``)."""
-    return normalized.rstrip(NUMBER_UNITS)
-
-
-def supported_numbers(text: str) -> set[str]:
-    """Return the numbers in ``text`` (dates included), with and without units."""
-    normalized = {
-        normalize_number(token) for token in extract_numbers(text, skip_dates=False)
+def supported_numbers(text: str) -> set[Decimal]:
+    """Return every quantity the numbers in ``text`` (dates included) stand for."""
+    return {
+        value
+        for token in extract_numbers(text, skip_dates=False)
+        for value in number_values(token)
     }
-    return normalized | {bare_digits(number) for number in normalized}
 
 
-def is_supported_number(token: str, supported: set[str]) -> bool:
-    """Return True if ``token`` (as written) is among ``supported`` numbers."""
-    normalized = normalize_number(token)
-    return normalized in supported or bare_digits(normalized) in supported
+def is_supported_number(token: str, supported: set[Decimal]) -> bool:
+    """Return True if ``token`` (as written) states a quantity in ``supported``."""
+    return bool(number_values(token) & supported)
 
 
 def normalize_text(text: str) -> str:
