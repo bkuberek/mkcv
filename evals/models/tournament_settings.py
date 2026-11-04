@@ -7,10 +7,11 @@ class TournamentSettings(BaseModel):
     """The two rounds of a run and the rule that eliminates models between them.
 
     Screening runs every model on ``screening_cases`` (plus every review
-    probe) with ``screening_repeats`` repeats and one judge from another
-    provider. A model leaves a stage only when it fails a hard gate or its
-    primary score trails the leader's by more than ``margin`` plus the noise
-    of that lead; the top ``keep_top`` models of each stage and the best
+    probe) with ``screening_repeats`` repeats, graded like the finals by
+    every judge of the panel but the one from the model's own provider. A
+    model leaves a stage only when it fails a hard gate or its primary
+    score trails the leader's by more than ``margin`` plus the noise of that
+    lead; the top ``keep_top`` models of each stage and the best
     ``keep_per_provider`` of each provider always go on. The finals run the
     survivors on every case with the whole judge panel and ``[run] repeats``.
     """

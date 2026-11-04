@@ -375,21 +375,22 @@ class TestTournamentEstimate:
         assert estimate.screening.runs_per_model == 1
         assert set(estimate.screening.model_costs) == {m.label for m in MODELS}
 
-    def test_screening_asks_one_judge_per_model(self) -> None:
+    def test_screening_asks_every_judge_but_the_models_own(self) -> None:
         estimate = estimate_tournament_cost(
             _tournament(), list(self.cases), ModelCatalog.builtin()
         )
         calls = estimate.screening.judge_call_counts
-        assert sum(calls.values()) == len(MODELS) * 2  # tailor: two judge calls
+        assert sum(calls.values()) == len(MODELS) * 2 * 2  # two judges, two calls
 
-    def test_the_screening_judge_is_never_the_models_own_provider(self) -> None:
+    def test_each_judge_screens_the_other_providers_models(self) -> None:
         estimate = estimate_tournament_cost(
             _tournament(), list(self.cases), ModelCatalog.builtin()
         )
-        # two Anthropic models go to Google, four others to Anthropic's judge
+        # each judge scores the four models of the two other providers
         assert estimate.screening.judge_call_counts == {
             "anthropic/claude-opus-5-5": 8,
-            "google/gemini-4-argon": 4,
+            "openai/gpt-6-astra": 8,
+            "google/gemini-4-argon": 8,
         }
 
     def test_the_finals_run_the_assumed_survivors_on_every_case(self) -> None:

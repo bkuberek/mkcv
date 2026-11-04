@@ -26,7 +26,8 @@ cases = ["*"]                       # case IDs or "*"
 preset = "standard"
 
 # Two rounds. Screening runs every model on the cases below (plus every review
-# probe) once, graded by one judge from another provider. A model is dropped
+# probe) once, graded like the finals by every judge but the one from the
+# model's own provider. A model is dropped
 # from a stage only if it fails a hard gate or trails the leader by more than
 # margin plus the noise of that lead; the top keep_top models and the best of
 # each provider always go on. The finals run the survivors on every case with

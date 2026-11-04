@@ -11,7 +11,6 @@ from evals.models.stage_summary import StageSummary
 from evals.models.tournament_settings import TournamentSettings
 from evals.report.recommender import lead_noise
 from evals.stages import stage_position
-from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.stage_key import StageKey
 
 _EPSILON = 1e-9
@@ -49,21 +48,19 @@ def unknown_screening_cases(
     return [name for name in settings.screening_cases if name not in ids]
 
 
-def screening_judge(
-    model: MatrixModel, panel: Sequence[JudgeConfig], catalog: ModelCatalog
-) -> JudgeConfig | None:
-    """Return the one judge that screens ``model``.
+def screening_judges(
+    model: MatrixModel, panel: Sequence[JudgeConfig]
+) -> list[JudgeConfig]:
+    """Return the judges that screen ``model``: the finals' rule.
 
-    It is the cheapest judge (input plus output price) from another provider,
-    earlier in the panel on a tie, so the screening score is never
-    self-judged when the panel allows it. With only judges of the model's own
-    provider, the cheapest of those; with no judge, None.
+    They are every judge of the panel but the one from the model's own
+    provider, and the grade is their mean, so a harsh or lenient judge
+    weighs on every provider alike and no screening score is self-judged.
+    With only judges of the model's own provider, those (the grade is then
+    self-judged); with no judge, none.
     """
     others = [judge for judge in panel if judge.provider != model.provider]
-    candidates = others or list(panel)
-    if not candidates:
-        return None
-    return min(candidates, key=lambda judge: _price(judge, catalog))
+    return others or list(panel)
 
 
 def decide_survivors(
@@ -156,8 +153,3 @@ def _verdict(
 def _rank(summary: StageSummary) -> tuple[bool, float]:
     score = summary.primary_score
     return (not summary.eligible, -score if score is not None else math.inf)
-
-
-def _price(judge: JudgeConfig, catalog: ModelCatalog) -> float:
-    price = catalog.price_for(judge.model, provider=judge.provider)
-    return math.inf if price is None else price[0] + price[1]

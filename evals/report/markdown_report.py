@@ -105,7 +105,7 @@ def _caveats_section(
     ]
     if screening_only:
         lines.append(
-            "- Only the screening round has run: one judge per model and a subset "
+            "- Only the screening round has run: one repeat on a subset "
             "of cases. Run the finals before adopting anything below."
         )
     self_judged = [s for s in summaries if s.self_judged]
@@ -212,7 +212,8 @@ def _tournament_section(decisions: Sequence[ScreeningDecision]) -> list[str]:
         "## Tournament",
         "",
         "Screening ran every model on a subset of cases (and every review "
-        "probe) once, graded by one judge from another provider. A model left "
+        "probe) once, graded like the finals by every judge but the one from "
+        "the model's own provider. A model left "
         "a stage only when it failed a hard gate or trailed the leader by more "
         "than the margin plus the noise of that lead; the top models of each "
         "stage and the best of each provider always went on. The finals ran "

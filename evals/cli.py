@@ -567,7 +567,8 @@ def _tournament_lines(estimate: TournamentEstimate, matrix: MatrixConfig) -> lis
     screening = estimate.screening
     lines = [
         f"Screening: every model, {screening.runs_per_model} run(s) each "
-        f"({settings.screening_repeats} repeat), one judge per model",
+        f"({settings.screening_repeats} repeat), the panel without each "
+        "model's own provider's judge",
         *("  " + line for line in _estimate_lines(screening, case_count=0)[1:]),
         f"Finals: assumed survivors {', '.join(estimate.assumed_survivors)}; "
         f"{estimate.finals.runs_per_model} run(s) each ({matrix.run.repeats} "

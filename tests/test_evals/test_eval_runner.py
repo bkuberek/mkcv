@@ -1177,7 +1177,7 @@ class TestTournament:
             ),
         )
 
-    async def test_screening_runs_the_subset_once_with_one_judge(
+    async def test_screening_runs_the_subset_once_with_the_other_judges(
         self,
         make_runner: Callable[..., EvalRunner],
         tournament_cases: list[EvalCase],
@@ -1196,9 +1196,11 @@ class TestTournament:
             ("alpha-probe", "review"),
         }
         judged = [r for r in records if r.status == "ok"]
-        assert {len(r.judges) for r in judged} == {1}
+        assert {tuple(r.judges) for r in judged} == {
+            ("anthropic/claude-opus-5-5", "openai/gpt-6-astra")
+        }
 
-    async def test_the_screening_judge_comes_from_another_provider(
+    async def test_the_screening_leaves_out_the_models_own_provider(
         self,
         make_runner: Callable[..., EvalRunner],
         tournament_cases: list[EvalCase],

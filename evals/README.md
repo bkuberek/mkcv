@@ -160,8 +160,10 @@ judges agree (within 0.1) and the mean score each judge gave per stage.
 A run has two rounds (`[tournament]`):
 
 1. **Screening.** Every model runs every stage on eight representative cases
-   (`screening_cases`) and every review probe, once, graded by one judge from
-   another provider (the cheapest).
+   (`screening_cases`) and every review probe, once. It is graded by the same
+   rule as the finals: every judge of the panel but the one from the model's
+   own provider, averaged, so a harsh or lenient judge weighs on every
+   provider alike.
 2. **Elimination.** Per stage, a model is eliminated only when it fails a hard
    gate or trails the leader by more than `margin` (0.05) plus the noise of
    that lead. The top `keep_top` (3) models of each stage and the best of each
@@ -221,7 +223,7 @@ before any call is made. Google batches need Vertex AI.
    model of each provider (the survivors are unknown until screening ends),
    and a worst case with no model eliminated, each by provider and with the
    online price beside the batched one. For the shipped matrix and fixtures it
-   is about $177 (worst case about $361), against about $703 for the same
+   is about $195 (worst case about $378), against about $703 for the same
    panel and repeats run online in a single round
    (`estimate --single-round --no-batch --no-cache`). These are planning token
    counts, not measurements; `report.md` shows what the run used.
@@ -297,7 +299,7 @@ before any call is made. Google batches need Vertex AI.
   models.
 - **Caveats**: what weakens the numbers: self-judged rows, rows with fewer
   than six runs, skipped models and judges, failed records, and a run that has
-  only screened.
+  only screened (one repeat on a subset of cases).
 - **Judge panel**: how the panel scores, how often the judges agree, and the
   mean score each judge gave.
 - **Cost**: what each model and judge cost as sent, beside the online price.

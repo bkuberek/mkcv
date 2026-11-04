@@ -473,9 +473,10 @@ provider (Anthropic, OpenAI, and Google), averaged. A judge may favour its own
 provider's models, so a model's score leaves out the judge from its own
 provider whenever another judge scored it; a row is marked self-judged only
 when its own provider's judge was the only one. To keep the run affordable, a
-screening round first runs every model on a few representative cases with one
-judge, and drops a model from a stage only if it fails a gate or trails the
-leader by more than a margin plus the noise; the top three of each stage and
+screening round first runs every model once on a few representative cases,
+graded like the finals by every judge but its own provider's, and drops a
+model from a stage only if it fails a gate or trails the leader by more than a
+margin plus the noise; the top three of each stage and
 the best of each provider always reach the finals, which use every case, the
 whole panel, and two repeats. Calls go out as provider batches, and the
 judges' shared prompt prefix is cached; neither changes what a model is asked.

@@ -8,13 +8,12 @@ from evals.harness.tournament import (
     decide_survivors,
     finals_models,
     screening_cases,
-    screening_judge,
+    screening_judges,
     unknown_screening_cases,
 )
 from evals.models.judge_config import JudgeConfig
 from evals.models.matrix_model import MatrixModel
 from evals.models.tournament_settings import TournamentSettings
-from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.stage_key import StageKey
 from tests.test_evals.grading_support import CASE_BY_ID, make_case
 from tests.test_evals.report_support import summary
@@ -92,32 +91,40 @@ class TestScreeningCases:
         assert [c.id for c in chosen] == ["a", "letter-probe"]
 
 
-class TestScreeningJudge:
-    catalog = ModelCatalog.builtin()
+class TestScreeningJudges:
+    """Screening uses the finals' rule: every judge but the model's own provider's."""
 
-    def test_it_is_a_judge_from_another_provider(self) -> None:
+    def test_they_are_the_panel_without_the_models_own_provider(self) -> None:
         model = MatrixModel(provider="openai", model="gpt-6-luna")
-        assert screening_judge(model, PANEL, self.catalog).provider != "openai"
+        assert screening_judges(model, PANEL) == [PANEL[0], PANEL[2]]
 
-    def test_it_is_the_cheapest_such_judge(self) -> None:
-        model = MatrixModel(provider="anthropic", model="claude-haiku-5-5")
-        assert screening_judge(model, PANEL, self.catalog).label == (
-            "google/gemini-4-argon"
-        )
+    def test_every_provider_is_judged_by_the_same_rule(self) -> None:
+        judged_by = {
+            provider: [
+                j.provider
+                for j in screening_judges(
+                    MatrixModel(provider=provider, model="m"), PANEL
+                )
+            ]
+            for provider in ("anthropic", "openai", "google")
+        }
+        assert judged_by == {
+            "anthropic": ["openai", "google"],
+            "openai": ["anthropic", "google"],
+            "google": ["anthropic", "openai"],
+        }
 
-    def test_a_tie_on_price_goes_to_the_first_in_the_panel(self) -> None:
-        model = MatrixModel(provider="google", model="gemini-3.8-flash")
-        assert screening_judge(model, PANEL, self.catalog).label == (
-            "anthropic/claude-opus-5-5"
-        )
+    def test_a_model_of_another_provider_gets_the_whole_panel(self) -> None:
+        model = MatrixModel(provider="stub", model="m")
+        assert screening_judges(model, PANEL) == PANEL
 
     def test_with_only_its_own_provider_it_falls_back_to_that_judge(self) -> None:
         model = MatrixModel(provider="openai", model="gpt-6-luna")
-        assert screening_judge(model, PANEL[1:2], self.catalog) == PANEL[1]
+        assert screening_judges(model, PANEL[1:2]) == [PANEL[1]]
 
-    def test_without_judges_there_is_none(self) -> None:
+    def test_without_judges_there_are_none(self) -> None:
         model = MatrixModel(provider="openai", model="gpt-6-luna")
-        assert screening_judge(model, [], self.catalog) is None
+        assert screening_judges(model, []) == []
 
 
 def _decisions(*summaries: object, **settings: object) -> dict[str, object]:

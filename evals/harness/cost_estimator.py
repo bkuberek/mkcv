@@ -4,7 +4,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 
 from evals.graders.stage_graders import judge_calls
-from evals.harness.tournament import screening_cases, screening_judge
+from evals.harness.tournament import screening_cases, screening_judges
 from evals.models.cost_estimate import CostEstimate
 from evals.models.eval_case import EvalCase
 from evals.models.judge_config import JudgeConfig
@@ -133,16 +133,16 @@ def estimate_tournament_cost(
     """Estimate both rounds of a tournament run.
 
     Screening runs every model on the screening cases with the screening
-    repeats, each model's outputs judged by its one screening judge. The
+    repeats, each model's outputs judged by every judge but its own
+    provider's. The
     finals run ``assumed_survivors`` on every case with ``[run] repeats`` and
     the whole panel; the worst case keeps every model.
     """
     available = [j for j in matrix.panel if j.label not in (skipped_judges or {})]
     settings = matrix.tournament
 
-    def one_judge(model: MatrixModel) -> list[JudgeConfig]:
-        chosen = screening_judge(model, available, catalog)
-        return [chosen] if chosen is not None else []
+    def other_judges(model: MatrixModel) -> list[JudgeConfig]:
+        return screening_judges(model, available)
 
     screening_matrix = matrix.model_copy(
         update={
@@ -156,7 +156,7 @@ def estimate_tournament_cost(
             screening_cases(cases, settings),
             catalog,
             skipped_judges=skipped_judges,
-            judges_for=one_judge,
+            judges_for=other_judges,
             discounts=discounts,
         ),
         finals=estimate_matrix_cost(

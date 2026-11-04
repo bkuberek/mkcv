@@ -27,7 +27,7 @@ from evals.harness.tournament import (
     decide_survivors,
     finals_models,
     screening_cases,
-    screening_judge,
+    screening_judges,
 )
 from evals.models.call_usage import CallUsage
 from evals.models.eval_case import REFERENCE_FILES, UPSTREAM_STAGES, EvalCase
@@ -144,10 +144,11 @@ class EvalRunner:
     written beside them.
 
     With ``[tournament]`` enabled the run has two rounds (see
-    ``evals.harness.tournament``): screening, graded by one judge from
-    another provider, then the finals for the survivors with the whole
-    panel. With ``resume`` the records already in ``results.jsonl`` are kept
-    and their runs are not made again.
+    ``evals.harness.tournament``): screening on a few cases, then the
+    finals for the survivors on every case; both are graded by the panel
+    without the judge of the evaluated model's own provider. With
+    ``resume`` the records already in ``results.jsonl`` are kept and their
+    runs are not made again.
     """
 
     def __init__(
@@ -212,7 +213,7 @@ class EvalRunner:
                 records += await self._run_jobs(tools, plan, kept)
             else:
                 if "screening" in rounds:
-                    plan = _screening(matrix, cases, judges, registry.catalog)
+                    plan = _screening(matrix, cases, judges)
                     records += await self._run_jobs(tools, plan, kept)
                 if "finals" in rounds:
                     plan = _finals(matrix, cases, judges, records)
@@ -385,18 +386,14 @@ def _single_round(
 
 
 def _screening(
-    matrix: MatrixConfig,
-    cases: Sequence[EvalCase],
-    judges: tuple[_Judge, ...],
-    catalog: ModelCatalog,
+    matrix: MatrixConfig, cases: Sequence[EvalCase], judges: tuple[_Judge, ...]
 ) -> list[_Job]:
-    """Every model on the screening cases, each graded by one judge."""
+    """Every model on the screening cases, graded by the other providers' judges."""
     by_label = {judge.label: judge for judge in judges}
     configs = [JudgeConfig(provider=j.provider, model=j.model) for j in judges]
     plan: list[_Job] = []
     for model in matrix.models:
-        chosen = screening_judge(model, configs, catalog)
-        own = (by_label[chosen.label],) if chosen is not None else ()
+        own = tuple(by_label[j.label] for j in screening_judges(model, configs))
         for case in screening_cases(cases, matrix.tournament):
             for stage in matrix.run.stages:
                 if not case.applies_to(stage):
