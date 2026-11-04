@@ -69,7 +69,10 @@ def kb_generate_command(
     provider: Annotated[
         str | None,
         cyclopts.Parameter(
-            help=("Override AI provider (anthropic/openai/openrouter/ollama)."),
+            help=(
+                "Run on this provider (anthropic/openai/google/ollama/openrouter "
+                "or a provider from your config)."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -168,7 +171,10 @@ def kb_update_command(
     provider: Annotated[
         str | None,
         cyclopts.Parameter(
-            help=("Override AI provider (anthropic/openai/openrouter/ollama)."),
+            help=(
+                "Run on this provider (anthropic/openai/google/ollama/openrouter "
+                "or a provider from your config)."
+            ),
         ),
     ] = None,
 ) -> None:

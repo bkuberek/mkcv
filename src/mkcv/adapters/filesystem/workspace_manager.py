@@ -93,8 +93,21 @@ profile = "standard"
 # alignment = "justified"
 
 # ── Pipeline ────────────────────────────────────────────────────────
-# Override AI provider/model per stage. The defaults use a smart mix:
-# Haiku for mechanical tasks, Opus for decisions and writing.
+# Which models run each stage comes from a model profile. The default is
+# the "anthropic" profile: Haiku for mechanical tasks, Opus for decisions
+# and writing. Run `mkcv models` to see what every stage will use, and
+# `mkcv models --profiles` to list the profiles. All profiles are
+# provisional: they are not yet backed by an eval run.
+#
+# [default.pipeline]
+# model_profile = "anthropic"   # anthropic, anthropic-economy, openai,
+#                               # openai-economy, google, google-economy, local
+# provider = "anthropic"        # used when model_profile is not set
+# model_warnings = true         # warn about weak or unknown models
+#
+# Per-stage settings below beat the profile; --model-profile and
+# --provider on the command line beat both. A stage that sets only `model`
+# runs on the provider mkcv finds that model under.
 #
 # [default.pipeline.stages.analyze]
 # provider = "anthropic"
@@ -167,8 +180,32 @@ profile = "standard"
 # [default.providers.openai]
 # api_key = ""           # prefer: export OPENAI_API_KEY=sk-...
 #
+# [default.providers.google]
+# api_key = ""           # prefer: export GEMINI_API_KEY=... (or GOOGLE_API_KEY)
+#
 # [default.providers.openrouter]
 # api_key = ""           # prefer: export OPENROUTER_API_KEY=sk-or-...
+#
+# Any OpenAI-compatible endpoint (Groq, Together, vLLM, LM Studio, ...) is
+# a provider too. Name it, then use it in a stage or with --provider.
+#
+# [default.providers.groq]
+# type = "openai-compatible"
+# base_url = "https://api.groq.com/openai/v1"
+# api_key_env = "GROQ_API_KEY"
+
+# ── Model catalog ───────────────────────────────────────────────────
+# Tell mkcv about a model it does not know: its quality tier, prices (USD
+# per 1M tokens), and how it returns structured output. Unknown models
+# still run, with conservative defaults and a warning.
+#
+# [[default.model_catalog]]
+# provider = "groq"
+# match = "llama-3.3-70b-versatile"
+# tier = "efficient"                # minimal, efficient, strong, frontier
+# structured_output = "json_object" # json_schema, tool, json_object, prompt
+# input_price_per_mtok = 0.59
+# output_price_per_mtok = 0.79
 """
 
 _CAREER_MD_TEMPLATE = """\
@@ -327,8 +364,11 @@ def _build_readme() -> str:
         ]
 
     command_help: dict[str, str] = {
+        "cover-letter": "Generate a tailored cover letter",
         "generate": "Generate a tailored resume",
         "init": "Initialize a new workspace",
+        "kb": "Generate or update a knowledge base from documents",
+        "models": "Show the models each stage will use, with costs",
         "render": "Render resume YAML to PDF",
         "status": "Show workspace overview",
         "themes": "List and preview themes",
@@ -420,34 +460,60 @@ mkcv validate resume.yaml --jd job.txt  # Check keyword coverage
 mkcv validate --kb knowledge-base/career.md  # Check KB structure
 mkcv themes                        # List available themes
 mkcv themes --preview sb2nov       # Preview a theme
+mkcv models                        # Models, tiers, and costs per stage
 ```
 
-## Presets
+## Presets and model profiles
 
-Presets control which AI models are used at each pipeline stage. Choose a
-preset based on quality, speed, and cost trade-offs:
+Two independent choices decide what a run does:
 
-| Preset | Models | Best for |
-|--------|--------|----------|
-| `concise` | Haiku for all stages | Fast iteration, short resumes |
-| `standard` | Haiku (mechanical) + Opus (decisions) | Default — balanced quality/cost |
-| `comprehensive` | Opus for all stages | Maximum quality, detailed resumes |
-| `budget` | Ollama (local) | Free, offline, no API key needed |
+- A **preset** (`--preset`) sets how much the resume says.
+- A **model profile** (`--model-profile`) sets which provider and models run
+  each stage.
 
-The **standard** preset uses a smart-mixed allocation: Haiku handles
-mechanical tasks (JD analysis, YAML structuring) while Opus handles
-decisions and writing (experience selection, bullet tailoring, review).
+| Preset | Resume | Models |
+|--------|--------|--------|
+| `concise` | 1 page, highlights only | The economy variant of the profile |
+| `standard` | 1-2 pages, balanced (default) | The profile's recommended models |
+| `comprehensive` | 2+ pages, full career detail | The profile's recommended models |
+| `budget` | 1 page (legacy name) | Ollama (local, free, no API key) |
 
 ```bash
-mkcv generate --jd job.txt --profile concise
-mkcv generate --jd job.txt --profile standard        # default
-mkcv generate --jd job.txt --profile comprehensive
+mkcv generate --jd job.txt --preset concise
+mkcv generate --jd job.txt --preset standard         # default
+mkcv generate --jd job.txt --preset comprehensive
 ```
+
+The default profile is `anthropic`: Haiku for mechanical stages, Opus for
+decisions and writing, Sonnet for YAML. Switch every stage to another
+provider's recommended models with a profile:
+
+```bash
+mkcv generate --jd job.txt --model-profile google
+mkcv generate --jd job.txt --model-profile openai-economy
+mkcv generate --jd job.txt --provider openai         # same as --model-profile openai
+mkcv models                      # see the model, tier, and cost of every stage
+mkcv models --profiles           # list the profiles
+```
+
+Profiles: `anthropic`, `anthropic-economy`, `openai`, `openai-economy`,
+`google`, `google-economy`, `local`. They are provisional recommendations,
+not yet backed by an eval run. To make a profile your default, set
+`pipeline.model_profile` in `mkcv.toml`:
+
+```toml
+[default.pipeline]
+model_profile = "google"
+```
+
+A stage that you configure yourself (see below) beats the profile, and
+`--model-profile` or `--provider` on the command line beat both. mkcv warns
+before a run when a stage uses a weak or unknown model.
 
 ### Using OpenRouter
 
-To use [OpenRouter](https://openrouter.ai), set the API key and configure
-your `mkcv.toml`:
+OpenRouter has no model profile, so name the model for each stage. Set the
+API key and configure your `mkcv.toml`:
 
 ```toml
 [default.pipeline.stages.analyze]
@@ -475,7 +541,7 @@ Configuration is resolved in layers (highest priority wins):
 | 2 | Global user config | `~/.config/mkcv/settings.toml` |
 | 3 | Workspace config | `mkcv.toml` (this file) |
 | 4 | Environment variables | `MKCV_` prefix (e.g. `MKCV_RENDERING__THEME`) |
-| 5 | CLI flags | `--theme`, `--profile`, etc. |
+| 5 | CLI flags | `--theme`, `--preset`, `--model-profile`, etc. |
 
 ### Section reference
 
@@ -485,11 +551,13 @@ Configuration is resolved in layers (highest priority wins):
 | `[default.paths]` | Knowledge base, applications, templates directories |
 | `[default.naming]` | Company slug, application directory pattern |
 | `[default.defaults]` | Default theme and profile |
+| `[default.pipeline]` | Model profile, default provider, model warnings |
 | `[default.rendering]` | Resume PDF appearance — font, colours, margins, layout |
 | `[default.pipeline.stages.*]` | AI provider/model/temperature per pipeline stage |
 | `[default.cover_letter]` | Cover letter generation and design settings |
 | `[default.voice]` | Writing-style guidelines |
-| `[default.providers.*]` | API keys (prefer env vars instead) |
+| `[default.providers.*]` | API keys (prefer env vars), custom providers |
+| `[[default.model_catalog]]` | Tier and prices of models mkcv does not know |
 
 ### Rendering (fonts, colours, page size)
 
@@ -515,7 +583,9 @@ These apply to all resumes by default. You can override per-command with
 
 ### Pipeline (AI provider per stage)
 
-The default standard preset uses a smart-mixed allocation:
+The default `anthropic` model profile runs the mix below. A stage you set in
+`mkcv.toml` overrides the profile for that stage only (a stage that sets just
+`model` runs on the provider mkcv finds that model under):
 
 ```toml
 # Haiku for mechanical tasks (fast, cheap)

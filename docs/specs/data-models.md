@@ -300,15 +300,129 @@ class PipelineResult(BaseModel):
 ```python
 class StageConfig(BaseModel):
     """Configuration for a single pipeline stage's LLM call."""
-    provider: str    # e.g. "anthropic", "ollama"
+    provider: str    # e.g. "anthropic", "ollama", or a provider from your config
     model: str       # e.g. "claude-sonnet-5-5"
     temperature: float  # 0.0–2.0
+```
 
-# Profile presets define per-stage configs for budget/premium modes
-PROFILE_PRESETS: dict[str, dict[int, StageConfig]] = {
-    "budget": {1: StageConfig(provider="ollama", ...), ...},
-    "premium": {1: StageConfig(provider="anthropic", ...), ...},
-}
+Which provider, model, and temperature each stage gets is decided by the
+stage resolver (see [`docs/models.md`](../models.md)), from command-line flags,
+per-stage config, and a model profile.
+
+```python
+class StageKey(StrEnum):
+    """An LLM-backed stage, named as in configuration and output."""
+    ANALYZE = "analyze"; SELECT = "select"; TAILOR = "tailor"
+    STRUCTURE = "structure"; REVIEW = "review"
+    COVER_LETTER_GENERATE = "cover_letter.generate"
+    COVER_LETTER_REVIEW = "cover_letter.review"
+    KB = "kb"; VALIDATE = "validate"
+
+class StageRequirement(BaseModel):
+    """What a stage needs from a model."""
+    stage: StageKey
+    config_path: str          # e.g. "pipeline.stages.tailor"
+    default_temperature: float
+    min_tier: ModelTier       # lowest tier mkcv recommends
+    est_input_tokens: int     # rough planning numbers, for cost estimates
+    est_output_tokens: int
+    label: str
+
+class ModelProfile(BaseModel):
+    """Recommended model per stage, all on one provider."""
+    name: str                 # "anthropic", "openai-economy", "local", ...
+    description: str
+    provider: str
+    economy: bool = False
+    extends: str | None = None        # economy profiles inherit the other stages
+    evidence: Literal["provisional", "eval"] = "provisional"
+    eval_run: str | None = None
+    stages: dict[StageKey, str]       # stage -> model ID
+
+class StageAssignment(BaseModel):
+    """A resolved stage: where its model came from and what it is."""
+    stage: StageKey
+    provider: str
+    provider_kind: ProviderKind
+    model: str
+    temperature: float
+    source: Literal["cli", "config", "profile"]
+```
+
+`Preset` (content density) has no stage configs. It carries `economy` (prefer
+the economy variant of a profile) and an optional `provider` (the legacy
+`budget` preset pins `ollama`).
+
+---
+
+## Model Catalog
+
+```python
+class CapabilityOverlay(BaseModel):
+    """A partial set of model capabilities; None means inherit."""
+    structured_output: StructuredOutputMode | None   # json_schema, tool, json_object, prompt
+    allow_structured_fallback: bool | None
+    accepts_sampling_params: bool | None             # may temperature be sent?
+    token_param: TokenParam | None                   # max_tokens or max_completion_tokens
+    min_output_tokens: int | None                    # floor on the output limit
+    max_output_tokens: int | None                    # ceiling on the output limit
+    context_window: int | None
+    input_price_per_mtok: float | None               # USD per 1M input tokens
+    output_price_per_mtok: float | None
+    tier: ModelTier | None                           # minimal, efficient, strong, frontier
+    deprecated: bool | None
+    notes: str | None
+
+class ModelCapability(CapabilityOverlay):
+    """A catalog entry."""
+    provider: str
+    match: str                                        # model ID or prefix
+    match_type: Literal["exact", "prefix"] = "exact"
+    display_name: str | None = None
+```
+
+`ModelCatalog` holds the entries (built-in plus the user's
+`[[default.model_catalog]]` overrides) and resolves a provider and model to a
+`ResolvedModel`: the provider-kind defaults overlaid with the matching entries.
+Adapters use it to shape each request; the advisor uses it for tiers and
+prices.
+
+---
+
+## Model Advice
+
+```python
+class ModelWarningKind(StrEnum):
+    UNKNOWN_MODEL; TIER_UNKNOWN; BELOW_RECOMMENDED_TIER
+    DEPRECATED_MODEL; MISSING_API_KEY
+
+class ModelWarning(BaseModel):
+    kind: ModelWarningKind
+    stage: StageKey | None            # None for provider-level warnings
+    provider: str
+    model: str | None
+    message: str
+
+class StageAdvice(BaseModel):
+    assignment: StageAssignment
+    recommended_model: str | None
+    recommended_provider: str | None
+    tier: ModelTier | None
+    min_tier: ModelTier
+    known: bool                       # does the catalog describe the model?
+    estimated_cost_usd: float | None
+    warnings: list[ModelWarning]
+
+class ModelReport(BaseModel):
+    """What `mkcv models --json` prints."""
+    profile_name: str | None
+    profile_evidence: Literal["provisional", "eval"] | None
+    profile_source: Literal["cli", "config", "default", "preset"]
+    preset_name: str
+    stages: list[StageAdvice]
+    warnings: list[ModelWarning]      # provider-level first, then per stage
+    estimated_total_usd: float | None # sum over every stage in the report
+    estimate_is_partial: bool         # some stage has no known price
 ```
 
 ---
@@ -316,12 +430,15 @@ PROFILE_PRESETS: dict[str, dict[int, StageConfig]] = {
 ## Pricing
 
 ```python
-# MODEL_PRICING: dict of model → (input_cost_per_1k, output_cost_per_1k)
-# Covers Claude, GPT-4o, GPT-4.1 variants. Returns 0.0 for unknown models.
+# MODEL_PRICING: dict of model -> (input_cost_per_1k, output_cost_per_1k),
+# derived from the model catalog. Returns 0.0 for unknown models.
 
-def calculate_cost(model: str, usage: TokenUsage) -> float:
+def calculate_cost(model: str, usage: TokenUsage, catalog=None, *, provider=None) -> float:
     """Calculate USD cost for a single LLM call."""
 ```
+
+Prices in the catalog are USD per 1M tokens. When `provider` is given, the
+price comes from that provider's catalog entry.
 
 ---
 
