@@ -78,6 +78,23 @@ async def test_the_resume_grader_still_flags_the_tool() -> None:
     ]
 
 
+async def test_the_unit_of_a_scaled_number_is_not_a_name() -> None:
+    letter = {
+        **COVER_LETTER.model_dump(),
+        "closing_paragraph": "Initech grew a book from $1.1M to $6.8M, closing $640K.",
+    }
+    ctx = make_context(
+        StageKey.COVER_LETTER_GENERATE,
+        letter,
+        case=make_case(),
+        kb_text="Initech: $1.1M sourced, $6.8M book, $640K closed.",
+    )
+    grade = await CoverLetterFaithfulnessGrader().grade(ctx)
+    names = [v for v in grade.details["violations"] if v["type"] == "name"]
+    assert "M" not in {v["text"] for v in names}
+    assert "K" not in {v["text"] for v in names}
+
+
 async def test_the_cover_letter_grader_does_not_flag_the_verb() -> None:
     letter = {
         **COVER_LETTER.model_dump(),

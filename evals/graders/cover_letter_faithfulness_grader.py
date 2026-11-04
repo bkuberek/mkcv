@@ -14,7 +14,8 @@ from evals.graders.text_normalization import (
 )
 from evals.models.grade import Grade
 
-_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+#&'-]*")
+_WORD = re.compile(r"(?<![\w$.,])[A-Za-z][A-Za-z0-9+#&'-]*")
+"""A word that does not continue a number (the M of "$6.8M" is a unit)."""
 _POSSESSIVE = re.compile("['\\u2019]s$")
 _HONEST_GAP = re.compile(
     r"(?i)\b(?:not|never|haven't|hasn't|have yet to|lack|new to"
