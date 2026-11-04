@@ -10,6 +10,19 @@ STAGE_ORDER: dict[StageKey, int] = {
 }
 """Each evaluated stage's position, for sorting summaries and recommendations."""
 
+DEFAULT_JUDGED_STAGES: tuple[StageKey, ...] = (
+    StageKey.SELECT,
+    StageKey.TAILOR,
+    StageKey.REVIEW,
+    StageKey.COVER_LETTER_GENERATE,
+    StageKey.COVER_LETTER_REVIEW,
+)
+"""Stages whose judge graders run unless ``[run] judged_stages`` says otherwise.
+
+Analyze and structure are graded by rule only: a judge adds little signal to
+keyword recall or YAML shape, so their judge calls are off by default.
+"""
+
 NOT_EVALUATED: dict[StageKey, str] = {
     StageKey.KB: (
         "not evaluated: needs source-document fixtures and a knowledge base "

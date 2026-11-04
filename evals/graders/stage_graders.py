@@ -1,5 +1,7 @@
 """Which graders score each stage, and which grade is its quality metric."""
 
+from collections.abc import Collection
+
 from evals.graders.ats_rules_grader import AtsRulesGrader
 from evals.graders.cover_letter_defect_grader import CoverLetterDefectGrader
 from evals.graders.cover_letter_faithfulness_grader import (
@@ -21,6 +23,7 @@ from evals.graders.selection_judge_grader import SelectionJudgeGrader
 from evals.graders.structure_grader import StructureGrader
 from evals.graders.tailoring_judge_grader import TailoringJudgeGrader
 from evals.models.eval_case import EvalCase
+from evals.stages import DEFAULT_JUDGED_STAGES
 from mkcv.core.models.stage_key import StageKey
 
 STAGE_GRADERS: dict[StageKey, tuple[Grader, ...]] = {
@@ -41,6 +44,7 @@ STAGE_GRADERS: dict[StageKey, tuple[Grader, ...]] = {
         AtsRulesGrader(),
         StructureGrader(),
         FaithfulnessExtractionGrader(),
+        FaithfulnessJudgeGrader(),
     ),
     StageKey.REVIEW: (SchemaGrader(), ReviewDefectGrader()),
     StageKey.COVER_LETTER_GENERATE: (
@@ -74,8 +78,18 @@ JUDGED_GRADES: frozenset[str] = frozenset(
 """Names of the grades the judge panel scores."""
 
 
-def judge_calls(case: EvalCase, stage: StageKey) -> int:
-    """Return the calls each judge makes to grade one run of ``case`` at ``stage``."""
+def judge_calls(
+    case: EvalCase,
+    stage: StageKey,
+    *,
+    judged: Collection[StageKey] = DEFAULT_JUDGED_STAGES,
+) -> int:
+    """Return the calls each judge makes to grade one run of ``case`` at ``stage``.
+
+    A stage outside ``judged`` makes none: its judge graders do not run.
+    """
+    if stage not in judged:
+        return 0
     return sum(
         1
         for grader in STAGE_GRADERS.get(stage, ())

@@ -13,6 +13,15 @@ stages = [
     "cover_letter.generate",
     "cover_letter.review",
 ]
+# Analyze and structure are graded by rule; add them here to judge them too
+# (structure then gets a faithfulness judge; analyze has no judge rubric).
+judged_stages = [
+    "select",
+    "tailor",
+    "review",
+    "cover_letter.generate",
+    "cover_letter.review",
+]
 cases = ["*"]                       # case IDs or "*"
 preset = "standard"
 

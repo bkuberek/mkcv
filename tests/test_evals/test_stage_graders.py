@@ -3,6 +3,7 @@
 import pytest
 
 from evals.graders.stage_graders import (
+    DEFAULT_JUDGED_STAGES,
     JUDGED_GRADES,
     PRIMARY_METRIC,
     STAGE_GRADERS,
@@ -62,6 +63,7 @@ def test_the_judge_graders_follow_the_deterministic_ones() -> None:
             "ats_rules",
             "structure",
             "faithfulness_extraction",
+            "faithfulness_judge",
         ],
         StageKey.REVIEW: ["schema", "review_defect_recall"],
         StageKey.COVER_LETTER_GENERATE: [
@@ -110,14 +112,14 @@ def test_the_judged_grades_are_the_judge_graders_names() -> None:
         (StageKey.ANALYZE, 0),
         (StageKey.SELECT, 1),
         (StageKey.TAILOR, 2),
-        (StageKey.STRUCTURE, 0),
+        (StageKey.STRUCTURE, 1),
         (StageKey.REVIEW, 0),
         (StageKey.COVER_LETTER_GENERATE, 2),
         (StageKey.COVER_LETTER_REVIEW, 0),
     ],
 )
 def test_each_judge_makes_these_calls_per_run(stage: StageKey, calls: int) -> None:
-    assert judge_calls(make_case(), stage) == calls
+    assert judge_calls(make_case(), stage, judged=EVALUATED_STAGES) == calls
 
 
 def test_probe_cases_add_their_defect_judgement() -> None:
@@ -126,3 +128,18 @@ def test_probe_cases_add_their_defect_judgement() -> None:
     )
     assert judge_calls(probe, StageKey.REVIEW) == 1
     assert judge_calls(probe, StageKey.COVER_LETTER_REVIEW) == 1
+
+
+def test_by_default_only_the_stages_that_gain_from_a_judge_are_judged() -> None:
+    assert DEFAULT_JUDGED_STAGES == (
+        StageKey.SELECT,
+        StageKey.TAILOR,
+        StageKey.REVIEW,
+        StageKey.COVER_LETTER_GENERATE,
+        StageKey.COVER_LETTER_REVIEW,
+    )
+
+
+def test_a_stage_left_out_of_the_judged_stages_makes_no_judge_call() -> None:
+    assert judge_calls(make_case(), StageKey.STRUCTURE, judged=()) == 0
+    assert judge_calls(make_case(), StageKey.TAILOR, judged=()) == 0

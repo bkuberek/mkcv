@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from evals.stages import EVALUATED_STAGES
+from evals.stages import DEFAULT_JUDGED_STAGES, EVALUATED_STAGES
 from mkcv.core.models.stage_key import StageKey
 
 
@@ -16,10 +16,14 @@ class RunSettings(BaseModel):
     stages: list[StageKey] = Field(
         default_factory=lambda: list(EVALUATED_STAGES), min_length=1
     )
+    judged_stages: list[StageKey] = Field(
+        default_factory=lambda: list(DEFAULT_JUDGED_STAGES),
+        description="Stages whose judge graders run; the others are graded by rule",
+    )
     cases: list[str] = Field(default_factory=lambda: ["*"], min_length=1)
     preset: str = "standard"
 
-    @field_validator("stages")
+    @field_validator("stages", "judged_stages")
     @classmethod
     def _only_evaluated_stages(cls, stages: list[StageKey]) -> list[StageKey]:
         invalid = [stage.value for stage in stages if stage not in EVALUATED_STAGES]

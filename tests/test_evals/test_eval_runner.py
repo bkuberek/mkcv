@@ -1071,3 +1071,62 @@ def test_the_manifest_round_trips_through_json() -> None:
     assert (
         RunManifest.model_validate(json.loads(manifest.model_dump_json())) == manifest
     )
+
+
+class TestJudgedStages:
+    @pytest.fixture
+    def judged_cases(
+        self, cases: list[EvalCase], add_reference: Callable[..., None]
+    ) -> list[EvalCase]:
+        add_reference(cases[0], [StageKey.ANALYZE, StageKey.SELECT, StageKey.TAILOR])
+        return cases[:1]
+
+    async def test_structure_asks_no_judge_by_default(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        monkeypatch: pytest.MonkeyPatch,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        stub = install_adapter(judging_stub())
+        await make_runner().run(_matrix([STUB], [StageKey.STRUCTURE]), judged_cases)
+        assert "FaithfulnessJudgement" not in [
+            c.get("response_model")
+            for c in stub.call_log  # type: ignore[attr-defined]
+        ]
+
+    async def test_the_flag_turns_the_structure_judge_on(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        monkeypatch: pytest.MonkeyPatch,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        install_adapter(judging_stub())
+        matrix = _matrix([STUB], [StageKey.STRUCTURE])
+        matrix = matrix.model_copy(
+            update={
+                "run": RunSettings(
+                    stages=[StageKey.STRUCTURE], judged_stages=[StageKey.STRUCTURE]
+                )
+            }
+        )
+        [record] = await make_runner().run(matrix, judged_cases)
+        assert "faithfulness_judge" in [g.name for g in record.grades]
+
+    async def test_a_stage_left_out_is_not_judged(
+        self,
+        make_runner: Callable[..., EvalRunner],
+        judged_cases: list[EvalCase],
+        monkeypatch: pytest.MonkeyPatch,
+        install_adapter: Callable[[LLMPort], LLMPort],
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        install_adapter(judging_stub())
+        matrix = _matrix([STUB], [StageKey.TAILOR]).model_copy(
+            update={"run": RunSettings(stages=[StageKey.TAILOR], judged_stages=[])}
+        )
+        [record] = await make_runner().run(matrix, judged_cases)
+        assert [g.name for g in record.grades] == ["schema", "faithfulness_extraction"]

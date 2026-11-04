@@ -81,6 +81,7 @@ class _RunTools:
     gate: asyncio.Semaphore
     sink: TextIO
     judges: tuple[_Judge, ...]
+    judged_stages: frozenset[StageKey]
 
 
 class EvalRunner:
@@ -140,7 +141,9 @@ class EvalRunner:
         runner = StageRunner(self._config, preset=matrix.run.preset)
         gate = asyncio.Semaphore(matrix.run.concurrency)
         with (self._out_dir / RESULTS_FILE).open("w", encoding="utf-8") as sink:
-            tools = _RunTools(runner, gate, sink, judges)
+            tools = _RunTools(
+                runner, gate, sink, judges, frozenset(matrix.run.judged_stages)
+            )
             async with asyncio.TaskGroup() as group:
                 tasks = [
                     group.create_task(self._run_job(tools, case, stage, model, repeat))
@@ -168,7 +171,8 @@ class EvalRunner:
         async with tools.gate:
             work_dir = work_dir_for(self._out_dir, case.id, stage, model, repeat)
             result = await tools.runner.run(case, stage, model, repeat, work_dir)
-            grades = await self._grade(case, stage, model, result, tools.judges)
+            judges = tools.judges if stage in tools.judged_stages else ()
+            grades = await self._grade(case, stage, model, result, judges)
             record = self._record(case, stage, model, repeat, result, grades)
             tools.sink.write(record.model_dump_json() + "\n")
             tools.sink.flush()

@@ -62,7 +62,12 @@ def estimate_matrix_cost(
         for model in matrix.models
     }
 
-    calls = len(matrix.models) * repeats * sum(judge_calls(c, s) for c, s in runs)
+    judged = matrix.run.judged_stages
+    calls = (
+        len(matrix.models)
+        * repeats
+        * sum(judge_calls(c, s, judged=judged) for c, s in runs)
+    )
     skipped = dict(skipped_judges or {}) if calls else {}
     judges = [] if not calls else [j for j in matrix.panel if j.label not in skipped]
     judge_costs = {

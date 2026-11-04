@@ -344,6 +344,17 @@ class TestLoadMatrix:
         settings = load_matrix(_write_matrix(tmp_path, _MINIMAL_MATRIX)).recommendation
         assert (settings.tie_epsilon, settings.max_fabrication_rate) == (0.01, 0.0)
 
+    def test_the_shipped_matrix_judges_only_where_it_adds_signal(self) -> None:
+        judged = load_matrix(DEFAULT_MATRIX).run.judged_stages
+        assert StageKey.ANALYZE not in judged
+        assert StageKey.STRUCTURE not in judged
+        assert StageKey.TAILOR in judged
+
+    def test_judges_can_be_turned_on_for_structure(self, tmp_path: Path) -> None:
+        body = '[run]\njudged_stages = ["structure"]\n' + _MINIMAL_MATRIX
+        matrix = load_matrix(_write_matrix(tmp_path, body))
+        assert matrix.run.judged_stages == [StageKey.STRUCTURE]
+
     def test_the_tie_epsilon_can_be_set(self, tmp_path: Path) -> None:
         body = "[recommendation]\ntie_epsilon = 0.02\n" + _MINIMAL_MATRIX
         settings = load_matrix(_write_matrix(tmp_path, body)).recommendation
