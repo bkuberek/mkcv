@@ -85,6 +85,15 @@ class EvalCase(BaseModel):
         """Return True if this case should be evaluated at ``stage``."""
         return self.stages is None or stage in self.stages
 
+    def existing_reference_files(self) -> list[Path]:
+        """Return every reference file already on disk, complete stage or not."""
+        return [
+            path
+            for names in REFERENCE_FILES.values()
+            for name in names
+            if (path := self.reference_dir / name).is_file()
+        ]
+
     def reference_stages(self) -> list[StageKey]:
         """Return the stages whose reference files all exist, in pipeline order."""
         return [

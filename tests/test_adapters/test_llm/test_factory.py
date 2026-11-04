@@ -13,6 +13,7 @@ from mkcv.adapters.factory import (
     create_cover_letter_service,
     create_model_report,
     create_pipeline_service,
+    create_pipeline_service_for_stage_configs,
     create_regeneration_service,
     create_validation_service,
     create_workspace_service,
@@ -28,6 +29,7 @@ from mkcv.core.exceptions.configuration import ConfigurationError
 from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.model_warning_kind import ModelWarningKind
 from mkcv.core.models.profile_preset import ContentDensity
+from mkcv.core.models.stage_config import StageConfig
 from mkcv.core.models.stage_key import COVER_LETTER_STAGES, PIPELINE_STAGES, StageKey
 from mkcv.core.services.regeneration import RegenerationService
 from mkcv.core.services.workspace import WorkspaceService
@@ -550,6 +552,91 @@ class TestCatalogInjection:
             create_pipeline_service(
                 _blank_config(), preset_name="standard", provider_override="nope"
             )
+
+
+def _given_stage_configs(
+    provider: str = "stub", model: str = "given-model"
+) -> dict[int, StageConfig]:
+    return {
+        number: StageConfig(provider=provider, model=model, temperature=0.25)
+        for number in range(1, 6)
+    }
+
+
+class TestCreatePipelineServiceForStageConfigs:
+    """The eval harness supplies stage configs; nothing is resolved."""
+
+    def test_the_given_stage_configs_are_used_unchanged(self) -> None:
+        given = _given_stage_configs()
+        service = create_pipeline_service_for_stage_configs(_blank_config(), given)
+        assert service._stage_configs == given
+
+    def test_configured_stage_models_do_not_override_the_given_ones(self) -> None:
+        config = _blank_config(
+            **{"pipeline.stages.tailor": {"provider": "openai", "model": "gpt-6.1-sol"}}
+        )
+        service = create_pipeline_service_for_stage_configs(
+            config, _given_stage_configs()
+        )
+        assert set(_models(service)) == {"given-model"}
+
+    def test_one_adapter_is_created_per_provider(self) -> None:
+        given = _given_stage_configs()
+        given[3] = StageConfig(provider="ollama", model="llama3.1:8b", temperature=0.5)
+        service = create_pipeline_service_for_stage_configs(_blank_config(), given)
+        assert set(service._providers) == {"stub", "ollama"}
+
+    def test_every_stage_adapter_is_a_separate_instance_per_service(self) -> None:
+        first = create_pipeline_service_for_stage_configs(
+            _blank_config(), _given_stage_configs()
+        )
+        second = create_pipeline_service_for_stage_configs(
+            _blank_config(), _given_stage_configs()
+        )
+        assert first._providers["stub"] is not second._providers["stub"]
+
+    def test_the_standard_preset_is_the_default(self) -> None:
+        service = create_pipeline_service_for_stage_configs(
+            _blank_config(), _given_stage_configs()
+        )
+        assert service._preset is not None
+        assert service._preset.name == "standard"
+
+    def test_the_preset_sets_the_content_density(self) -> None:
+        service = create_pipeline_service_for_stage_configs(
+            _blank_config(), _given_stage_configs(), preset_name="concise"
+        )
+        assert service._preset is not None
+        assert service._preset.density is ContentDensity.CONCISE
+
+    def test_the_theme_reaches_the_resume_design(self) -> None:
+        service = create_pipeline_service_for_stage_configs(
+            _blank_config(), _given_stage_configs(), theme="classic"
+        )
+        assert service._resume_design is not None
+        assert service._resume_design.theme == "classic"
+
+    def test_the_catalog_with_user_overrides_is_injected(self) -> None:
+        config = _blank_config(model_catalog=TestCatalogInjection.OVERRIDE)
+        service = create_pipeline_service_for_stage_configs(
+            config, _given_stage_configs()
+        )
+        assert service._catalog is not None
+        assert service._catalog.price_for("claude-opus-5-5", provider="anthropic") == (
+            100.0,
+            20.0,
+        )
+
+    def test_an_unknown_provider_is_a_configuration_error(self) -> None:
+        with pytest.raises(ConfigurationError, match="Unknown LLM provider 'nope'"):
+            create_pipeline_service_for_stage_configs(
+                _blank_config(), _given_stage_configs(provider="nope")
+            )
+
+    def test_an_invalid_catalog_override_fails_before_any_call(self) -> None:
+        config = _blank_config(model_catalog="not a list")
+        with pytest.raises(ConfigurationError, match="array of tables"):
+            create_pipeline_service_for_stage_configs(config, _given_stage_configs())
 
 
 class TestCreateWorkspaceService:

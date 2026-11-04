@@ -8,14 +8,18 @@ from evals.models.run_settings import RunSettings
 
 
 class MatrixConfig(BaseModel):
-    """Everything ``evals/config/matrix.toml`` defines."""
+    """Everything ``evals/config/matrix.toml`` defines.
+
+    ``models`` may be empty here: a run whose models all lack credentials is
+    planned with none. ``load_matrix`` rejects a matrix file without models.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run: RunSettings = Field(default_factory=RunSettings)
     judge: JudgeConfig
     reference: JudgeConfig
-    models: list[MatrixModel] = Field(min_length=1)
+    models: list[MatrixModel]
 
     @model_validator(mode="after")
     def _models_are_unique(self) -> "MatrixConfig":

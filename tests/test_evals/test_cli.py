@@ -288,7 +288,7 @@ class TestEstimate:
 
 
 class TestUnfinishedCommands:
-    @pytest.mark.parametrize("command", ["run", "report", "bootstrap-reference"])
+    @pytest.mark.parametrize("command", ["report"])
     def test_prints_not_implemented_and_exits_two(
         self, command: str, capsys: pytest.CaptureFixture[str]
     ) -> None:

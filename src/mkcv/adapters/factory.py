@@ -328,8 +328,6 @@ def create_pipeline_service(
     Raises:
         ConfigurationError: If a stage cannot be resolved.
     """
-    prompt_loader = _create_prompt_loader(config)
-    artifact_store = FileSystemArtifactStore()
     registry = _registry(config)
     resolved = StageResolver(config, registry).resolve(
         PIPELINE_STAGES,
@@ -339,17 +337,67 @@ def create_pipeline_service(
             provider_override=provider_override,
         ),
     )
-    stage_configs = resolved.pipeline_stage_configs()
-    providers = _create_providers(config, stage_configs, registry)
-    resume_design = _build_resume_design(config, theme)
+    return _assemble_pipeline_service(
+        config,
+        registry,
+        resolved.pipeline_stage_configs(),
+        preset_name=preset_name,
+        theme=theme,
+    )
 
+
+def create_pipeline_service_for_stage_configs(
+    config: Configuration,
+    stage_configs: dict[int, StageConfig],
+    *,
+    preset_name: str = "standard",
+    theme: str = "sb2nov",
+) -> PipelineService:
+    """Create a PipelineService that runs exactly the given stage configs.
+
+    Nothing is resolved: no profile, per-stage config, or command-line flag
+    changes which provider or model a stage uses. The eval harness uses this
+    to pin every stage to the model under evaluation. A new service creates
+    its own LLM adapters, so concurrent services never share token usage.
+
+    Args:
+        config: Application configuration (providers, keys, catalog).
+        stage_configs: Provider, model, and temperature for stages 1 to 5.
+        preset_name: Preset or legacy profile name (content density only).
+        theme: Resolved theme name.
+
+    Returns:
+        PipelineService with one LLM adapter per provider in ``stage_configs``.
+
+    Raises:
+        ConfigurationError: If a provider is unknown or the provider or
+            model-catalog settings are invalid.
+    """
+    return _assemble_pipeline_service(
+        config,
+        _registry(config),
+        stage_configs,
+        preset_name=preset_name,
+        theme=theme,
+    )
+
+
+def _assemble_pipeline_service(
+    config: Configuration,
+    registry: ProviderRegistry,
+    stage_configs: dict[int, StageConfig],
+    *,
+    preset_name: str,
+    theme: str,
+) -> PipelineService:
+    """Wire a PipelineService from already-decided stage configs."""
     return PipelineService(
-        providers=providers,
-        prompts=prompt_loader,
-        artifacts=artifact_store,
+        providers=_create_providers(config, stage_configs, registry),
+        prompts=_create_prompt_loader(config),
+        artifacts=FileSystemArtifactStore(),
         stage_configs=stage_configs,
         preset=resolve_preset(preset_name),
-        resume_design=resume_design,
+        resume_design=_build_resume_design(config, theme),
         catalog=registry.catalog,
     )
 

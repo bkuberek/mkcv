@@ -184,6 +184,20 @@ class TestEvalCase:
         (reference / "stage4_structure.json").write_text("{}", encoding="utf-8")
         assert case.reference_stages() == [StageKey.ANALYZE, StageKey.SELECT]
 
+    def test_existing_reference_files_lists_every_file_present(
+        self, tmp_fixtures: Path
+    ) -> None:
+        case = load_cases(tmp_fixtures)[0]
+        reference = tmp_fixtures / "reference" / "alpha-match"
+        reference.mkdir(parents=True)
+        (reference / "stage4_structure.json").write_text("{}", encoding="utf-8")
+        assert case.existing_reference_files() == [reference / "stage4_structure.json"]
+
+    def test_existing_reference_files_is_empty_without_a_reference(
+        self, tmp_fixtures: Path
+    ) -> None:
+        assert load_cases(tmp_fixtures)[0].existing_reference_files() == []
+
     def test_structure_reference_needs_the_yaml_too(self, tmp_fixtures: Path) -> None:
         case = load_cases(tmp_fixtures)[0]
         reference = tmp_fixtures / "reference" / "alpha-match"
@@ -259,6 +273,11 @@ class TestLoadMatrix:
     def test_a_matrix_needs_at_least_one_model(self, tmp_path: Path) -> None:
         body = _MINIMAL_MATRIX.split("[[models]]")[0]
         with pytest.raises(ValueError, match="models"):
+            load_matrix(_write_matrix(tmp_path, body))
+
+    def test_an_empty_model_list_is_rejected(self, tmp_path: Path) -> None:
+        body = "models = []\n" + _MINIMAL_MATRIX.split("[[models]]")[0]
+        with pytest.raises(ValueError, match=r"at least one \[\[models\]\]"):
             load_matrix(_write_matrix(tmp_path, body))
 
     def test_only_pipeline_stages_can_be_run(self, tmp_path: Path) -> None:

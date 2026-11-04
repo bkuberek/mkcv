@@ -64,9 +64,12 @@ def load_matrix(path: Path) -> MatrixConfig:
     """
     raw = _read_toml(path)
     try:
-        return MatrixConfig.model_validate(raw)
+        matrix = MatrixConfig.model_validate(raw)
     except ValidationError as error:
         raise ValueError(f"Invalid matrix {path.name}: {error}") from error
+    if not matrix.models:
+        raise ValueError(f"{path.name} must define at least one [[models]] table")
+    return matrix
 
 
 def _read_toml(path: Path) -> dict[str, Any]:

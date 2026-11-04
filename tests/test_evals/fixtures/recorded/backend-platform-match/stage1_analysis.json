@@ -1,0 +1,80 @@
+{
+  "company": "Acme Corp",
+  "role_title": "Senior Platform Engineer",
+  "seniority_level": "senior",
+  "team_or_org": "Platform Engineering",
+  "location": "Remote (US)",
+  "compensation": null,
+  "core_requirements": [
+    {
+      "skill": "Kubernetes",
+      "importance": "must_have",
+      "years_implied": 4,
+      "context": "Runs the container platform for 60+ internal services"
+    },
+    {
+      "skill": "Go",
+      "importance": "must_have",
+      "years_implied": 3,
+      "context": "Primary language for platform tooling and services"
+    },
+    {
+      "skill": "PostgreSQL",
+      "importance": "strong_prefer",
+      "years_implied": null,
+      "context": "Operates the primary relational stores"
+    },
+    {
+      "skill": "observability",
+      "importance": "must_have",
+      "years_implied": null,
+      "context": "Owns metrics, tracing, and alerting standards"
+    },
+    {
+      "skill": "incident response",
+      "importance": "strong_prefer",
+      "years_implied": null,
+      "context": "Participates in a shared on-call rotation"
+    },
+    {
+      "skill": "Terraform",
+      "importance": "nice_to_have",
+      "years_implied": null,
+      "context": "Provisions cloud infrastructure as code"
+    }
+  ],
+  "technical_stack": [
+    "Kubernetes",
+    "Go",
+    "PostgreSQL",
+    "Terraform",
+    "Prometheus",
+    "Grafana"
+  ],
+  "soft_skills": [
+    "cross-team collaboration",
+    "written communication"
+  ],
+  "leadership_signals": [
+    "mentors engineers",
+    "leads technical design reviews"
+  ],
+  "culture_keywords": [
+    "ownership",
+    "blameless postmortems",
+    "pragmatism"
+  ],
+  "ats_keywords": [
+    "Kubernetes",
+    "Go",
+    "PostgreSQL",
+    "observability",
+    "incident response",
+    "Terraform"
+  ],
+  "hidden_requirements": [
+    "comfort with on-call",
+    "experience reducing cloud cost"
+  ],
+  "role_summary": "Acme Corp needs a senior engineer to run and improve its Kubernetes-based platform. The role mixes Go development, database operations, and on-call ownership."
+}
