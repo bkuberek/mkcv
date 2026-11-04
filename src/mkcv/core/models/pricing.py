@@ -1,65 +1,69 @@
-"""LLM model pricing and cost calculation."""
+"""LLM model pricing and cost calculation, derived from the model catalog."""
 
+from mkcv.core.catalog.builtin_models import BUILTIN_MODEL_CAPABILITIES
+from mkcv.core.models.model_catalog import ModelCatalog
 from mkcv.core.models.token_usage import TokenUsage
 
-# Pricing per 1K tokens: (input_cost, output_cost)
-# Source: provider pricing pages (Anthropic rates as of 2026-10)
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    # Anthropic Claude 5.5
-    "claude-opus-5-5": (0.004, 0.020),
-    "claude-sonnet-5-5": (0.002, 0.010),
-    "claude-haiku-5-5": (0.0001, 0.0005),
-    # Anthropic Claude 4.x — kept so older run metadata still prices
-    "claude-opus-4-6": (0.005, 0.025),
-    "claude-sonnet-4-6": (0.003, 0.015),
-    "claude-haiku-4-5": (0.001, 0.005),
-    "claude-haiku-4-5-20251001": (0.001, 0.005),
-    "claude-opus-4-20250514": (0.015, 0.075),
-    "claude-sonnet-4-20250514": (0.003, 0.015),
-    "claude-haiku-4-20250414": (0.0008, 0.004),
-    # OpenAI GPT-4o
-    "gpt-4o": (0.0025, 0.010),
-    "gpt-4o-mini": (0.00015, 0.0006),
-    # OpenAI GPT-4.1
-    "gpt-4.1": (0.002, 0.008),
-    "gpt-4.1-mini": (0.0004, 0.0016),
-    "gpt-4.1-nano": (0.0001, 0.0004),
-    # OpenRouter — models use their canonical names; pricing reflects
-    # OpenRouter's pass-through rates (may include small markup).
-    "anthropic/claude-sonnet-4": (0.003, 0.015),
-    "anthropic/claude-haiku-4": (0.0008, 0.004),
-    "openai/gpt-4o": (0.0025, 0.010),
-    "openai/gpt-4.1": (0.002, 0.008),
-    "google/gemini-2.5-pro-preview": (0.00125, 0.010),
-    "google/gemini-2.5-flash-preview": (0.00015, 0.0006),
-    "deepseek/deepseek-chat-v3": (0.00014, 0.00028),
-}
-
 _TOKENS_PER_UNIT = 1000
+_TOKENS_PER_MILLION = 1_000_000
+_PER_UNIT_PRECISION = 12
 
 
-def calculate_cost(model: str, usage: TokenUsage) -> float:
+def _derive_model_pricing() -> dict[str, tuple[float, float]]:
+    """Build the per-1K price table from the built-in catalog.
+
+    Only exact entries with both prices are listed, and the first entry wins
+    when a model ID appears under more than one provider. Prices are rounded
+    so that converting from per-1M prices adds no floating-point noise.
+    """
+    pricing: dict[str, tuple[float, float]] = {}
+    for entry in BUILTIN_MODEL_CAPABILITIES:
+        if entry.match_type != "exact" or entry.match in pricing:
+            continue
+        if entry.input_price_per_mtok is None or entry.output_price_per_mtok is None:
+            continue
+        pricing[entry.match] = (
+            round(entry.input_price_per_mtok / _TOKENS_PER_UNIT, _PER_UNIT_PRECISION),
+            round(entry.output_price_per_mtok / _TOKENS_PER_UNIT, _PER_UNIT_PRECISION),
+        )
+    return pricing
+
+
+# Pricing per 1K tokens: (input_cost, output_cost), derived from the built-in
+# catalog (which stores USD per 1M tokens).
+MODEL_PRICING: dict[str, tuple[float, float]] = _derive_model_pricing()
+
+
+def calculate_cost(
+    model: str,
+    usage: TokenUsage,
+    catalog: ModelCatalog | None = None,
+    *,
+    provider: str | None = None,
+) -> float:
     """Calculate the USD cost for a single LLM call.
 
-    Looks up per-token pricing for the model and multiplies by
-    actual token counts. Returns 0.0 for unknown models (e.g.
-    local Ollama models that have no per-token cost).
+    Looks up per-token pricing for the model in the catalog and multiplies
+    by actual token counts. Returns 0.0 for models with no catalog price
+    (e.g. local Ollama models that have no per-token cost).
 
     Args:
         model: The model identifier string.
         usage: Token counts from the LLM call.
+        catalog: Catalog to price against; defaults to the built-in one.
+        provider: Restrict the price lookup to this provider's entries.
 
     Returns:
         Estimated cost in USD, rounded to 6 decimal places.
     """
-    pricing = MODEL_PRICING.get(model)
-    if pricing is None:
+    catalog = catalog or ModelCatalog.builtin()
+    price = catalog.price_for(model, provider=provider)
+    if price is None:
         return 0.0
 
-    input_cost_per_1k, output_cost_per_1k = pricing
+    input_per_mtok, output_per_mtok = price
     cost = (
-        usage.input_tokens * input_cost_per_1k
-        + usage.output_tokens * output_cost_per_1k
-    ) / _TOKENS_PER_UNIT
+        usage.input_tokens * input_per_mtok + usage.output_tokens * output_per_mtok
+    ) / _TOKENS_PER_MILLION
 
     return round(cost, 6)

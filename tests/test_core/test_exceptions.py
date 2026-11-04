@@ -4,6 +4,7 @@ import pytest
 
 from mkcv.core.exceptions import (
     AuthenticationError,
+    ConfigurationError,
     ContextLengthError,
     MkcvError,
     PipelineStageError,
@@ -90,6 +91,21 @@ class TestContextLengthError:
     def test_exit_code_is_four(self) -> None:
         err = ContextLengthError("too long", provider="openai")
         assert err.exit_code == 4
+
+
+class TestConfigurationError:
+    """Tests for ConfigurationError."""
+
+    def test_exit_code_is_three(self) -> None:
+        err = ConfigurationError("x")
+        assert err.exit_code == 3
+
+    def test_message_is_preserved(self) -> None:
+        err = ConfigurationError("bad config")
+        assert str(err) == "bad config"
+
+    def test_inherits_from_mkcv_error(self) -> None:
+        assert issubclass(ConfigurationError, MkcvError)
 
 
 class TestPipelineStageError:
@@ -197,6 +213,7 @@ class TestAllExceptionsInheritFromMkcvError:
             RateLimitError,
             AuthenticationError,
             ContextLengthError,
+            ConfigurationError,
             PipelineStageError,
             WorkspaceError,
             WorkspaceNotFoundError,
