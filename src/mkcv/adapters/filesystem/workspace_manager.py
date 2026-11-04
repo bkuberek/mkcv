@@ -97,27 +97,27 @@ profile = "standard"
 #
 # [default.pipeline.stages.analyze]
 # provider = "anthropic"
-# model = "claude-haiku-4-5-20251001"
+# model = "claude-haiku-5-5"
 # temperature = 0.2
 #
 # [default.pipeline.stages.select]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.3
 #
 # [default.pipeline.stages.tailor]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.5
 #
 # [default.pipeline.stages.structure]
 # provider = "anthropic"
-# model = "claude-sonnet-4-20250514"
+# model = "claude-sonnet-5-5"
 # temperature = 0.1
 #
 # [default.pipeline.stages.review]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.3
 
 # ── Cover Letter ────────────────────────────────────────────────────
@@ -128,12 +128,12 @@ profile = "standard"
 #
 # [default.cover_letter.stages.generate]
 # provider = "anthropic"
-# model = "claude-opus-4-20250514"
+# model = "claude-opus-5-5"
 # temperature = 0.6
 #
 # [default.cover_letter.stages.review]
 # provider = "anthropic"
-# model = "claude-haiku-4-5-20251001"
+# model = "claude-haiku-5-5"
 # temperature = 0.2
 #
 # # Cover letter page layout
@@ -519,28 +519,28 @@ The default standard preset uses a smart-mixed allocation:
 # Haiku for mechanical tasks (fast, cheap)
 [default.pipeline.stages.analyze]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-5-5"
 temperature = 0.2
 
 [default.pipeline.stages.structure]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-5-5"
 temperature = 0.1
 
 # Opus for decisions and writing (best quality)
 [default.pipeline.stages.select]
 provider = "anthropic"
-model = "claude-opus-4-20250514"
+model = "claude-opus-5-5"
 temperature = 0.3
 
 [default.pipeline.stages.tailor]
 provider = "anthropic"
-model = "claude-opus-4-20250514"
+model = "claude-opus-5-5"
 temperature = 0.5
 
 [default.pipeline.stages.review]
 provider = "anthropic"
-model = "claude-opus-4-20250514"
+model = "claude-opus-5-5"
 temperature = 0.3
 ```
 
@@ -552,12 +552,12 @@ auto_render = true
 
 [default.cover_letter.stages.generate]
 provider = "anthropic"
-model = "claude-opus-4-20250514"
+model = "claude-opus-5-5"
 temperature = 0.6
 
 [default.cover_letter.stages.review]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-5-5"
 temperature = 0.2
 
 [default.cover_letter.design]

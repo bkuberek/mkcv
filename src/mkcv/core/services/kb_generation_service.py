@@ -21,7 +21,7 @@ from mkcv.core.services.kb_validator import validate_kb
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_MAX_TOKENS = 8192
 CHUNK_CHAR_THRESHOLD = 100_000
 

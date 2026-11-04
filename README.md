@@ -230,7 +230,7 @@ Configure different providers and models for each pipeline stage in `mkcv.toml`:
 ```toml
 [pipeline.stages.analyze]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-5-5"
 temperature = 0.2
 
 [pipeline.stages.structure]
@@ -239,13 +239,15 @@ model = "gpt-4o"
 temperature = 0.1
 ```
 
+Claude 5.x models (`claude-*-5-5`, the defaults) do not accept sampling parameters, so mkcv ignores `temperature` for them. It still applies to Claude 4.x and other providers.
+
 ### Environment Variables
 
 Use the `MKCV_` prefix with double underscores for nested keys:
 
 ```bash
 export MKCV_RENDERING__THEME=classic
-export MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-4-20250514
+export MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5
 ```
 
 ## LLM Providers

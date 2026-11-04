@@ -13,7 +13,7 @@ from mkcv.core.ports.prompts import PromptLoaderPort
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_MAX_TOKENS = 8192
 YAML_EXTENSIONS = {".yaml", ".yml"}
 PDF_EXTENSIONS = {".pdf"}

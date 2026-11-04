@@ -14,7 +14,7 @@ class TestStageMetadata:
             stage_number=1,
             stage_name="analyze_jd",
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=0.3,
             input_tokens=2000,
             output_tokens=800,
@@ -28,7 +28,7 @@ class TestStageMetadata:
             stage_number=1,
             stage_name="analyze_jd",
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=0.3,
             input_tokens=2000,
             output_tokens=800,
@@ -57,7 +57,7 @@ class TestStageMetadata:
             StageMetadata(
                 stage_name="analyze_jd",  # type: ignore[call-arg]
                 provider="anthropic",
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-5-5",
                 temperature=0.3,
                 input_tokens=2000,
                 output_tokens=800,
@@ -70,7 +70,7 @@ class TestStageMetadata:
             StageMetadata(
                 stage_number=1,  # type: ignore[call-arg]
                 provider="anthropic",
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-5-5",
                 temperature=0.3,
                 input_tokens=2000,
                 output_tokens=800,
@@ -83,7 +83,7 @@ class TestStageMetadata:
             stage_number=1,
             stage_name="analyze_jd",
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=0.3,
             input_tokens=2000,
             output_tokens=800,

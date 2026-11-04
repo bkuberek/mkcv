@@ -161,7 +161,7 @@ class TestResolveStageConfigs:
         config = MagicMock()
         analyze = MagicMock()
         analyze.provider = "anthropic"
-        analyze.model = "claude-sonnet-4-20250514"
+        analyze.model = "claude-sonnet-5-5"
         analyze.temperature = 0.2
         config.pipeline.stages.analyze = analyze
         config.pipeline.stages.select = analyze
@@ -171,7 +171,7 @@ class TestResolveStageConfigs:
 
         configs = _resolve_stage_configs(config, preset_name="default")
         assert configs[1].provider == "anthropic"
-        assert configs[1].model == "claude-sonnet-4-20250514"
+        assert configs[1].model == "claude-sonnet-5-5"
 
     def test_budget_preset_uses_ollama(self) -> None:
         config = MagicMock()

@@ -36,7 +36,7 @@ from mkcv.core.ports.stage_callback import StageCallbackPort
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_MAX_TOKENS = 4096
 STAGE_MAX_TOKENS_YAML = 8192
 

@@ -504,7 +504,7 @@ async def test_llm_called_with_configured_model_and_temperature() -> None:
     service = RegenerationService(
         llm=mock_llm,
         prompts=mock_prompts,
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-5-5",
         temperature=0.7,
         max_tokens=2048,
     )
@@ -521,7 +521,7 @@ async def test_llm_called_with_configured_model_and_temperature() -> None:
     )
 
     call_kwargs = mock_llm.complete_structured.call_args
-    assert call_kwargs.kwargs["model"] == "claude-sonnet-4-20250514"
+    assert call_kwargs.kwargs["model"] == "claude-sonnet-5-5"
     assert call_kwargs.kwargs["temperature"] == 0.7
     assert call_kwargs.kwargs["max_tokens"] == 2048
 

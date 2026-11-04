@@ -3,9 +3,17 @@
 from mkcv.core.models.token_usage import TokenUsage
 
 # Pricing per 1K tokens: (input_cost, output_cost)
-# Source: provider pricing pages as of 2025
+# Source: provider pricing pages (Anthropic rates as of 2026-10)
 MODEL_PRICING: dict[str, tuple[float, float]] = {
-    # Anthropic Claude
+    # Anthropic Claude 5.5
+    "claude-opus-5-5": (0.004, 0.020),
+    "claude-sonnet-5-5": (0.002, 0.010),
+    "claude-haiku-5-5": (0.0001, 0.0005),
+    # Anthropic Claude 4.x — kept so older run metadata still prices
+    "claude-opus-4-6": (0.005, 0.025),
+    "claude-sonnet-4-6": (0.003, 0.015),
+    "claude-haiku-4-5": (0.001, 0.005),
+    "claude-haiku-4-5-20251001": (0.001, 0.005),
     "claude-sonnet-4-20250514": (0.003, 0.015),
     "claude-haiku-4-20250414": (0.0008, 0.004),
     # OpenAI GPT-4o

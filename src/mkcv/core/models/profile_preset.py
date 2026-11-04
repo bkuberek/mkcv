@@ -35,75 +35,35 @@ class Preset(BaseModel):
 
 
 _SONNET_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(
-        provider="anthropic", model="claude-sonnet-4-20250514", temperature=0.2
-    ),
-    2: StageConfig(
-        provider="anthropic", model="claude-sonnet-4-20250514", temperature=0.3
-    ),
-    3: StageConfig(
-        provider="anthropic", model="claude-sonnet-4-20250514", temperature=0.5
-    ),
-    4: StageConfig(
-        provider="anthropic", model="claude-sonnet-4-20250514", temperature=0.1
-    ),
-    5: StageConfig(
-        provider="anthropic", model="claude-sonnet-4-20250514", temperature=0.3
-    ),
+    1: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.2),
+    2: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.3),
+    3: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.5),
+    4: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.1),
+    5: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.3),
 }
 
 _HAIKU_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(
-        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.2
-    ),
-    2: StageConfig(
-        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.3
-    ),
-    3: StageConfig(
-        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.5
-    ),
-    4: StageConfig(
-        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.1
-    ),
-    5: StageConfig(
-        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.3
-    ),
+    1: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.2),
+    2: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.3),
+    3: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.5),
+    4: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.1),
+    5: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.3),
 }
 
 _SMART_MIXED_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(
-        provider="anthropic", model="claude-haiku-4-5-20251001", temperature=0.2
-    ),
-    2: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.3
-    ),
-    3: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.5
-    ),
-    4: StageConfig(
-        provider="anthropic", model="claude-sonnet-4-20250514", temperature=0.1
-    ),
-    5: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.3
-    ),
+    1: StageConfig(provider="anthropic", model="claude-haiku-5-5", temperature=0.2),
+    2: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
+    3: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.5),
+    4: StageConfig(provider="anthropic", model="claude-sonnet-5-5", temperature=0.1),
+    5: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
 }
 
 _OPUS_STAGE_CONFIGS: dict[int, StageConfig] = {
-    1: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.2
-    ),
-    2: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.3
-    ),
-    3: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.5
-    ),
-    4: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.1
-    ),
-    5: StageConfig(
-        provider="anthropic", model="claude-opus-4-20250514", temperature=0.3
-    ),
+    1: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.2),
+    2: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
+    3: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.5),
+    4: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.1),
+    5: StageConfig(provider="anthropic", model="claude-opus-5-5", temperature=0.3),
 }
 
 _OLLAMA_STAGE_CONFIGS: dict[int, StageConfig] = {

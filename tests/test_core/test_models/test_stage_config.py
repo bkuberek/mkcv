@@ -12,7 +12,7 @@ class TestStageConfig:
     def test_valid_creation(self) -> None:
         config = StageConfig(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=0.3,
         )
         assert config.provider == "anthropic"
@@ -28,7 +28,7 @@ class TestStageConfig:
     def test_temperature_value(self) -> None:
         config = StageConfig(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=0.5,
         )
         assert config.temperature == 0.5
@@ -36,7 +36,7 @@ class TestStageConfig:
     def test_temperature_zero_allowed(self) -> None:
         config = StageConfig(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=0.0,
         )
         assert config.temperature == 0.0
@@ -53,7 +53,7 @@ class TestStageConfig:
         with pytest.raises(ValidationError):
             StageConfig(
                 provider="anthropic",
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-5-5",
                 temperature=-0.1,
             )
 
@@ -61,14 +61,14 @@ class TestStageConfig:
         with pytest.raises(ValidationError):
             StageConfig(
                 provider="anthropic",
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-5-5",
                 temperature=2.1,
             )
 
     def test_provider_required(self) -> None:
         with pytest.raises(ValidationError):
             StageConfig(
-                model="claude-sonnet-4-20250514",  # type: ignore[call-arg]
+                model="claude-sonnet-5-5",  # type: ignore[call-arg]
                 temperature=0.3,
             )
 
@@ -83,18 +83,18 @@ class TestStageConfig:
         with pytest.raises(ValidationError):
             StageConfig(
                 provider="anthropic",  # type: ignore[call-arg]
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-5-5",
             )
 
     def test_model_dump(self) -> None:
         config = StageConfig(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             temperature=0.3,
         )
         data = config.model_dump()
         assert data == {
             "provider": "anthropic",
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-5-5",
             "temperature": 0.3,
         }

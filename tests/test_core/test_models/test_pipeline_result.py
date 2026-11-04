@@ -19,7 +19,7 @@ def _make_stage(
         stage_number=stage_number,
         stage_name=stage_name,
         provider="anthropic",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-5-5",
         temperature=0.3,
         input_tokens=1000,
         output_tokens=500,

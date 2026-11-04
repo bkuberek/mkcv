@@ -281,4 +281,4 @@ All env vars use the `MKCV_` prefix (Dynaconf convention):
 | `MKCV_GENERAL__VERBOSE` | Enable verbose logging |
 
 Dynaconf uses double underscores for nested keys:
-`MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-4-20250514`
+`MKCV_PIPELINE__STAGES__ANALYZE__MODEL=claude-sonnet-5-5`

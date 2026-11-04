@@ -15,7 +15,7 @@ def _make_stage_metadata(**overrides: object) -> StageMetadata:
         "stage_number": 1,
         "stage_name": "generate_cover_letter",
         "provider": "default",
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-5-5",
         "temperature": 0.6,
         "input_tokens": 100,
         "output_tokens": 200,

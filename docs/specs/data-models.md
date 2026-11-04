@@ -301,7 +301,7 @@ class PipelineResult(BaseModel):
 class StageConfig(BaseModel):
     """Configuration for a single pipeline stage's LLM call."""
     provider: str    # e.g. "anthropic", "ollama"
-    model: str       # e.g. "claude-sonnet-4-20250514"
+    model: str       # e.g. "claude-sonnet-5-5"
     temperature: float  # 0.0–2.0
 
 # Profile presets define per-stage configs for budget/premium modes
