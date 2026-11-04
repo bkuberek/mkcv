@@ -1,11 +1,39 @@
 name: CI
 
+# Lints and tests every push and pull request. On main, once they pass, it also versions the
+# code and publishes each release. Rules: docs/DEVELOPMENT.md#releases-and-the-homebrew-tap.
+#
+# 1. version: python-semantic-release reads the Conventional Commits since the last tag and,
+#    when one warrants a bump, updates pyproject.toml, uv.lock and CHANGELOG.md, commits
+#    "chore(release): vX.Y.Z" and tags vX.Y.Z. Configuration: [tool.semantic_release] in
+#    pyproject.toml.
+# 2. release: builds the wheel and a hashed requirements file from the tag and attaches them
+#    to the GitHub release vX.Y.Z, whose notes are the tag's CHANGELOG.md section.
+# 3. homebrew: points Formula/mkcv.rb in bkuberek/homebrew-tap at those two files.
+#
+# Release and homebrew run for the tag this run created. A manual run on main (workflow_dispatch)
+# publishes the newest tag reachable from it instead, so it repairs a failed or missing publish.
+# Both jobs skip what is already done: a release that has its files keeps them, and an unchanged
+# formula is not committed. Nothing goes to PyPI.
+#
+# The push uses GITHUB_TOKEN, never a personal access token. Events caused by GITHUB_TOKEN do
+# not start new workflow runs (workflow_dispatch and repository_dispatch excepted), so the bot
+# commit and the tag do not retrigger this workflow, and no loop is possible:
+# https://docs.github.com/en/actions/concepts/security/github_token
+# For the same reason a workflow triggered by the tag or the release would never run, so
+# publishing is part of this workflow. Only the homebrew job holds HOMEBREW_TAP_GITHUB_TOKEN
+# (an environment secret of the "production" environment), which can push to the tap.
+
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
 
 jobs:
   lint:
@@ -16,6 +44,8 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v6
+      - name: Lockfile is up to date
+        run: uv lock --check
       - run: uv sync --extra dev
       - name: Ruff check
         run: uv run ruff check src/ tests/ evals/
@@ -39,28 +69,154 @@ jobs:
       - run: uv sync --extra dev
       - name: Run tests
         run: uv run pytest --tb=short
+      - name: Test the release tooling
+        run: uv run pytest packaging --tb=short
 
   version:
     needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     concurrency: version
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: main
-      - name: Pull latest main
-        run: git pull origin main
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install python-semantic-release
-      - name: Bump version
-        run: semantic-release version --no-vcs-release
+
+      # The branch may have moved while this run waited in the queue; version exactly the
+      # commit whose lint and tests just passed, so no untested change is released.
+      - name: Pin the branch to the tested commit
+        run: git reset --hard "$GITHUB_SHA"
+
+      - uses: astral-sh/setup-uv@v6
+
+      # semantic-release runs `uv lock` as its build command, so uv must be on PATH.
+      - name: Bump version, update the changelog, commit and tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uvx --from "python-semantic-release==10.7.0" semantic-release version --no-vcs-release
+
       - name: Push version commit and tag
         run: git push origin main --follow-tags
+
+      # HEAD is the release commit when semantic-release made one. An empty tag publishes
+      # nothing.
+      - name: Choose the tag to publish
+        id: publish
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)
+          else
+            tag=$(git tag --points-at HEAD --list 'v[0-9]*' --sort=-version:refname | head -n 1)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Tag to publish: ${tag:-none}"
+
+  release:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # The release tooling comes from the commit this run is for; the artifacts come from the
+      # tag, which may predate the tooling.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+          path: tagged
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v6
+
+      # --frozen exports uv.lock as it is. Tags up to v1.5.1 were cut with the project's own
+      # version in uv.lock one release behind (semantic-release did not refresh it), which
+      # --locked rejects although every dependency pin is current. The lint job's
+      # `uv lock --check` keeps the dependency pins fresh from here on.
+      - name: Attach the wheel and the requirements to the GitHub release
+        run: |
+          has_files='[.assets[].name] | any(endswith("-py3-none-any.whl")) and any(. == "requirements.txt")'
+          if complete=$(gh release view "$TAG" --json assets --jq "$has_files"); then
+            if [ "$complete" = true ]; then
+              echo "$TAG already has its files"
+              exit 0
+            fi
+            release_exists=true
+          fi
+
+          uv build --directory tagged --wheel --out-dir "$PWD/dist"
+          uv export --directory tagged --frozen --no-dev --no-emit-project --no-header \
+            --format requirements.txt --output-file "$PWD/dist/requirements.txt" --quiet
+
+          if [ "${release_exists:-false}" = true ]; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            python3 packaging/release_notes.py tagged/CHANGELOG.md "$TAG" > notes.md
+            gh release create "$TAG" dist/* --verify-tag --title "$TAG" --notes-file notes.md
+          fi
+
+  homebrew:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    # HOMEBREW_TAP_GITHUB_TOKEN is an environment secret, readable only by a job that names
+    # its environment. No other job declares it.
+    environment: production
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          repository: bkuberek/homebrew-tap
+          ref: main
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # The formula hashes the files the release serves, not a rebuild of them.
+      - name: Download the release files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
+            --pattern '*-py3-none-any.whl' --pattern requirements.txt
+
+      - name: Render the formula
+        run: |
+          python3 packaging/homebrew/render_formula.py \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" \
+            --wheel assets/*-py3-none-any.whl \
+            --requirements assets/requirements.txt \
+            --output tap/Formula/mkcv.rb
+          ruby -c tap/Formula/mkcv.rb
+
+      - name: Commit and push the formula to the tap
+        working-directory: tap
+        run: |
+          git add Formula/mkcv.rb
+          if git diff --cached --quiet; then
+            echo "Formula/mkcv.rb is already at $TAG"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --message "mkcv ${TAG#v}"
+          git push origin HEAD:main

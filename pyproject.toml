@@ -117,6 +117,10 @@ version_toml = ["pyproject.toml:project.version"]
 branch = "main"
 commit_message = "chore(release): v{version}"
 tag_format = "v{version}"
+# Not a package build: `uv lock` refreshes the project's own version in uv.lock, which
+# `uv lock --check` (CI) and `uv export --locked` reject when stale. Nothing is built.
+build_command = "uv lock"
+assets = ["uv.lock"]
 
 [tool.semantic_release.changelog.default_templates]
 changelog_file = "CHANGELOG.md"
